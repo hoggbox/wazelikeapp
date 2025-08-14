@@ -1,117 +1,29 @@
 const express = require('express');
-const router = express.Router();
-const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
+const User = require('../models/User');
+const router = express.Router();
 
-const authenticateToken = (req, res, next) => {
-  const token = req.headers['authorization']?.split(' ')[1];
-  if (!token) {
-    console.log('No token provided');
-    return res.status(401).json({ msg: 'No token provided' });
-  }
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) {
-      console.error('Token verification error:', err.message);
-      return res.status(403).json({ msg: 'Invalid token' });
-    }
-    req.user = decoded;
-    console.log('Authenticated user:', req.user.username);
-    next();
-  });
-};
+const JWT_SECRET = process.env.JWT_SECRET || 'X7k9pLm2nQv8jRx4yZw5tUv3iOy6pAq1';
+const REFRESH_SECRET = process.env.REFRESH_SECRET || 'Y8m2qZn3pKw9jSx5zAx6uTv4iPy7rBq2';
 
-// Check Username and Email Availability
-router.post('/check-availability', async (req, res) => {
-  const { username, email } = req.body;
-  try {
-    console.log('Availability check:', { username, email });
-    const trimmedUsername = username?.trim().toLowerCase();
-    const trimmedEmail = email?.trim().toLowerCase();
-    const errors = {};
-
-    if (!trimmedUsername && !trimmedEmail) {
-      console.log('No username or email provided');
-      return res.status(400).json({ msg: 'Username or email required' });
-    }
-
-    if (trimmedUsername) {
-      const userByUsername = await User.findOne({ username: trimmedUsername });
-      if (userByUsername) errors.username = 'Username already taken';
-    }
-    if (trimmedEmail) {
-      const userByEmail = await User.findOne({ email: trimmedEmail });
-      if (userByEmail) errors.email = 'Email already in use';
-    }
-
-    if (Object.keys(errors).length > 0) {
-      console.log('Availability check failed:', errors);
-      return res.status(400).json({ msg: 'Validation failed', errors });
-    }
-    console.log('Availability check passed');
-    res.json({ available: true });
-  } catch (err) {
-    console.error('Availability check error:', err.message);
-    res.status(500).json({ msg: 'Server error' });
-  }
-});
-
-// Register User
+// Register
 router.post('/register', async (req, res) => {
-  const { username, password, email, name, age, dob, location } = req.body;
+  const { name, username, email, password, age, dob, location } = req.body;
+  console.log('Register request:', { name, username, email, password: '[provided]', age, dob, location });
   try {
-    console.log('Register request:', { username, email, passwordLength: password?.length, name, age, dob, location });
-    console.log('Raw password received:', password); // Temporary debug log
-    const trimmedUsername = username?.trim().toLowerCase();
-    const trimmedEmail = email?.trim().toLowerCase();
-    const trimmedPassword = password?.trim();
-    if (!trimmedUsername || !trimmedPassword || !trimmedEmail) {
-      console.log('Missing required fields');
-      return res.status(400).json({ msg: 'Username, password, and email are required' });
+    let user = await User.findOne({ $or: [{ username }, { email }] });
+    if (user) {
+      console.log('User already exists:', { username, email });
+      return res.status(400).json({ msg: 'User already exists' });
     }
-    if (!/^[a-z0-9_]{3,20}$/.test(trimmedUsername)) {
-      console.log('Invalid username format:', trimmedUsername);
-      return res.status(400).json({ msg: 'Username must be 3-20 characters, letters, numbers, or underscores' });
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      console.log('Invalid email format:', trimmedEmail);
-      return res.status(400).json({ msg: 'Invalid email format' });
-    }
-    if (trimmedPassword.length < 8) {
-      console.log('Password too short:', trimmedPassword.length);
-      return res.status(400).json({ msg: 'Password must be at least 8 characters' });
-    }
-
-    const existingUser = await User.findOne({ $or: [{ username: trimmedUsername }, { email: trimmedEmail }] });
-    if (existingUser) {
-      console.log('User already exists:', { username: existingUser.username, email: existingUser.email });
-      return res.status(400).json({
-        msg: 'User already exists',
-        errors: {
-          username: existingUser.username === trimmedUsername ? 'Username already taken' : undefined,
-          email: existingUser.email === trimmedEmail ? 'Email already in use' : undefined
-        }
-      });
-    }
-
-    console.log('Hashing password:', trimmedPassword);
-    const hashedPassword = await bcrypt.hash(trimmedPassword, 10);
-    console.log('Hashed password:', hashedPassword);
-    const user = new User({
-      username: trimmedUsername,
-      password: hashedPassword,
-      email: trimmedEmail,
-      name: name?.trim() || '',
-      age: parseInt(age) || 0,
-      dob: dob ? new Date(dob) : null,
-      location: location?.trim() || ''
-    });
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    user = new User({ name, username, email, password: hashedPassword, age, dob, location });
     await user.save();
-    console.log('User registered:', trimmedUsername, 'email:', trimmedEmail, 'ID:', user._id);
-
-    const token = jwt.sign({ username: trimmedUsername }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    const refreshToken = jwt.sign({ username: trimmedUsername }, process.env.REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
+    console.log('User registered:', { username: user.username, email: user.email, id: user._id });
+    const token = jwt.sign({ _id: user._id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ _id: user._id, username: user.username }, REFRESH_SECRET, { expiresIn: '7d' });
     res.json({ token, refreshToken, username: user.username, userId: user._id });
   } catch (err) {
     console.error('Register error:', err.message);
@@ -119,34 +31,26 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Login User
+// Login
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
-  console.log('Login request:', { username, passwordLength: password?.length });
-  console.log('Raw password received:', password); // Temporary debug log
+  console.log('Login request received:', { username, password: '[provided]' });
   try {
-    if (!username || !password) {
-      console.log('Missing username or password');
-      return res.status(400).json({ msg: 'Username or email and password are required' });
-    }
-    const trimmedUsername = username.trim().toLowerCase();
-    const trimmedPassword = password.trim();
-    console.log('Querying user with:', { $or: [{ username: trimmedUsername }, { email: trimmedUsername }] });
-    const user = await User.findOne({ $or: [{ username: trimmedUsername }, { email: trimmedUsername }] });
+    const user = await User.findOne({ $or: [{ username }, { email: username }] });
     if (!user) {
-      console.log('User not found:', trimmedUsername);
+      console.log('User not found:', username);
       return res.status(400).json({ msg: 'Invalid credentials' });
     }
-    console.log('Found user:', user.username, 'email:', user.email, 'ID:', user._id);
-    console.log('Comparing password:', { input: trimmedPassword, storedHash: user.password });
-    const isMatch = await bcrypt.compare(trimmedPassword, user.password);
+    console.log('Found user:', { username: user.username, email: user.email, id: user._id });
+    const isMatch = await bcrypt.compare(password, user.password);
+    console.log('Password comparison:', { input: '[provided]', storedHash: user.password, isMatch });
     if (!isMatch) {
-      console.log('Password mismatch for user:', user.username, 'Input length:', trimmedPassword.length);
+      console.log('Password mismatch for user:', user.username);
       return res.status(400).json({ msg: 'Invalid credentials' });
     }
     console.log('Login successful for user:', user.username);
-    const token = jwt.sign({ username: user.username }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    const refreshToken = jwt.sign({ username: user.username }, process.env.REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ _id: user._id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ _id: user._id, username: user.username }, REFRESH_SECRET, { expiresIn: '7d' });
     res.json({ token, refreshToken, username: user.username, userId: user._id });
   } catch (err) {
     console.error('Login error:', err.message);
@@ -154,83 +58,141 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Reset Password
-router.post('/reset-password', async (req, res) => {
-  const { email, newPassword } = req.body;
-  try {
-    console.log('Password reset request for email:', email);
-    console.log('Raw new password received:', newPassword); // Temporary debug log
-    if (!email || !newPassword) {
-      console.log('Missing email or new password');
-      return res.status(400).json({ msg: 'Email and new password are required' });
-    }
-    if (newPassword.length < 8) {
-      console.log('New password too short:', newPassword.length);
-      return res.status(400).json({ msg: 'New password must be at least 8 characters' });
-    }
-    const trimmedEmail = email.trim().toLowerCase();
-    const trimmedNewPassword = newPassword.trim();
-    const user = await User.findOne({ email: trimmedEmail });
-    if (!user) {
-      console.log('User not found for email:', trimmedEmail);
-      return res.status(400).json({ msg: 'User not found' });
-    }
-    console.log('Hashing new password:', trimmedNewPassword);
-    const hashedPassword = await bcrypt.hash(trimmedNewPassword, 10);
-    console.log('Hashed new password:', hashedPassword);
-    user.password = hashedPassword;
-    await user.save();
-    console.log('Password reset successful for user:', user.username);
-    res.json({ msg: 'Password reset successful' });
-  } catch (err) {
-    console.error('Password reset error:', err.message);
-    res.status(500).json({ msg: 'Server error' });
-  }
-});
-
 // Refresh Token
-router.post('/refresh', (req, res) => {
+router.post('/refresh', async (req, res) => {
   const { refreshToken } = req.body;
+  console.log('Refresh token request:', { refreshToken: refreshToken ? '[provided]' : 'none' });
   if (!refreshToken) {
     console.log('No refresh token provided');
-    return res.status(400).json({ msg: 'No refresh token provided' });
+    return res.status(401).json({ msg: 'No refresh token provided' });
   }
-  jwt.verify(refreshToken, process.env.REFRESH_SECRET || process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      console.error('Refresh token verification error:', err.message);
+  try {
+    const decoded = jwt.verify(refreshToken, REFRESH_SECRET);
+    console.log('Refresh token decoded:', { userId: decoded._id, username: decoded.username });
+    const user = await User.findById(decoded._id);
+    if (!user) {
+      console.log('User not found for refresh token:', decoded._id);
       return res.status(403).json({ msg: 'Invalid refresh token' });
     }
-    const newAccessToken = jwt.sign({ username: user.username }, process.env.JWT_SECRET, { expiresIn: '1h' });
-    res.json({ token: newAccessToken });
-  });
+    const token = jwt.sign({ _id: user._id, username: user.username }, JWT_SECRET, { expiresIn: '1h' });
+    console.log('New access token generated for user:', user.username);
+    res.json({ token });
+  } catch (err) {
+    console.error('Refresh token error:', err.message);
+    res.status(403).json({ msg: 'Invalid refresh token' });
+  }
 });
 
 // Get User Profile
 router.get('/user/:username', authenticateToken, async (req, res) => {
   try {
-    if (req.params.username !== req.user.username) {
-      console.log('Forbidden access:', req.params.username, 'by:', req.user.username);
-      return res.status(403).json({ msg: 'Forbidden' });
-    }
-    const user = await User.findOne({ username: req.params.username }).select('-password');
+    const user = await User.findOne({ username: req.params.username });
     if (!user) {
       console.log('User not found:', req.params.username);
       return res.status(404).json({ msg: 'User not found' });
     }
+    console.log('Fetched user profile:', { username: user.username, id: user._id });
     res.json({
+      _id: user._id,
+      name: user.name,
       username: user.username,
       email: user.email,
-      name: user.name,
       age: user.age,
       dob: user.dob,
       location: user.location,
-      _id: user._id,
       lastUsernameChange: user.lastUsernameChange
     });
   } catch (err) {
-    console.error('User fetch error:', err.message);
+    console.error('Fetch user error:', err.message);
     res.status(500).json({ msg: 'Server error' });
   }
 });
+
+// Update Profile
+router.post('/update', authenticateToken, async (req, res) => {
+  const { name, username, email, age, dob, location } = req.body;
+  console.log('Update profile request:', { name, username, email, age, dob, location });
+  try {
+    let user = await User.findById(req.user._id);
+    if (!user) {
+      console.log('User not found for update:', req.user._id);
+      return res.status(404).json({ msg: 'User not found' });
+    }
+    if (username !== user.username) {
+      const existingUser = await User.findOne({ username });
+      if (existingUser) {
+        console.log('Username already taken:', username);
+        return res.status(400).json({ msg: 'Username already taken' });
+      }
+      if (user.lastUsernameChange) {
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+        if (new Date(user.lastUsernameChange) > threeMonthsAgo) {
+          console.log('Username change limit exceeded for:', user.username);
+          return res.status(400).json({ msg: 'Username can only be changed once every 3 months' });
+        }
+      }
+      user.lastUsernameChange = new Date();
+    }
+    user.name = name || user.name;
+    user.username = username || user.username;
+    user.email = email || user.email;
+    user.age = age || user.age;
+    user.dob = dob || user.dob;
+    user.location = location || user.location;
+    await user.save();
+    console.log('Profile updated:', { username: user.username, id: user._id });
+    res.json({
+      _id: user._id,
+      name: user.name,
+      username: user.username,
+      email: user.email,
+      age: user.age,
+      dob: user.dob,
+      location: user.location,
+      lastUsernameChange: user.lastUsernameChange
+    });
+  } catch (err) {
+    console.error('Update profile error:', err.message);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+// Check Username Availability
+router.post('/check-availability', async (req, res) => {
+  const { username } = req.body;
+  console.log('Checking username availability:', username);
+  try {
+    const user = await User.findOne({ username });
+    if (user) {
+      console.log('Username taken:', username);
+      return res.json({ available: false });
+    }
+    console.log('Username available:', username);
+    res.json({ available: true });
+  } catch (err) {
+    console.error('Check availability error:', err.message);
+    res.status(500).json({ msg: 'Server error' });
+  }
+});
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  console.log('Authenticating token:', token ? '[provided]' : 'none');
+  if (!token) {
+    console.log('No token provided in request');
+    return res.status(401).json({ msg: 'No token provided' });
+  }
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    console.log('Token authenticated:', { userId: decoded._id, username: decoded.username });
+    req.user = decoded;
+    next();
+  } catch (err) {
+    console.error('Token verification failed:', err.message);
+    res.status(403).json({ msg: 'Invalid token' });
+  }
+}
 
 module.exports = router;
