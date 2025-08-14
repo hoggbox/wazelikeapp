@@ -1,4 +1,4 @@
-const VERSION = '1.0.41'; // Updated version for cache busting
+const VERSION = '1.0.43'; // Updated version for cache busting
 // Global variables
 let map;
 let routePolyline;
@@ -10,6 +10,8 @@ let routePath = [];
 let recentDestinations = ['1827 Holly Hill Rd, Milledgeville, GA 31061', 'Walmart Milledgeville GA'];
 let autocompleteService;
 let placesService;
+let directionsService; // For Google Directions API
+let directionsRenderer; // For rendering routes
 let userLocation = { lat: 33.0891264, lng: -83.2372736 }; // Default position
 let socket = null;
 let recognition = null;
@@ -156,59 +158,105 @@ function checkHazardsOnRoute() {
   });
   if (currentHazards.length > 0) {
     const reroutePrompt = document.getElementById('reroutePrompt');
-    if (reroutePrompt) {
+    if (reroutePrompt && reroutePrompt.style.display !== 'flex') {
       reroutePrompt.style.display = 'flex';
       console.log('Hazard detected on route, showing reroute prompt:', currentHazards);
     }
+  } else {
+    const reroutePrompt = document.getElementById('reroutePrompt');
+    if (reroutePrompt) reroutePrompt.style.display = 'none';
   }
 }
 
 function rerouteAroundHazards(hazards) {
-  if (!currentDestination) return;
-  const avoidPoints = hazards.map(h => `${h.location.coordinates[1]},${h.location.coordinates[0]}`).join('|');
-  updateRoute([userLocation.lat, userLocation.lng], currentDestination, `&avoid=point:${avoidPoints}`);
-  const reroutePrompt = document.getElementById('reroutePrompt');
-  if (reroutePrompt) reroutePrompt.style.display = 'none';
+  if (!currentDestination || !isNavigating) {
+    console.warn('No destination or navigation active, cannot reroute');
+    return;
+  }
   console.log('Rerouting around hazards:', hazards);
+  updateRoute([userLocation.lat, userLocation.lng], currentDestination, true);
+  const reroutePrompt = document.getElementById('reroutePrompt');
+  if (reroutePrompt) {
+    reroutePrompt.style.display = 'none';
+    console.log('Reroute prompt hidden after rerouting');
+  }
+  ignoredHazards.push(...hazards.map(h => h._id)); // Ignore these hazards to prevent re-prompting
 }
 
 function ignoreHazards(hazards) {
   hazards.forEach(h => ignoredHazards.push(h._id));
   const reroutePrompt = document.getElementById('reroutePrompt');
-  if (reroutePrompt) reroutePrompt.style.display = 'none';
-  console.log('Ignoring hazards:', hazards);
+  if (reroutePrompt) {
+    reroutePrompt.style.display = 'none';
+    console.log('Ignoring hazards:', hazards);
+  }
 }
 
-async function updateRoute(start, end, extraParams = '') {
+async function updateRoute(start, end, avoidHazards = false) {
   await mapReady;
   try {
     console.time('Route calculation');
-    console.log(`Fetching route from ${start} to ${end} with params: ${extraParams}`);
-    const response = await fetch(`${BASE_URL}/api/map/route?start=${start[0]},${start[1]}&end=${end[0]},${end[1]}${extraParams}`);
-    const data = await response.json();
-    console.log('GraphHopper response:', data);
-    if (data.paths && data.paths.length > 0) {
-      const path = data.paths[0];
-      const decodedPath = google.maps.geometry.encoding.decodePath(path.points);
-      routePath = decodedPath;
-      if (routePolyline) routePolyline.setMap(null);
-      routePolyline = new google.maps.Polyline({
-        path: decodedPath,
-        strokeColor: '#ff4444',
-        strokeOpacity: 1.0,
-        strokeWeight: 4,
-        map: map
+    console.log(`Fetching route from [${start}] to [${end}] with avoidHazards: ${avoidHazards}`);
+    const request = {
+      origin: new google.maps.LatLng(start[0], start[1]),
+      destination: new google.maps.LatLng(end[0], end[1]),
+      travelMode: google.maps.TravelMode.DRIVING,
+      provideRouteAlternatives: avoidHazards, // Request alternative routes if avoiding hazards
+      avoidTolls: true,
+      avoidHighways: false,
+      avoidFerries: true
+    };
+    const response = await new Promise((resolve, reject) => {
+      directionsService.route(request, (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK) {
+          resolve(result);
+        } else {
+          reject(new Error(`Directions request failed: ${status}`));
+        }
       });
-      if (eta) eta.textContent = `${Math.round(path.time / 60000)} min`;
-      if (dta) dta.textContent = `${Math.round(path.distance / 1609.34)} mi`;
-    } else {
-      console.log('No route found');
-      if (eta) eta.textContent = 'N/A';
-      if (dta) dta.textContent = 'N/A';
+    });
+    console.log('Google Directions response:', response);
+    let selectedRouteIndex = 0;
+    if (avoidHazards && response.routes.length > 1) {
+      let maxMinDistance = 0;
+      response.routes.forEach((route, index) => {
+        const path = route.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
+        let minDistanceToHazards = Infinity;
+        currentHazards.forEach(hazard => {
+          const hazardPos = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+          path.forEach(point => {
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(point, hazardPos);
+            if (dist < minDistanceToHazards) minDistanceToHazards = dist;
+          });
+        });
+        if (minDistanceToHazards > maxMinDistance) {
+          maxMinDistance = minDistanceToHazards;
+          selectedRouteIndex = index;
+        }
+      });
+      console.log(`Selected alternative route index: ${selectedRouteIndex} with min hazard distance: ${maxMinDistance}m`);
     }
+    const selectedRoute = response.routes[selectedRouteIndex];
+    directionsRenderer.setDirections(response);
+    directionsRenderer.setRouteIndex(selectedRouteIndex);
+    const path = selectedRoute.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
+    routePath = path;
+    if (routePolyline) routePolyline.setMap(null);
+    routePolyline = new google.maps.Polyline({
+      path: path,
+      strokeColor: '#ff4444',
+      strokeOpacity: 1.0,
+      strokeWeight: 4,
+      map: map
+    });
+    const timeMs = selectedRoute.legs.reduce((acc, leg) => acc + leg.duration.value * 1000, 0);
+    const distanceM = selectedRoute.legs.reduce((acc, leg) => acc + leg.distance.value, 0);
+    if (eta) eta.textContent = `${Math.round(timeMs / 60000)} min`;
+    if (dta) dta.textContent = `${Math.round(distanceM / 1609.34)} mi`;
     console.timeEnd('Route calculation');
   } catch (err) {
     console.error('Route calculation failed:', err);
+    showToastMessage('Failed to calculate route. Please try again.', 7000);
   }
 }
 
@@ -288,6 +336,11 @@ function addMarker(type, notes = '', position) {
       })
       .catch(err => {
         console.error('Failed to save alert (attempt ' + attempts + '):', err.message);
+        if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
+          console.warn('Authentication error detected, logging out');
+          logout();
+          return;
+        }
         if (attempts < maxAttempts) {
           attempts++;
           setTimeout(trySave, 1000 * attempts);
@@ -358,6 +411,8 @@ function fetchAlerts() {
   const token = localStorage.getItem('token');
   if (!token || !currentUser) {
     console.warn('No token or user available, skipping alert fetch');
+    showToastMessage('Please log in to view alerts.', 5000);
+    logout();
     return;
   }
   fetchWithTokenRefresh(`${BASE_URL}/api/map/all-alerts`, {
@@ -396,7 +451,13 @@ function fetchAlerts() {
       populateUserFilter();
       checkHazardsOnRoute();
     })
-    .catch(err => console.error('Failed to fetch alerts:', err.message));
+    .catch(err => {
+      console.error('Failed to fetch alerts:', err.message);
+      showToastMessage(`Failed to fetch alerts: ${err.message}`, 7000);
+      if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
+        logout();
+      }
+    });
 }
 
 function checkUsernameAvailability(username) {
@@ -422,10 +483,17 @@ function checkUsernameAvailability(username) {
 }
 
 function fetchUserProfile() {
-  if (!currentUser) return;
+  if (!currentUser) {
+    console.warn('No current user, skipping profile fetch');
+    showToastMessage('Please log in to view profile.', 5000);
+    logout();
+    return;
+  }
   const token = localStorage.getItem('token');
   if (!token) {
     console.warn('No token available, skipping user profile fetch');
+    showToastMessage('Please log in to view profile.', 5000);
+    logout();
     return;
   }
   fetchWithTokenRefresh(`${BASE_URL}/api/auth/user/${currentUser.username}`, {
@@ -442,7 +510,13 @@ function fetchUserProfile() {
       updateProfileDisplay();
       updateEditProfileForm();
     })
-    .catch(err => console.error('Failed to fetch user profile:', err.message));
+    .catch(err => {
+      console.error('Failed to fetch user profile:', err.message);
+      showToastMessage(`Failed to fetch profile: ${err.message}`, 7000);
+      if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
+        logout();
+      }
+    });
 }
 
 function updateProfileDisplay() {
@@ -591,13 +665,17 @@ function populateUserFilter() {
 
 function fetchWithTokenRefresh(url, options = {}) {
   const token = localStorage.getItem('token');
-  if (!token) throw new Error('No token available');
+  if (!token) {
+    console.error('No token available');
+    logout();
+    return Promise.reject(new Error('No token available'));
+  }
   return fetch(url, {
     ...options,
     headers: { ...options.headers, 'Authorization': `Bearer ${token}` }
   }).then(response => {
-    if (response.status === 403) {
-      console.warn('Token might be expired, attempting refresh');
+    if (response.status === 403 || response.status === 401) {
+      console.warn('Token might be expired or invalid, attempting refresh');
       return refreshToken().then(newToken => {
         if (newToken) {
           localStorage.setItem('token', newToken);
@@ -607,6 +685,7 @@ function fetchWithTokenRefresh(url, options = {}) {
         return Promise.reject(new Error('Refresh failed, no new token'));
       }).catch(err => {
         console.error('Refresh failed:', err);
+        logout();
         return Promise.reject(err);
       });
     }
@@ -713,6 +792,12 @@ function alertAtCurrentLocation() {
     return;
   }
   const type = alertType.value;
+  if (!currentUser) {
+    console.warn('No current user, cannot post alert');
+    showToastMessage('Please log in to post alerts.', 5000);
+    logout();
+    return;
+  }
   if (navigator.geolocation) {
     console.log('Requesting geolocation for current location alert');
     navigator.geolocation.getCurrentPosition(
@@ -799,6 +884,35 @@ function initializeMapAfterLogin() {
   }
 }
 
+window.removeAlert = function(alertId) {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    console.error('No token available, cannot remove alert');
+    showToastMessage('Please log in to remove alerts.', 7000);
+    return;
+  }
+  fetchWithTokenRefresh(`${BASE_URL}/api/map/alert/${alertId}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` }
+  })
+    .then(response => {
+      if (!response.ok) throw new Error(`Failed to delete alert: ${response.status}`);
+      return response.json();
+    })
+    .then(() => {
+      console.log('Alert removed successfully:', alertId);
+      showToastMessage('Alert removed successfully.', 5000);
+      fetchAlerts();
+    })
+    .catch(err => {
+      console.error('Error removing alert:', err.message);
+      showToastMessage(`Failed to remove alert: ${err.message}`, 7000);
+      if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
+        logout();
+      }
+    });
+};
+
 window.initMap = function() {
   console.time('Map initialization');
   if (!window.google || !google.maps) {
@@ -859,6 +973,8 @@ window.initMap = function() {
   }
   autocompleteService = new google.maps.places.AutocompleteService();
   placesService = new google.maps.places.PlacesService(map);
+  directionsService = new google.maps.DirectionsService();
+  directionsRenderer = new google.maps.DirectionsRenderer({ map: map, suppressMarkers: true });
   console.log('Map, Directions, and Places initialized');
   mapReadyResolve();
   if (navigator.geolocation) {
@@ -958,32 +1074,6 @@ window.initMap = function() {
     );
   }
   console.timeEnd('Map initialization');
-};
-
-window.removeAlert = function(alertId) {
-  const token = localStorage.getItem('token');
-  if (!token) {
-    console.error('No token available, cannot remove alert');
-    showToastMessage('Please log in to remove alerts.', 7000);
-    return;
-  }
-  fetchWithTokenRefresh(`${BASE_URL}/api/map/alert/${alertId}`, {
-    method: 'DELETE',
-    headers: { 'Authorization': `Bearer ${token}` }
-  })
-    .then(response => {
-      if (!response.ok) throw new Error(`Failed to delete alert: ${response.status}`);
-      return response.json();
-    })
-    .then(() => {
-      console.log('Alert removed successfully:', alertId);
-      showToastMessage('Alert removed successfully.', 5000);
-      fetchAlerts();
-    })
-    .catch(err => {
-      console.error('Error removing alert:', err.message);
-      showToastMessage(`Failed to remove alert: ${err.message}`, 7000);
-    });
 };
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -1098,20 +1188,83 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 
   // Initialize Socket.IO with retry logic
+  function loadSocketIOScript() {
+    return new Promise((resolve, reject) => {
+      if (window.io) {
+        resolve();
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = `${BASE_URL}/socket.io/socket.io.js`;
+      script.async = true;
+      script.onload = () => {
+        console.log('Socket.IO script loaded successfully');
+        resolve();
+      };
+      script.onerror = () => {
+        console.error('Failed to load Socket.IO script');
+        reject(new Error('Socket.IO script failed to load'));
+      };
+      document.head.appendChild(script);
+    });
+  }
+
   function connectSocket() {
-    try {
-      socket = io(BASE_URL, { reconnectionAttempts: 5, reconnectionDelay: 1000 });
-      console.log('Socket.IO connected to:', BASE_URL);
-      socket.on('connect', () => {
-        console.log('Socket.IO connection established');
+    loadSocketIOScript()
+      .then(() => {
+        socket = window.io(BASE_URL, { reconnectionAttempts: 5, reconnectionDelay: 1000 });
+        console.log('Socket.IO connected to:', BASE_URL);
+        socket.on('connect', () => {
+          console.log('Socket.IO connection established');
+          socket.on('hazard', (data) => {
+            if (map && !alertMarkers.has(data._id)) {
+              addMarkerFromDB(data);
+              fetchAlerts();
+            }
+          });
+          socket.on('detailedAlert', (data) => {
+            if (map && !alertMarkers.has(data._id)) {
+              addMarkerFromDB(data);
+              fetchAlerts();
+            }
+          });
+          socket.on('alert', (data) => {
+            if (map) {
+              new google.maps.Marker({
+                position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
+                map: map,
+                title: data.type
+              });
+            }
+          });
+          socket.on('alertRemoved', (data) => {
+            if (alertMarkers.has(data._id)) {
+              alertMarkers.get(data._id).setMap(null);
+              alertMarkers.delete(data._id);
+              hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
+              allAlerts = allAlerts.filter(a => a._id !== data._id);
+              updateAlertTable();
+            }
+            console.log('Alert removed via socket:', data._id);
+          });
+          socket.on('locationUpdate', (data) => {
+            if (map) {
+              new google.maps.Marker({
+                position: { lat: data.latitude, lng: data.longitude },
+                map: map,
+                title: 'User Location'
+              });
+            }
+          });
+        });
+        socket.on('connect_error', (err) => {
+          console.warn('Socket.IO connection error:', err.message);
+        });
+      })
+      .catch(err => {
+        console.warn('Socket.IO failed to load, retrying in 5 seconds:', err);
+        setTimeout(connectSocket, 5000);
       });
-      socket.on('connect_error', (err) => {
-        console.warn('Socket.IO connection error:', err.message);
-      });
-    } catch (e) {
-      console.warn('Socket.IO failed to load, retrying in 5 seconds:', e);
-      setTimeout(connectSocket, 5000);
-    }
   }
   connectSocket();
 
@@ -1206,6 +1359,9 @@ window.addEventListener('DOMContentLoaded', () => {
       routePolyline.setMap(null);
       routePolyline = null;
     }
+    if (directionsRenderer) {
+      directionsRenderer.setMap(null);
+    }
     if (eta) eta.textContent = 'N/A';
     if (dta) dta.textContent = 'N/A';
     if (time) time.textContent = '0:00';
@@ -1285,165 +1441,184 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   function confirmVoiceInput(transcript) {
-  if ('speechSynthesis' in window && femaleVoice) {
-    const utterance = new SpeechSynthesisUtterance(`You said ${transcript}. Is this correct?`);
-    utterance.voice = femaleVoice;
-    utterance.lang = 'en-US';
-    window.speechSynthesis.speak(utterance);
-    if (recognition) recognition.stop();
-    recognition = new webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-    recognition.onstart = () => {
-      if (voiceOverlay) voiceOverlay.style.display = 'flex';
-      if (pulsator) pulsator.classList.add('active');
-      if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
-    };
-    recognition.onresult = (event) => {
-      const confirmation = event.results[0][0].transcript.toLowerCase().trim();
-      console.log('Confirmation input:', confirmation);
-      if (confirmation.includes('yes')) {
-        startNavigation(transcript);
-      } else if (confirmation.includes('no')) {
-        if (voiceInstruction) voiceInstruction.textContent = 'Please try again...';
-        const retryUtterance = new SpeechSynthesisUtterance('Please try again.');
-        retryUtterance.voice = femaleVoice;
-        window.speechSynthesis.speak(retryUtterance);
-        setTimeout(() => startVoiceRecognition(), 1000);
-      } else {
-        if (voiceInstruction) voiceInstruction.textContent = 'Please say "yes" or "no"...';
-        const promptUtterance = new SpeechSynthesisUtterance('Please say "yes" or "no".');
-        promptUtterance.voice = femaleVoice;
-        window.speechSynthesis.speak(promptUtterance);
-        setTimeout(() => confirmVoiceInput(transcript), 1000);
-      }
-      stopVoiceRecognition();
-    };
-    recognition.onerror = (event) => {
-      console.error('Confirmation error:', event.error);
-      if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
-      stopVoiceRecognition();
-      setTimeout(() => confirmVoiceInput(transcript), 1000);
-    };
-    recognition.onend = () => {
-      if (voiceOverlay && voiceOverlay.style.display === 'flex' && !recognition) {
+    if ('speechSynthesis' in window && femaleVoice) {
+      const utterance = new SpeechSynthesisUtterance(`You said ${transcript}. Is this correct?`);
+      utterance.voice = femaleVoice;
+      utterance.lang = 'en-US';
+      window.speechSynthesis.speak(utterance);
+      if (recognition) recognition.stop();
+      recognition = new webkitSpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+      recognition.onstart = () => {
+        if (voiceOverlay) voiceOverlay.style.display = 'flex';
+        if (pulsator) pulsator.classList.add('active');
         if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
-      }
-    };
-    recognition.start();
-  } else {
-    alert('Text-to-speech not supported or no voice available in this browser.');
-    startNavigation(transcript);
-  }
-}
-
-function showDetailedAlertBox() {
-  console.time('Show detailed alert box');
-  console.log('Showing detailed alert box, element:', detailedAlertBox);
-  if (detailedAlertBox) {
-    console.log('Current class list:', detailedAlertBox.classList);
-    detailedAlertBox.classList.add('active');
-    detailedAlertBox.style.display = 'flex';
-    detailedAlertBox.style.left = '50%';
-    detailedAlertBox.style.top = '50%';
-    console.log('Added active class, new class list:', detailedAlertBox.classList, 'display style:', window.getComputedStyle(detailedAlertBox).display);
-    detailedAlertBox.style.opacity = '0';
-    setTimeout(() => {
-      detailedAlertBox.style.opacity = '1';
-    }, 0);
-    if (alertType) alertType.style.display = 'block';
-    const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
-    if (alertTypeLabel) alertTypeLabel.style.display = 'block';
-    if (clickLocationBtn) clickLocationBtn.style.display = 'block';
-    if (alertCurrentBtn) alertCurrentBtn.style.display = 'block';
-    if (locationDisplay) locationDisplay.style.display = 'none';
-    if (alertNotes) alertNotes.value = '';
-    if (postAlertBtn) postAlertBtn.style.display = 'none';
-    if (cancelAlertBtn) cancelAlertBtn.style.display = 'none';
-    if (toastMessage) toastMessage.style.display = 'none';
-  } else {
-    console.error('detailedAlertBox element not found');
-  }
-  console.timeEnd('Show detailed alert box');
-}
-
-function addAlert(type, notes = '', position) {
-  return new Promise((resolve) => {
-    console.time(`Add ${type} alert`);
-    if (!position) {
-      console.error('No position provided for alert, using default location');
-      position = new google.maps.LatLng(33.0891264, -83.2372736);
-    }
-    addMarker(type, notes, position);
-    showToastMessage('Your alert has been posted.', 5000);
-    console.timeEnd(`Add ${type} alert`);
-    resolve();
-  });
-}
-
-function addHazardMarker() {
-  const now = Date.now();
-  if (now - lastHazardTime < 1000) {
-    console.log('Hazard add debounced, too soon');
-    return;
-  }
-  lastHazardTime = now;
-  console.log('Hazard button clicked, checking geolocation...');
-  if (navigator.geolocation) {
-    console.log('Requesting geolocation for hazard alert');
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude } = position.coords;
-        userLocation = { lat: latitude, lng: longitude };
-        lastLocationUpdate = Date.now();
-        console.log('Current location retrieved for hazard:', userLocation);
-        addAlert('Hazard', '', new google.maps.LatLng(latitude, longitude)).then(() => {
-          console.log('Hazard alert posted at:', userLocation);
-        }).catch(err => {
-          console.error('Failed to post hazard alert:', err);
-          showToastMessage('Failed to post hazard alert.', 7000);
-        });
-      },
-      (err) => {
-        console.error('Geolocation error for hazard alert:', err);
-        let errorMessage = 'Failed to get current location for hazard. ';
-        if (err.code === 1) {
-          errorMessage += 'Location permission denied. Please enable location services.';
-        } else if (err.code === 2) {
-          errorMessage += 'Location unavailable. Using last known location.';
-        } else if (err.code === 3) {
-          errorMessage += 'Location request timed out. Using last known location.';
+      };
+      recognition.onresult = (event) => {
+        const confirmation = event.results[0][0].transcript.toLowerCase().trim();
+        console.log('Confirmation input:', confirmation);
+        if (confirmation.includes('yes')) {
+          startNavigation(transcript);
+        } else if (confirmation.includes('no')) {
+          if (voiceInstruction) voiceInstruction.textContent = 'Please try again...';
+          const retryUtterance = new SpeechSynthesisUtterance('Please try again.');
+          retryUtterance.voice = femaleVoice;
+          window.speechSynthesis.speak(retryUtterance);
+          setTimeout(() => startVoiceRecognition(), 1000);
         } else {
-          errorMessage += 'An unknown error occurred. Using last known location.';
+          if (voiceInstruction) voiceInstruction.textContent = 'Please say "yes" or "no"...';
+          const promptUtterance = new SpeechSynthesisUtterance('Please say "yes" or "no".');
+          promptUtterance.voice = femaleVoice;
+          window.speechSynthesis.speak(promptUtterance);
+          setTimeout(() => confirmVoiceInput(transcript), 1000);
         }
-        showToastMessage(errorMessage, 7000);
-        const fallbackLocation = userLocation.lat && userLocation.lng
-          ? new google.maps.LatLng(userLocation.lat, userLocation.lng)
-          : new google.maps.LatLng(33.0891264, -83.2372736);
-        console.log('Using fallback location for hazard:', fallbackLocation.toString());
-        addAlert('Hazard', '', fallbackLocation).then(() => {
-          console.log('Hazard alert posted with fallback location');
-        }).catch(err => {
-          console.error('Failed to post hazard alert with fallback:', err);
-          showToastMessage('Failed to post hazard alert with fallback.', 7000);
-        });
-      },
-      { maximumAge: 10000, timeout: 30000, enableHighAccuracy: true }
-    );
-  } else {
-    console.error('Geolocation unavailable');
-    showToastMessage('Geolocation not supported. Using default location for hazard.', 7000);
-    const defaultLocation = new google.maps.LatLng(33.0891264, -83.2372736);
-    console.log('Using default location for hazard:', defaultLocation.toString());
-    addAlert('Hazard', '', defaultLocation).then(() => {
-      console.log('Hazard alert posted with default location');
-    }).catch(err => {
-      console.error('Failed to post hazard alert with default:', err);
-      showToastMessage('Failed to post hazard alert with default.', 7000);
+        stopVoiceRecognition();
+      };
+      recognition.onerror = (event) => {
+        console.error('Confirmation error:', event.error);
+        if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
+        stopVoiceRecognition();
+        setTimeout(() => confirmVoiceInput(transcript), 1000);
+      };
+      recognition.onend = () => {
+        if (voiceOverlay && voiceOverlay.style.display === 'flex' && !recognition) {
+          if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
+        }
+      };
+      recognition.start();
+    } else {
+      alert('Text-to-speech not supported or no voice available in this browser.');
+      startNavigation(transcript);
+    }
+  }
+
+  function showDetailedAlertBox() {
+    console.time('Show detailed alert box');
+    console.log('Showing detailed alert box, element:', detailedAlertBox);
+    if (detailedAlertBox) {
+      console.log('Current class list:', detailedAlertBox.classList);
+      detailedAlertBox.classList.add('active');
+      detailedAlertBox.style.display = 'flex';
+      detailedAlertBox.style.left = '50%';
+      detailedAlertBox.style.top = '50%';
+      console.log('Added active class, new class list:', detailedAlertBox.classList, 'display style:', window.getComputedStyle(detailedAlertBox).display);
+      detailedAlertBox.style.opacity = '0';
+      setTimeout(() => {
+        detailedAlertBox.style.opacity = '1';
+      }, 0);
+      if (alertType) alertType.style.display = 'block';
+      const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+      if (alertTypeLabel) alertTypeLabel.style.display = 'block';
+      if (clickLocationBtn) clickLocationBtn.style.display = 'block';
+      if (alertCurrentBtn) alertCurrentBtn.style.display = 'block';
+      if (locationDisplay) locationDisplay.style.display = 'none';
+      if (alertNotes) alertNotes.value = '';
+      if (postAlertBtn) postAlertBtn.style.display = 'none';
+      if (cancelAlertBtn) cancelAlertBtn.style.display = 'none';
+      if (toastMessage) toastMessage.style.display = 'none';
+    } else {
+      console.error('detailedAlertBox element not found');
+    }
+    console.timeEnd('Show detailed alert box');
+  }
+
+  function addAlert(type, notes = '', position) {
+    return new Promise((resolve, reject) => {
+      console.time(`Add ${type} alert`);
+      if (!position) {
+        console.error('No position provided for alert, using default location');
+        position = new google.maps.LatLng(33.0891264, -83.2372736);
+      }
+      if (!currentUser) {
+        console.warn('No current user, cannot post alert');
+        showToastMessage('Please log in to post alerts.', 5000);
+        logout();
+        reject(new Error('No authenticated user'));
+        return;
+      }
+      addMarker(type, notes, position).then(() => {
+        showToastMessage('Your alert has been posted.', 5000);
+        console.timeEnd(`Add ${type} alert`);
+        resolve();
+      }).catch(err => {
+        console.error('Failed to post alert:', err);
+        showToastMessage('Failed to post alert.', 7000);
+        console.timeEnd(`Add ${type} alert`);
+        reject(err);
+      });
     });
   }
-}
+
+  function addHazardMarker() {
+    const now = Date.now();
+    if (now - lastHazardTime < 1000) {
+      console.log('Hazard add debounced, too soon');
+      return;
+    }
+    lastHazardTime = now;
+    console.log('Hazard button clicked, checking geolocation...');
+    if (!currentUser) {
+      console.warn('No current user, cannot post hazard');
+      showToastMessage('Please log in to post alerts.', 5000);
+      logout();
+      return;
+    }
+    if (navigator.geolocation) {
+      console.log('Requesting geolocation for hazard alert');
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          userLocation = { lat: latitude, lng: longitude };
+          lastLocationUpdate = Date.now();
+          console.log('Current location retrieved for hazard:', userLocation);
+          addAlert('Hazard', '', new google.maps.LatLng(latitude, longitude)).then(() => {
+            console.log('Hazard alert posted at:', userLocation);
+          }).catch(err => {
+            console.error('Failed to post hazard alert:', err);
+            showToastMessage('Failed to post hazard alert.', 7000);
+          });
+        },
+        (err) => {
+          console.error('Geolocation error for hazard alert:', err);
+          let errorMessage = 'Failed to get current location for hazard. ';
+          if (err.code === 1) {
+            errorMessage += 'Location permission denied. Please enable location services.';
+          } else if (err.code === 2) {
+            errorMessage += 'Location unavailable. Using last known location.';
+          } else if (err.code === 3) {
+            errorMessage += 'Location request timed out. Using last known location.';
+          } else {
+            errorMessage += 'An unknown error occurred. Using last known location.';
+          }
+          showToastMessage(errorMessage, 7000);
+          const fallbackLocation = userLocation.lat && userLocation.lng
+            ? new google.maps.LatLng(userLocation.lat, userLocation.lng)
+            : new google.maps.LatLng(33.0891264, -83.2372736);
+          console.log('Using fallback location for hazard:', fallbackLocation.toString());
+          addAlert('Hazard', '', fallbackLocation).then(() => {
+            console.log('Hazard alert posted with fallback location');
+          }).catch(err => {
+            console.error('Failed to post hazard alert with fallback:', err);
+            showToastMessage('Failed to post hazard alert with fallback.', 7000);
+          });
+        },
+        { maximumAge: 10000, timeout: 30000, enableHighAccuracy: true }
+      );
+    } else {
+      console.error('Geolocation unavailable');
+      showToastMessage('Geolocation not supported. Using default location for hazard.', 7000);
+      const defaultLocation = new google.maps.LatLng(33.0891264, -83.2372736);
+      console.log('Using default location for hazard:', defaultLocation.toString());
+      addAlert('Hazard', '', defaultLocation).then(() => {
+        console.log('Hazard alert posted with default location');
+      }).catch(err => {
+        console.error('Failed to post hazard alert with default:', err);
+        showToastMessage('Failed to post hazard alert with default.', 7000);
+      });
+    }
+  }
 
 function enableMapClick() {
   isSelectingLocation = true;
@@ -1603,8 +1778,8 @@ function makeDraggable(element) {
     console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left || '50%', top: element.style.top || '50%' });
   });
   // Touch events
-  element.querySelector('h3').addEventListener('touchstart', (e) => {
-    if (e.target !== element.querySelector('h3')) return;
+  h3.addEventListener('touchstart', (e) => {
+    if (e.target !== h3) return;
     const touch = e.touches[0];
     initialX = touch.clientX - xOffset;
     initialY = touch.clientY - yOffset;
@@ -1713,6 +1888,8 @@ if (profileBtn) {
       }
     } else {
       console.warn('No current user, profile action skipped');
+      showToastMessage('Please log in to view profile.', 5000);
+      logout();
     }
   });
 }
@@ -1794,6 +1971,9 @@ if (saveProfileBtn) {
             .catch(err => {
               console.error('Profile update error:', err.message);
               showToastMessage(`Failed to update profile: ${err.message}`, 7000);
+              if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
+                logout();
+              }
             });
         })
         .catch(err => {
@@ -1821,6 +2001,9 @@ if (saveProfileBtn) {
         .catch(err => {
           console.error('Profile update error:', err.message);
           showToastMessage(`Failed to update profile: ${err.message}`, 7000);
+          if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
+            logout();
+          }
         });
     }
   });
@@ -1874,16 +2057,23 @@ if (detailedAlertBtn) {
 if (settingsBtn) {
   settingsBtn.addEventListener('click', () => {
     if (currentUser) {
-      if (settingsHud) settingsHud.classList.add('active');
-      else console.error('settingsHud element not found');
+      if (settingsHud) {
+        settingsHud.classList.add('active');
+        settingsHud.style.display = 'flex';
+      } else console.error('settingsHud element not found');
+    } else {
+      showToastMessage('Please log in to access settings.', 5000);
+      logout();
     }
   });
 }
 
 if (closeSettings) {
   closeSettings.addEventListener('click', () => {
-    if (settingsHud) settingsHud.classList.remove('active');
-    else console.error('closeSettings element not found');
+    if (settingsHud) {
+      settingsHud.classList.remove('active');
+      settingsHud.style.display = 'none';
+    } else console.error('closeSettings element not found');
   });
 }
 
@@ -2002,47 +2192,49 @@ if (document.getElementById('alert-user-filter')) {
 }
 
 // Sync with real-time updates
-if (socket) {
-  socket.on('hazard', (data) => {
-    if (map && !alertMarkers.has(data._id)) {
-      addMarkerFromDB(data);
-      fetchAlerts(); // Refresh alerts to ensure consistency
-    }
-  });
-  socket.on('detailedAlert', (data) => {
-    if (map && !alertMarkers.has(data._id)) {
-      addMarkerFromDB(data);
-      fetchAlerts(); // Refresh alerts to ensure consistency
-    }
-  });
-  socket.on('alert', (data) => {
-    if (map) {
-      new google.maps.Marker({
-        position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
-        map: map,
-        title: data.type
-      });
-    }
-  });
-  socket.on('alertRemoved', (data) => {
-    if (alertMarkers.has(data._id)) {
-      alertMarkers.get(data._id).setMap(null);
-      alertMarkers.delete(data._id);
-      hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
-      allAlerts = allAlerts.filter(a => a._id !== data._id);
-      updateAlertTable();
-    }
-    console.log('Alert removed via socket:', data._id);
-  });
-  socket.on('locationUpdate', (data) => {
-    if (map) {
-      new google.maps.Marker({
-        position: { lat: data.latitude, lng: data.longitude },
-        map: map,
-        title: 'User Location'
-      });
-    }
-  });
+function initializeSocket() {
+  if (socket) {
+    socket.on('hazard', (data) => {
+      if (map && !alertMarkers.has(data._id)) {
+        addMarkerFromDB(data);
+        fetchAlerts();
+      }
+    });
+    socket.on('detailedAlert', (data) => {
+      if (map && !alertMarkers.has(data._id)) {
+        addMarkerFromDB(data);
+        fetchAlerts();
+      }
+    });
+    socket.on('alert', (data) => {
+      if (map) {
+        new google.maps.Marker({
+          position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
+          map: map,
+          title: data.type
+        });
+      }
+    });
+    socket.on('alertRemoved', (data) => {
+      if (alertMarkers.has(data._id)) {
+        alertMarkers.get(data._id).setMap(null);
+        alertMarkers.delete(data._id);
+        hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
+        allAlerts = allAlerts.filter(a => a._id !== data._id);
+        updateAlertTable();
+      }
+      console.log('Alert removed via socket:', data._id);
+    });
+    socket.on('locationUpdate', (data) => {
+      if (map) {
+        new google.maps.Marker({
+          position: { lat: data.latitude, lng: data.longitude },
+          map: map,
+          title: 'User Location'
+        });
+      }
+    });
+  }
 }
 
 // Force Profile HUD width on load and resize
