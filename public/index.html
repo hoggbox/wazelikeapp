@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Waze-like App</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Roboto', sans-serif;
+      background: #0f1419;
+      color: #fff;
+      overflow: hidden;
+      height: 100vh;
+      transition: all 0.3s ease;
+    }
+    #map {
+      height: 100vh;
+      width: 100vw;
+      display: none;
+    }
+    #hud, #control-hud, #control-panel, #login-screen {
+      display: none;
+    }
+    #tools-hud {
+      display: flex;
+    }
+    #login-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      color: #ecf0f1;
+      position: absolute;
+      width: 100%;
+      z-index: 1003;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #login-screen.active {
+      display: flex;
+    }
+    #login-screen h2 {
+      margin-bottom: 20px;
+      font-size: 24px;
+      color: #3498db;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+    #login-screen input {
+      width: 80%;
+      max-width: 300px;
+      padding: 12px 20px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 8px;
+      background: #3d566e;
+      color: #ecf0f1;
+      font-size: 16px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #login-screen input:focus {
+      outline: none;
+      background: #34495e;
+      transform: scale(1.02);
+    }
+    #login-screen input.invalid {
+      border: 2px solid #ff4444;
+    }
+    #login-screen button {
+      width: 80%;
+      max-width: 300px;
+      padding: 12px 20px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      color: #000000;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #login-screen button:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    #login-screen .reset-btn {
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      color: #ffffff;
+    }
+    #login-screen .reset-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+    }
+    #error-message {
+      color: #ff4444;
+      font-size: 14px;
+      margin-top: 5px;
+      text-align: center;
+      display: none;
+    }
+    #reset-password-screen {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      color: #ecf0f1;
+      position: absolute;
+      width: 100%;
+      z-index: 1004;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #reset-password-screen.active {
+      display: flex;
+    }
+    #reset-password-screen h2 {
+      margin-bottom: 20px;
+      font-size: 24px;
+      color: #3498db;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+    #reset-password-screen input {
+      width: 80%;
+      max-width: 300px;
+      padding: 12px 20px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 8px;
+      background: #3d566e;
+      color: #ecf0f1;
+      font-size: 16px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #reset-password-screen input:focus {
+      outline: none;
+      background: #34495e;
+      transform: scale(1.02);
+    }
+    #reset-password-screen input.invalid {
+      border: 2px solid #ff4444;
+    }
+    #reset-password-screen button {
+      width: 80%;
+      max-width: 300px;
+      padding: 12px 20px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      color: #000000;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #reset-password-screen button:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    #reset-password-screen .cancel-btn {
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      color: #ffffff;
+    }
+    #reset-password-screen .cancel-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+    }
+    #reset-error-message {
+      color: #ff4444;
+      font-size: 14px;
+      margin-top: 5px;
+      text-align: center;
+      display: none;
+    }
+    #nav-input {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 90%;
+      max-width: 650px;
+      height: auto;
+      z-index: 1000;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      padding: 0;
+      margin: 0;
+    }
+    #navAddress {
+      padding: 12px 20px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px 0 0 8px;
+      flex: 1;
+      min-height: 40px;
+      background: #2c3e50;
+      color: #ecf0f1;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+      cursor: text;
+      border: 1px solid #34495e;
+      overflow: hidden;
+      margin: 0;
+      box-sizing: border-box;
+    }
+    #navAddress:focus {
+      outline: none;
+      background: #34495e;
+      transform: scale(1.02);
+    }
+    #navAddress:hover {
+      background: #3d566e;
+    }
+    .mic-button {
+      height: 40px;
+      width: 50px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 0 8px 8px 0;
+      color: #000000;
+      font-size: 20px;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+    }
+    .mic-button:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.1);
+    }
+    .mic-button i {
+      margin: 0;
+    }
+    #navOverlay {
+      display: none;
+      position: absolute;
+      top: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 600px;
+      min-height: 30vh;
+      max-height: 45vh;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      z-index: 1001;
+      padding: 20px;
+      box-sizing: border-box;
+      border: 2px solid #34495e;
+      border-radius: 10px;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    #navOverlay > div {
+      flex-grow: 1;
+      overflow: hidden;
+    }
+    #closeOverlay {
+      margin-top: auto;
+      padding: 10px 20px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 8px;
+      color: #000000;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #closeOverlay:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    .suggestion-item, .recent-item {
+      padding: 12px;
+      margin: 5px 0;
+      border-radius: 6px;
+      cursor: pointer;
+      color: #ecf0f1;
+      font-family: 'Roboto', sans-serif;
+      font-size: 14px;
+      line-height: 1.4;
+      transition: background 0.3s ease, transform 0.2s ease;
+      background: #3d566e;
+      white-space: normal;
+    }
+    .suggestion-item:hover, .recent-item:hover {
+      background: #3498db;
+      color: #ffffff;
+      transform: translateX(5px);
+    }
+    #hud {
+      position: fixed;
+      bottom: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 95%;
+      max-width: 650px;
+      min-height: 80px;
+      padding: 10px 15px;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      border-radius: 15px;
+      box-shadow: 0 -6px 15px rgba(0, 0, 0, 0.5), inset 0 2px 5px rgba(255, 255, 255, 0.1);
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.4s ease, transform 0.4s ease, box-shadow 0.4s ease;
+      flex-wrap: nowrap;
+      overflow: hidden;
+      transform: translateX(-50%) translateY(100%);
+      display: none;
+    }
+    #hud.navigating {
+      display: flex;
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.6), inset 0 2px 6px rgba(255, 255, 255, 0.15);
+    }
+    #control-hud {
+      position: fixed;
+      bottom: calc(80px + 50px);
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 250px;
+      height: 50px;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3), inset 0 1px 3px rgba(255, 255, 255, 0.1);
+      z-index: 1001;
+      opacity: 0;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+      gap: 5px;
+      padding: 5px;
+      display: none;
+    }
+    #control-hud.navigating {
+      display: flex;
+      opacity: 1;
+    }
+    #control-hud .cancel-btn {
+      padding: 8px 12px;
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      border: none;
+      border-radius: 6px;
+      color: #ffffff;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease, transform 0.3s ease;
+    }
+    #control-hud .cancel-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+      transform: scale(1.1);
+    }
+    #control-hud .mute-btn {
+      padding: 8px 12px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 6px;
+      color: #000000;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease, transform 0.3s ease;
+      position: relative;
+    }
+    #control-hud .mute-btn.muted::after {
+      content: '×';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-52%, -50%);
+      color: #ff4444;
+      font-size: 18px;
+      font-weight: bold;
+    }
+    #control-hud .mute-btn:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.1);
+    }
+    #control-hud .recenter-btn {
+      padding: 8px 12px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 6px;
+      color: #000000;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease, transform 0.3s ease;
+    }
+    #control-hud .recenter-btn:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.1);
+    }
+    #control-hud .hazard-btn {
+      padding: 8px 12px;
+      background: linear-gradient(45deg, #e67e22, #d35400);
+      border: none;
+      border-radius: 6px;
+      color: #ffffff;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease, transform 0.3s ease;
+    }
+    #control-hud .hazard-btn:hover {
+      background: linear-gradient(45deg, #d35400, #e67e22);
+      transform: scale(1.1);
+    }
+    #control-hud .cancel-btn i, #control-hud .recenter-btn i, #control-hud .mute-btn i, #control-hud .hazard-btn i {
+      margin: 0;
+      font-size: 18px;
+    }
+    .hud-item {
+      display: flex;
+      align-items: center;
+      color: #ecf0f1;
+      font-family: 'Roboto', sans-serif;
+      font-size: 18px;
+      margin: 0 5px;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+      padding: 6px 10px;
+      border-radius: 6px;
+      background: #3d566e;
+    }
+    .hud-item i {
+      margin-right: 6px;
+      color: #3498db;
+      font-size: 22px;
+    }
+    #tools-hud {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100vw;
+      background: #2c3e50;
+      padding: 8px 10px;
+      box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.4);
+      z-index: 999;
+      display: flex;
+      justify-content: center;
+      border-radius: 8px 8px 0 0;
+    }
+    #tools-hud button {
+      padding: 10px 20px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 8px;
+      color: #000000;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+      margin: 0 5px;
+    }
+    #tools-hud button:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    #tools-hud button i {
+      margin-right: 6px;
+    }
+    #profile-hud {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 100%;
+      max-width: 600px;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      z-index: 1002;
+      padding: 20px;
+      box-sizing: border-box;
+      border: 2px solid #34495e;
+      border-radius: 15px;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.6);
+      color: #ecf0f1;
+      font-family: 'Roboto', sans-serif;
+      height: auto;
+      max-height: 90vh;
+    }
+    #profile-hud.active {
+      display: flex;
+      flex-direction: column;
+    }
+    #profile-hud .close-btn {
+      position: absolute;
+      top: 15px;
+      right: 20px;
+      padding: 8px 12px;
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      border: none;
+      border-radius: 50%;
+      color: #ffffff;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      z-index: 1003;
+    }
+    #profile-hud .close-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+      transform: scale(1.1);
+    }
+    #profile-hud .tabs {
+      display: flex;
+      justify-content: space-around;
+      margin-bottom: 15px;
+      border-bottom: 3px solid #3498db;
+      background: #2c3e50;
+      border-radius: 10px 10px 0 0;
+      padding: 5px 0;
+    }
+    #profile-hud .tab-button {
+      padding: 12px 25px;
+      background: transparent;
+      border: none;
+      border-radius: 5px 5px 0 0;
+      color: #ecf0f1;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      font-size: 16px;
+      margin-bottom: -2px;
+      flex: 1;
+      text-align: center;
+      position: relative;
+      font-weight: 500;
+    }
+    #profile-hud .tab-button.active {
+      background: #3498db;
+      color: #000000;
+      border-bottom: 3px solid #00bcd4;
+    }
+    #profile-hud .tab-button:hover {
+      background: #34495e;
+      color: #ffffff;
+    }
+    #profile-hud .tab-content {
+      flex-grow: 1;
+      padding: 15px 0;
+      overflow: hidden;
+    }
+    #profile-hud .account-info,
+    #profile-hud .edit-profile,
+    #profile-hud .alerts {
+      display: none;
+      text-align: center;
+      padding: 10px;
+      height: 100%;
+    }
+    #profile-hud .account-info.active,
+    #profile-hud .edit-profile.active,
+    #profile-hud .alerts.active {
+      display: block;
+    }
+    #profile-hud .account-info h3 {
+      font-size: 18px;
+      color: #3498db;
+      margin: 0 0 15px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #profile-hud .account-info p {
+      margin: 10px 0;
+      font-size: 15px;
+      color: #d5d8dc;
+    }
+    #profile-hud .account-info .logout-btn {
+      padding: 10px 20px;
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      border: none;
+      border-radius: 8px;
+      color: #ffffff;
+      cursor: pointer;
+      margin-top: 15px;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #profile-hud .account-info .logout-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+      transform: scale(1.05);
+    }
+    #profile-hud .edit-profile h3 {
+      font-size: 18px;
+      color: #3498db;
+      margin: 0 0 15px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #profile-hud .edit-profile input {
+      width: 85%;
+      padding: 10px;
+      margin: 8px 0;
+      border: none;
+      border-radius: 8px;
+      background: #3d566e;
+      color: #ecf0f1;
+      font-size: 14px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    }
+    #profile-hud .edit-profile input:focus {
+      outline: none;
+      background: #34495e;
+      transform: scale(1.02);
+    }
+    #profile-hud .edit-profile input.invalid {
+      border: 2px solid #ff4444;
+    }
+    #profile-hud .edit-profile button {
+      padding: 10px 25px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 8px;
+      color: #000000;
+      cursor: pointer;
+      margin-top: 15px;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #profile-hud .edit-profile button:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    #profile-hud .alerts table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+      background: #2c3e50;
+      border-radius: 5px;
+      overflow: hidden;
+      table-layout: fixed;
+    }
+    #profile-hud .alerts th,
+    #profile-hud .alerts td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid #34495e;
+      font-size: 13px;
+      word-wrap: break-word;
+    }
+    #profile-hud .alerts th {
+      background: #34495e;
+      color: #ecf0f1;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    #profile-hud .alerts tr:nth-child(even) {
+      background: #3d566e;
+    }
+    #profile-hud .alerts tr:nth-child(odd) {
+      background: #2c3e50;
+    }
+    #profile-hud .alerts .delete-btn {
+      padding: 4px 8px;
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      border: none;
+      border-radius: 50%;
+      color: #ffffff;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto;
+    }
+    #profile-hud .alerts .delete-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+      transform: scale(1.1);
+    }
+    #profile-hud .pagination {
+      display: flex;
+      justify-content: center;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    #profile-hud .pagination button {
+      padding: 6px 10px;
+      background: #3d566e;
+      border: none;
+      border-radius: 5px;
+      color: #ecf0f1;
+      cursor: pointer;
+      transition: background 0.3s ease;
+      font-size: 12px;
+    }
+    #profile-hud .pagination button.active {
+      background: #3498db;
+      color: #000000;
+    }
+    #profile-hud .pagination button:hover {
+      background: #34495e;
+    }
+    #profile-hud .filters {
+      margin: 10px 0;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+    }
+    #profile-hud .filters select {
+      padding: 6px;
+      background: #3d566e;
+      border: none;
+      border-radius: 5px;
+      color: #ecf0f1;
+      font-size: 12px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+    }
+    #profile-hud .filters select:focus {
+      outline: none;
+      background: #34495e;
+    }
+    #settings-hud {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 90%;
+      max-width: 400px;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      z-index: 1002;
+      padding: 20px;
+      box-sizing: border-box;
+      border: 2px solid #34495e;
+      border-radius: 15px;
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.6);
+      color: #ecf0f1;
+      font-family: 'Roboto', sans-serif;
+      overflow-y: auto;
+      max-height: 90vh;
+    }
+    #settings-hud.active {
+      display: flex;
+      flex-direction: column;
+    }
+    #settings-hud h2 {
+      margin: 0 0 20px;
+      font-size: 22px;
+      color: #3498db;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #settings-hud .section {
+      margin-bottom: 20px;
+    }
+    #settings-hud .section h3 {
+      margin: 0 0 15px;
+      font-size: 18px;
+      color: #3498db;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #settings-hud button {
+      padding: 10px 25px;
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      border: none;
+      border-radius: 8px;
+      color: #ffffff;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      margin-top: 15px;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+    }
+    #settings-hud button:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+      transform: scale(1.05);
+    }
+    #closeSettings {
+      margin-top: 20px;
+      padding: 12px 30px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 8px;
+      color: #000000;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #closeSettings:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    #detailedAlertBox {
+      display: none;
+      position: fixed;
+      width: 90%;
+      max-width: 400px;
+      min-height: 200px;
+      max-height: 80vh;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      border: 2px solid #3498db;
+      border-radius: 10px;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5), 0 0 5px rgba(52, 152, 219, 0.5);
+      z-index: 1002;
+      padding: 20px;
+      box-sizing: border-box;
+      color: #ecf0f1;
+      font-family: 'Roboto', sans-serif;
+      overflow-y: auto;
+    }
+    #detailedAlertBox.active {
+      display: flex !important;
+      flex-direction: column;
+      justify-content: space-between;
+      opacity: 1;
+    }
+    #detailedAlertBox .close-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 8px 15px;
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      border: none;
+      border-radius: 50%;
+      color: #ffffff;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      margin: 0;
+    }
+    #detailedAlertBox .close-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+      transform: scale(1.1);
+    }
+    #detailedAlertBox h3 {
+      margin: 0 0 15px;
+      font-size: 18px;
+      color: #3498db;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      text-align: center;
+      cursor: move;
+    }
+    #detailedAlertBox label {
+      margin: 10px 0 5px;
+      font-size: 14px;
+    }
+    #detailedAlertBox select,
+    #detailedAlertBox textarea,
+    #detailedAlertBox .location-display {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 10px;
+      border: none;
+      border-radius: 5px;
+      background: #3d566e;
+      color: #ecf0f1;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+    #detailedAlertBox select:focus,
+    #detailedAlertBox textarea:focus {
+      outline: none;
+      background: #34495e;
+    }
+    #detailedAlertBox .location-display {
+      display: none;
+      text-align: left;
+    }
+    #detailedAlertBox .waiting-message,
+    #detailedAlertBox .alert-posted-message {
+      text-align: center;
+      font-size: 16px;
+      margin: 10px 0;
+      color: #00c853;
+    }
+    #detailedAlertBox .waiting-message {
+      display: none;
+    }
+    #detailedAlertBox .alert-posted-message {
+      display: none;
+    }
+    #detailedAlertBox button {
+      padding: 10px 20px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 8px;
+      color: #000000;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+      margin: 5px 0;
+    }
+    #detailedAlertBox button:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    #detailedAlertBox button.cancel-btn {
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      color: #ffffff;
+    }
+    #detailedAlertBox button.cancel-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+    }
+    #toast-message {
+      display: none;
+      position: fixed;
+      bottom: 150px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      padding: 15px 25px;
+      border-radius: 8px;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+      color: #ecf0f1;
+      font-size: 16px;
+      z-index: 1003;
+      text-align: center;
+    }
+    @media (orientation: portrait) {
+      #hud { width: 95%; max-width: 650px; }
+      #nav-input { width: 90%; max-width: 650px; }
+      #navAddress { width: 100%; max-width: 600px; }
+      #navOverlay { width: 100%; max-width: 600px; top: 40px; }
+      #control-hud { width: 250px; }
+      #profile-hud { width: 90%; max-width: 350px; }
+      #settings-hud { width: 90%; max-width: 350px; }
+      #login-screen { width: 100%; }
+      #detailedAlertBox { width: 90%; max-width: 350px; }
+      #reset-password-screen { width: 100%; }
+    }
+    @media (orientation: landscape) {
+      #hud { width: 75%; max-width: 700px; bottom: 50px; }
+      #nav-input { width: 70%; max-width: 550px; }
+      #navAddress { width: 70%; max-width: 500px; }
+      #navOverlay { width: 70%; max-width: 500px; top: 40px; }
+      #control-hud { width: 250px; }
+      #tools-hud { padding: 6px 10px; }
+      #tools-hud button { padding: 8px 16px; font-size: 12px; }
+      #profile-hud { width: 90%; max-width: 400px; }
+      #settings-hud { width: 90%; max-width: 400px; }
+      #login-screen { width: 100%; }
+      #detailedAlertBox { width: 90%; max-width: 400px; }
+      #reset-password-screen { width: 90%; max-width: 400px; }
+    }
+    .gm-style .gm-style-iw {
+      background-color: #2c3e50;
+      color: #ecf0f1;
+      border-radius: 5px;
+    }
+    .gm-style .gm-style-iw a {
+      color: #3498db;
+    }
+    .gm-style {
+      background-color: #2c3e50;
+    }
+    .gm-style .gm-style-iw-t {
+      background-color: #34495e;
+    }
+    .gm-style .gm-style-iw-d {
+      background-color: #2c3e50;
+    }
+    .gm-style .gm-style-mtc {
+      background-color: #34495e;
+    }
+    .gm-style .gm-style-cc {
+      color: #ecf0f1;
+    }
+    #voiceOverlay {
+      display: none;
+      position: absolute;
+      top: 25vh;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 90%;
+      max-width: 600px;
+      height: 50vh;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      z-index: 1002;
+      padding: 20px;
+      box-sizing: border-box;
+      border: 2px solid #34495e;
+      border-radius: 10px;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #ecf0f1;
+      font-family: 'Roboto', sans-serif;
+    }
+    #voiceOverlay .pulsator {
+      width: 100px;
+      height: 100px;
+      background: #3d566e;
+      border-radius: 50%;
+      position: relative;
+      animation: pulse 1.5s infinite;
+    }
+    #voiceOverlay .pulsator.active {
+      background: #34495e;
+      animation: pulse 1s infinite;
+    }
+    #voiceOverlay .instruction {
+      margin-top: 20px;
+      font-size: 16px;
+    }
+    #voiceOverlay .close-btn {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      border: none;
+      border-radius: 8px;
+      color: #000000;
+      cursor: pointer;
+      font-weight: bold;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    #voiceOverlay .close-btn:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.5; }
+      50% { transform: scale(1.2); opacity: 0.8; }
+      100% { transform: scale(1); opacity: 0.5; }
+    }
+    #reroutePrompt {
+      display: none;
+      position: fixed;
+      bottom: 150px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      padding: 20px;
+      border-radius: 10px;
+      z-index: 1002;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3), inset 0 1px 3px rgba(255, 255, 255, 0.1);
+      color: #ecf0f1;
+      text-align: center;
+      flex-direction: column;
+      gap: 10px;
+    }
+    #reroutePrompt p {
+      margin: 0;
+      font-size: 16px;
+    }
+    #reroutePrompt button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+      transition: all 0.3s ease;
+    }
+    #rerouteYes {
+      background: linear-gradient(45deg, #00c853, #009639);
+      color: #ffffff;
+    }
+    #rerouteYes:hover {
+      transform: scale(1.05);
+    }
+    #rerouteNo {
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      color: #ffffff;
+    }
+    #rerouteNo:hover {
+      transform: scale(1.05);
+    }
+  </style>
+  <script>
+    window.addEventListener('load', () => {
+      const profileHud = document.getElementById('profile-hud');
+      if (profileHud) {
+        profileHud.style.width = '100%';
+        profileHud.style.maxWidth = '600px';
+        console.log('Forced Profile HUD width to 100% and max-width to 600px');
+      }
+    });
+    window.addEventListener('resize', () => {
+      const profileHud = document.getElementById('profile-hud');
+      if (profileHud) {
+        profileHud.style.width = '100%';
+        profileHud.style.maxWidth = '600px';
+        console.log('Resized Profile HUD to 100% and max-width to 600px');
+      }
+    });
+  </script>
+</head>
+<body>
+  <div id="login-screen" class="active">
+    <h2>Welcome to Waze-like App</h2>
+    <input type="text" id="login-username" placeholder="Username or Email">
+    <input type="password" id="login-password" placeholder="Password">
+    <div id="error-message"></div>
+    <button id="login-btn">Login</button>
+    <button id="register-btn" onclick="window.location.href='/register.html'">Register</button>
+    <button id="reset-password-btn" class="reset-btn">Reset Password</button>
+  </div>
+  <div id="reset-password-screen">
+    <h2>Reset Password</h2>
+    <input type="email" id="reset-email" placeholder="Email">
+    <input type="password" id="reset-new-password" placeholder="New Password">
+    <input type="password" id="reset-confirm-password" placeholder="Confirm New Password">
+    <div id="reset-error-message"></div>
+    <button id="submit-reset-btn">Submit</button>
+    <button id="cancel-reset-btn" class="cancel-btn">Cancel</button>
+  </div>
+  <div id="map"></div>
+  <div id="nav-input">
+    <input type="text" id="navAddress" placeholder="Enter destination address">
+    <button class="mic-button"><i class="fas fa-microphone"></i></button>
+    <div id="navOverlay">
+      <div>
+        <div id="recentLocations"></div>
+        <div id="suggestions"></div>
+      </div>
+      <button id="closeOverlay">Close</button>
+    </div>
+  </div>
+  <div id="voiceOverlay">
+    <div class="pulsator"></div>
+    <div class="instruction" id="voiceInstruction">Speak the address or location...</div>
+    <button id="closeVoiceOverlay" class="close-btn">Close</button>
+  </div>
+  <div id="hud">
+    <div class="hud-item"><i class="fas fa-road"></i> <span id="speedLimit">45 mph</span></div>
+    <div class="hud-item"><i class="fas fa-tachometer-alt"></i> <span id="currentSpeed">47 mph</span></div>
+    <div class="hud-item"><i class="fas fa-clock"></i> <span id="eta">15 min</span></div>
+    <div class="hud-item"><i class="fas fa-map-marker-alt"></i> <span id="dta">5 mi</span></div>
+    <div class="hud-item"><i class="fas fa-clock"></i> <span id="time">8:30 AM</span></div>
+  </div>
+  <div id="control-hud">
+    <div class="recenter-btn"><i class="fas fa-crosshairs"></i></div>
+    <div class="mute-btn"><i class="fas fa-volume-up"></i></div>
+    <div class="cancel-btn"><i class="fas fa-times"></i></div>
+    <div class="hazard-btn"><i class="fas fa-exclamation-triangle"></i></div>
+    <div class="remove-alert-btn" style="display: none;"><i class="fas fa-trash"></i></div>
+  </div>
+  <div id="tools-hud">
+    <button id="settings-btn"><i class="fas fa-cog"></i> Settings</button>
+    <button id="profile-btn"><i class="fas fa-user"></i> Profile</button>
+    <button id="detailedAlert-btn"><i class="fas fa-bell"></i> Detailed Alert</button>
+  </div>
+  <div id="control-panel">
+    <button id="addAlert">+ Alert</button>
+  </div>
+  <div id="profile-hud">
+    <button class="close-btn">×</button>
+    <div class="tabs">
+      <button class="tab-button" data-tab="account">Account</button>
+      <button class="tab-button" data-tab="edit">Edit</button>
+      <button class="tab-button" data-tab="alerts">Alerts</button>
+    </div>
+    <div class="tab-content account-info">
+      <h3>Account Information</h3>
+      <p id="account-name">Name: N/A</p>
+      <p id="account-username">Username: N/A</p>
+      <p id="account-email">Email: N/A</p>
+      <p id="account-age">Age: N/A</p>
+      <p id="account-dob">DOB: N/A</p>
+      <p id="account-location">Location: N/A</p>
+    </div>
+    <div class="tab-content edit-profile">
+      <h3>Edit Profile</h3>
+      <input type="text" id="edit-name" placeholder="Name">
+      <input type="text" id="edit-username" placeholder="Username">
+      <input type="email" id="edit-email" placeholder="Email">
+      <input type="number" id="edit-age" placeholder="Age">
+      <input type="text" id="edit-dob" placeholder="DOB (MM/DD/YYYY)">
+      <input type="text" id="edit-location" placeholder="Location">
+      <div id="edit-error-message" class="error-message"></div>
+      <button id="save-profile-btn">Save Changes</button>
+    </div>
+    <div class="tab-content alerts">
+      <div class="filters">
+        <select id="alert-type-filter">
+          <option value="">All Types</option>
+          <option value="Hazard">Hazard</option>
+          <option value="Wreck">Wreck</option>
+          <option value="Fire">Fire</option>
+          <option value="Shooting">Shooting</option>
+          <option value="Roadblock">Roadblock</option>
+          <option value="Roadwork">Roadwork</option>
+          <option value="Other">Other</option>
+        </select>
+        <select id="alert-user-filter">
+          <option value="">All Users</option>
+        </select>
+      </div>
+      <table class="alert-table" id="alert-table"></table>
+      <div class="pagination" id="alert-pagination"></div>
+    </div>
+  </div>
+  <div id="settings-hud">
+    <h2>Settings</h2>
+    <div class="section">
+      <h3>Account Information</h3>
+      <button id="logout-btn">Logout</button>
+    </div>
+    <button id="closeSettings">Close</button>
+  </div>
+  <div id="detailedAlertBox">
+    <button class="close-btn">×</button>
+    <h3>Create Alert</h3>
+    <label for="alertType">Alert Type:</label>
+    <select id="alertType">
+      <option value="Hazard">Hazard</option>
+      <option value="Wreck">Wreck</option>
+      <option value="Fire">Fire</option>
+      <option value="Shooting">Shooting</option>
+      <option value="Roadblock">Roadblock</option>
+      <option value="Roadwork">Roadwork</option>
+      <option value="Other">Other</option>
+    </select>
+    <button id="click-location-alert">Click/Press location to alert</button>
+    <button id="alert-current-location">Alert at current location</button>
+    <div id="location-display" class="location-display">
+      <label>Selected Location:</label>
+      <p><span id="selected-location"></span></p>
+      <label for="alertNotes">Notes (optional):</label>
+      <textarea id="alertNotes" placeholder="Enter details here..." rows="3"></textarea>
+      <button id="post-alert">Post</button>
+      <button id="cancel-alert" class="cancel-btn">Cancel</button>
+    </div>
+    <div id="toast-message"></div>
+  </div>
+  <div id="reroutePrompt">
+    <p>Hazard detected on route within 5 miles. Reroute?</p>
+    <button id="rerouteYes">Accept</button>
+    <button id="rerouteNo">Ignore</button>
+  </div>
+  <script src="https://unpkg.com/jwt-decode@3.1.2/build/jwt-decode.js"></script>
+  <script src="/js/map.js?v=1.0.23" defer></script>
+  <script src="http://127.0.0.1:3000/socket.io/socket.io.js" async></script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&libraries=places,geometry&callback=initMap" async defer></script>
+</body>
+</html>

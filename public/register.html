@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Register - Waze-like App</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Roboto', sans-serif;
+      background: linear-gradient(135deg, #2c3e50, #34495e);
+      color: #ecf0f1;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .register-container {
+      width: 90%;
+      max-width: 400px;
+      padding: 30px;
+      background: #34495e;
+      border-radius: 12px;
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
+      text-align: left;
+    }
+    .register-container h2 {
+      margin: 0 0 20px;
+      font-size: 26px;
+      color: #3498db;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      font-weight: 500;
+      color: #ecf0f1;
+      margin-bottom: 8px;
+    }
+    .form-group input {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #3d566e;
+      color: #ecf0f1;
+      font-size: 16px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+      box-sizing: border-box;
+      transition: all 0.3s ease;
+    }
+    .form-group input:focus {
+      outline: none;
+      background: #2c3e50;
+      transform: scale(1.02);
+    }
+    .form-group input.valid {
+      border: 2px solid #00c853;
+    }
+    .form-group input.invalid {
+      border: 2px solid #ff4444;
+    }
+    .form-group .error-message {
+      color: #ff4444;
+      font-size: 12px;
+      margin-top: 5px;
+      display: none;
+    }
+    .form-group input:focus + .error-message,
+    .form-group input.invalid + .error-message {
+      display: block;
+    }
+    .register-container button {
+      width: 100%;
+      padding: 12px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(45deg, #3498db, #2980b9);
+      color: #000000;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s ease;
+    }
+    .register-container button:hover {
+      background: linear-gradient(45deg, #2980b9, #3498db);
+      transform: scale(1.05);
+    }
+    .register-container button.clear-btn,
+    .register-container button.return-btn {
+      background: linear-gradient(45deg, #ff4444, #cc0000);
+      color: #ffffff;
+    }
+    .register-container button.clear-btn:hover,
+    .register-container button.return-btn:hover {
+      background: linear-gradient(45deg, #cc0000, #ff4444);
+    }
+    @media (max-width: 600px) {
+      .register-container {
+        width: 95%;
+        padding: 20px;
+      }
+      .register-container h2 {
+        font-size: 22px;
+      }
+      .form-group input {
+        font-size: 14px;
+        padding: 10px;
+      }
+      .register-container button {
+        font-size: 14px;
+        padding: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="register-container">
+    <h2>Register</h2>
+    <div class="form-group">
+      <label for="name">Full Name (Optional)</label>
+      <input type="text" id="name">
+      <div class="error-message" id="name-error"></div>
+    </div>
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username">
+      <div class="error-message" id="username-error"></div>
+    </div>
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email">
+      <div class="error-message" id="email-error"></div>
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password">
+      <div class="error-message" id="password-error"></div>
+    </div>
+    <div class="form-group">
+      <label for="confirm-password">Confirm Password</label>
+      <input type="password" id="confirm-password">
+      <div class="error-message" id="confirm-password-error"></div>
+    </div>
+    <div class="form-group">
+      <label for="age">Age (Optional)</label>
+      <input type="number" id="age">
+      <div class="error-message" id="age-error"></div>
+    </div>
+    <div class="form-group">
+      <label for="dob">Date of Birth (Optional, MM/DD/YYYY)</label>
+      <input type="text" id="dob">
+      <div class="error-message" id="dob-error"></div>
+    </div>
+    <div class="form-group">
+      <label for="location">Location (Optional)</label>
+      <input type="text" id="location">
+      <div class="error-message" id="location-error"></div>
+    </div>
+    <button id="register-btn">Register</button>
+    <button id="clear-btn" class="clear-btn">Clear</button>
+    <button id="return-btn" class="return-btn">Return to Login</button>
+  </div>
+  <script src="/js/register.js?v=1.0.32"></script>
+</body>
+</html>
