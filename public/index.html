@@ -839,7 +839,6 @@
       border: none;
       border-radius: 50%;
       color: #ffffff;
-      font-size: 16px;
       cursor: pointer;
       transition: all 0.3s ease;
       margin: 0;
@@ -921,170 +920,19 @@
       background: linear-gradient(45deg, #cc0000, #ff4444);
     }
     #toast-message {
-      display: none;
       position: fixed;
-      bottom: 150px;
+      bottom: 20px;
       left: 50%;
       transform: translateX(-50%);
-      background: linear-gradient(135deg, #2c3e50, #34495e);
-      padding: 15px 25px;
-      border-radius: 8px;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
-      color: #ecf0f1;
-      font-size: 16px;
-      z-index: 1003;
-      text-align: center;
-    }
-    @media (orientation: portrait) {
-      #hud { width: 95%; max-width: 650px; }
-      #nav-input { width: 90%; max-width: 650px; }
-      #navAddress { width: 100%; max-width: 600px; }
-      #navOverlay { width: 100%; max-width: 600px; top: 40px; }
-      #control-hud { width: 250px; }
-      #profile-hud { width: 90%; max-width: 350px; }
-      #settings-hud { width: 90%; max-width: 350px; }
-      #login-screen { width: 100%; }
-      #detailedAlertBox { width: 90%; max-width: 350px; }
-      #reset-password-screen { width: 100%; }
-    }
-    @media (orientation: landscape) {
-      #hud { width: 75%; max-width: 700px; bottom: 50px; }
-      #nav-input { width: 70%; max-width: 550px; }
-      #navAddress { width: 70%; max-width: 500px; }
-      #navOverlay { width: 70%; max-width: 500px; top: 40px; }
-      #control-hud { width: 250px; }
-      #tools-hud { padding: 6px 10px; }
-      #tools-hud button { padding: 8px 16px; font-size: 12px; }
-      #profile-hud { width: 90%; max-width: 400px; }
-      #settings-hud { width: 90%; max-width: 400px; }
-      #login-screen { width: 100%; }
-      #detailedAlertBox { width: 90%; max-width: 400px; }
-      #reset-password-screen { width: 90%; max-width: 400px; }
-    }
-    .gm-style .gm-style-iw {
-      background-color: #2c3e50;
-      color: #ecf0f1;
+      background: #e74c3c;
+      color: #ffffff;
+      padding: 10px 20px;
       border-radius: 5px;
-    }
-    .gm-style .gm-style-iw a {
-      color: #3498db;
-    }
-    .gm-style {
-      background-color: #2c3e50;
-    }
-    .gm-style .gm-style-iw-t {
-      background-color: #34495e;
-    }
-    .gm-style .gm-style-iw-d {
-      background-color: #2c3e50;
-    }
-    .gm-style .gm-style-mtc {
-      background-color: #34495e;
-    }
-    .gm-style .gm-style-cc {
-      color: #ecf0f1;
-    }
-    #voiceOverlay {
+      z-index: 1003;
       display: none;
-      position: absolute;
-      top: 25vh;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 90%;
-      max-width: 600px;
-      height: 50vh;
-      background: linear-gradient(135deg, #2c3e50, #34495e);
-      z-index: 1002;
-      padding: 20px;
-      box-sizing: border-box;
-      border: 2px solid #34495e;
-      border-radius: 10px;
-      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      color: #ecf0f1;
-      font-family: 'Roboto', sans-serif;
-    }
-    #voiceOverlay .pulsator {
-      width: 100px;
-      height: 100px;
-      background: #3d566e;
-      border-radius: 50%;
-      position: relative;
-      animation: pulse 1.5s infinite;
-    }
-    #voiceOverlay .pulsator.active {
-      background: #34495e;
-      animation: pulse 1s infinite;
-    }
-    #voiceOverlay .instruction {
-      margin-top: 20px;
-      font-size: 16px;
-    }
-    #voiceOverlay .close-btn {
-      margin-top: 20px;
-      padding: 10px 20px;
-      background: linear-gradient(45deg, #3498db, #2980b9);
-      border: none;
-      border-radius: 8px;
-      color: #000000;
-      cursor: pointer;
-      font-weight: bold;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-      transition: all 0.3s ease;
-    }
-    #voiceOverlay .close-btn:hover {
-      background: linear-gradient(45deg, #2980b9, #3498db);
-      transform: scale(1.05);
-    }
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 0.5; }
-      50% { transform: scale(1.2); opacity: 0.8; }
-      100% { transform: scale(1); opacity: 0.5; }
-    }
-    #reroutePrompt {
-      display: none;
-      position: fixed;
-      bottom: 150px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #2c3e50, #34495e);
-      padding: 20px;
-      border-radius: 10px;
-      z-index: 1002;
-      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3), inset 0 1px 3px rgba(255, 255, 255, 0.1);
-      color: #ecf0f1;
+      font-size: 14px;
       text-align: center;
-      flex-direction: column;
-      gap: 10px;
-    }
-    #reroutePrompt p {
-      margin: 0;
-      font-size: 16px;
-    }
-    #reroutePrompt button {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      font-weight: bold;
-      transition: all 0.3s ease;
-    }
-    #rerouteYes {
-      background: linear-gradient(45deg, #00c853, #009639);
-      color: #ffffff;
-    }
-    #rerouteYes:hover {
-      transform: scale(1.05);
-    }
-    #rerouteNo {
-      background: linear-gradient(45deg, #ff4444, #cc0000);
-      color: #ffffff;
-    }
-    #rerouteNo:hover {
-      transform: scale(1.05);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
     }
   </style>
   <script>
@@ -1092,16 +940,16 @@
       const profileHud = document.getElementById('profile-hud');
       if (profileHud) {
         profileHud.style.width = '100%';
-        profileHud.style.maxWidth = '600px';
-        console.log('Forced Profile HUD width to 100% and max-width to 600px');
+        profileHud.style.maxWidth = '650px';
+        console.log('Forced Profile HUD width to 100% and max-width to 650px');
       }
     });
     window.addEventListener('resize', () => {
       const profileHud = document.getElementById('profile-hud');
       if (profileHud) {
         profileHud.style.width = '100%';
-        profileHud.style.maxWidth = '600px';
-        console.log('Resized Profile HUD to 100% and max-width to 600px');
+        profileHud.style.maxWidth = '650px';
+        console.log('Resized Profile HUD to 100% and max-width to 650px');
       }
     });
   </script>
@@ -1144,7 +992,6 @@
   </div>
   <div id="hud">
     <div class="hud-item"><i class="fas fa-road"></i> <span id="speedLimit">45 mph</span></div>
-    <div class="hud-item"><i class="fas fa-tachometer-alt"></i> <span id="currentSpeed">47 mph</span></div>
     <div class="hud-item"><i class="fas fa-clock"></i> <span id="eta">15 min</span></div>
     <div class="hud-item"><i class="fas fa-map-marker-alt"></i> <span id="dta">5 mi</span></div>
     <div class="hud-item"><i class="fas fa-clock"></i> <span id="time">8:30 AM</span></div>
@@ -1250,7 +1097,7 @@
     <button id="rerouteNo">Ignore</button>
   </div>
   <script src="https://unpkg.com/jwt-decode@3.1.2/build/jwt-decode.js"></script>
-  <script src="/js/map.js?v=1.0.23" defer></script>
+  <script src="/js/map.js?v=1.0.46" defer></script>
   <script src="http://127.0.0.1:3000/socket.io/socket.io.js" async></script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&libraries=places,geometry&callback=initMap" async defer></script>
 </body>

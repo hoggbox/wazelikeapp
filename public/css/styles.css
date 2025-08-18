@@ -102,43 +102,42 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(135deg, #1a2636, #0f1c2c);
-  padding: 6px;
+  padding: 8px;
   border-radius: 10px;
   display: flex;
-  gap: 3px;
+  gap: 8px;
   z-index: 1000;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
-  max-width: 95%;
-  flex-wrap: wrap;
-  justify-content: center;
+  max-width: 90%;
+  flex-wrap: nowrap;
+  justify-content: space-around;
   box-sizing: border-box;
 }
 
 .hud-item {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 4px 6px;
+  gap: 6px;
+  padding: 6px 10px;
   background: rgba(26, 38, 54, 0.8);
   border-radius: 5px;
-  font-size: 10px;
-  flex: 0 1 18%;
-  min-width: 60px;
-  max-width: 80px;
+  font-size: 14px;
+  flex: 1 1 0;
+  min-width: 0;
   text-align: center;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .hud-item i {
-  font-size: 10px;
+  font-size: 14px;
   color: #00c853;
+  flex-shrink: 0;
 }
 
 .hud-item span {
-  font-size: 10px;
+  font-size: 14px;
   font-weight: bold;
   color: #e0e0e0;
   white-space: nowrap;
@@ -148,31 +147,26 @@ body {
 
 #control-hud {
   position: absolute;
-  bottom: 65px;
+  bottom: 80px;
   left: 50%;
   transform: translateX(-50%);
   background: #1a2636;
-  padding: 6px;
+  padding: 10px;
   border-radius: 5px;
   display: flex;
-  gap: 4px;
+  gap: 10px;
   z-index: 1000;
-  flex-wrap: wrap;
-  justify-content: center;
-  max-width: 95%;
-  box-sizing: border-box;
 }
 
 #control-hud .btn {
   background: #00c853;
   border: none;
   color: white;
-  padding: 4px 8px;
+  padding: 8px 16px;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 14px;
   transition: background 0.3s;
-  flex: 0 1 22%;
 }
 
 #control-hud .btn:hover {
@@ -186,10 +180,10 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 90%;
-  max-width: 340px;
+  max-width: 400px;
   background: linear-gradient(135deg, #2c3e50, #34495e);
   z-index: 1002;
-  padding: 10px;
+  padding: 15px;
   border: 2px solid #34495e;
   border-radius: 10px;
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
@@ -207,60 +201,61 @@ body {
 @media (max-width: 600px) {
   #nav-input {
     flex-direction: row;
-    gap: 4px;
-    padding: 6px;
+    gap: 5px;
+    padding: 5px;
     width: 95%;
-    max-width: 340px;
+    max-width: 350px;
   }
   #navAddress {
     font-size: 14px;
   }
   .mic-button {
-    width: 32px;
-    padding: 5px;
+    width: 35px;
+    padding: 6px;
   }
   #hud {
     flex-direction: row;
-    flex-wrap: wrap;
-    gap: 3px;
+    gap: 5px;
     padding: 5px;
     max-width: 95%;
-    box-sizing: border-box;
+    flex-wrap: nowrap;
+    justify-content: space-around;
   }
   .hud-item {
-    flex: 0 1 18%;
-    font-size: 9px;
-    padding: 3px 5px;
-    gap: 2px;
-    min-width: 55px;
-    max-width: 75px;
+    flex: 1 1 0;
+    font-size: 12px;
+    padding: 4px 6px;
+    gap: 4px;
+    min-width: 0;
   }
   .hud-item i {
-    font-size: 9px;
+    font-size: 12px;
+    flex-shrink: 0;
   }
   .hud-item span {
-    font-size: 9px;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   #control-hud {
     flex-direction: row;
-    gap: 3px;
+    gap: 5px;
     padding: 5px;
-    bottom: 60px;
+    bottom: 70px;
     max-width: 95%;
-    box-sizing: border-box;
   }
   #control-hud .btn {
-    flex: 0 1 22%;
-    font-size: 10px;
-    padding: 3px 6px;
+    flex: 1 1 20%;
+    font-size: 12px;
+    padding: 5px;
   }
   #profile-hud, #settings-hud, #detailedAlertBox {
     width: 95%;
-    max-width: 320px;
-    padding: 8px;
+    max-width: 350px;
+    padding: 10px;
   }
   #profile-hud .tab-button, #profile-hud .alerts th, #profile-hud .alerts td {
-    font-size: 10px;
+    font-size: 12px;
   }
 }
 
@@ -280,15 +275,15 @@ body {
   }
   #hud {
     bottom: 5px;
-    max-width: 80%;
+    max-width: 75%;
   }
   #control-hud {
-    bottom: 60px;
-    max-width: 80%;
+    bottom: 65px;
+    max-width: 75%;
   }
   #nav-input {
-    width: 75%;
-    max-width: 480px;
+    width: 70%;
+    max-width: 500px;
   }
 }
 
@@ -546,7 +541,6 @@ body {
   border: 2px solid #3498db;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5), 0 0 5px rgba(52, 152, 219, 0.5);
   overflow: auto;
-  touch-action: none;
 }
 
 #detailedAlertBox.dragging {
@@ -555,10 +549,6 @@ body {
 
 #detailedAlertBox h3 {
   cursor: move;
-  user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-  touch-action: none;
 }
 
 #detailedAlertBox.debug {
@@ -569,7 +559,7 @@ body {
 #detailedAlertBox.transparent {
   opacity: 0.1;
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.3s ease;
 }
 
 #detailedAlertBox label {
