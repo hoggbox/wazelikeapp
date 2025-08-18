@@ -134,15 +134,15 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background: #1a2636;
-  padding: 8px;
+  padding: 6px;
   border-radius: 8px;
   display: flex;
-  gap: 8px;
+  gap: 4px;
   z-index: 1000;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   max-width: 90%;
   flex-wrap: nowrap;
-  justify-content: space-around;
+  justify-content: space-between;
   box-sizing: border-box;
   touch-action: none;
 }
@@ -150,13 +150,13 @@ body {
 .hud-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
+  gap: 4px;
+  padding: 4px 8px;
   background: rgba(26, 38, 54, 0.8);
   border-radius: 5px;
-  font-size: 14px;
+  font-size: 13px;
   flex: 1 1 0;
-  min-width: 80px;
+  min-width: 70px;
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -164,13 +164,13 @@ body {
 }
 
 .hud-item i {
-  font-size: 14px;
+  font-size: 13px;
   color: #00c853;
   flex-shrink: 0;
 }
 
 .hud-item span {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
   color: #e0e0e0;
   white-space: nowrap;
@@ -262,23 +262,23 @@ body {
   #hud {
     flex-direction: row;
     flex-wrap: nowrap;
-    gap: 5px;
-    padding: 5px;
+    gap: 3px;
+    padding: 4px;
     max-width: 95%;
     box-sizing: border-box;
   }
   .hud-item {
     flex: 1 1 0;
-    font-size: 12px;
-    padding: 4px 8px;
-    gap: 4px;
-    min-width: 85px;
+    font-size: 11px;
+    padding: 3px 6px;
+    gap: 3px;
+    min-width: 60px;
   }
   .hud-item i {
-    font-size: 12px;
+    font-size: 11px;
   }
   .hud-item span {
-    font-size: 12px;
+    font-size: 11px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
@@ -321,6 +321,8 @@ body {
   #hud {
     bottom: 5px;
     max-width: 80%;
+    gap: 4px;
+    padding: 6px;
   }
   #control-hud {
     bottom: 65px;
