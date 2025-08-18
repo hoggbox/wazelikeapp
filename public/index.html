@@ -375,7 +375,7 @@
       width: 95%;
       max-width: 650px;
       min-height: 80px;
-      padding: 10px 15px;
+      padding: 6px;
       background: linear-gradient(135deg, #2c3e50, #34495e);
       border-radius: 15px;
       box-shadow: 0 -6px 15px rgba(0, 0, 0, 0.5), inset 0 2px 5px rgba(255, 255, 255, 0.1);
@@ -519,18 +519,24 @@
       align-items: center;
       color: #ecf0f1;
       font-family: 'Roboto', sans-serif;
-      font-size: 18px;
+      font-size: 13px;
       margin: 0 5px;
       text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-      padding: 6px 10px;
+      padding: 4px 8px;
       border-radius: 6px;
       background: #3d566e;
+      flex: 1 1 0;
+      min-width: 70px;
+      text-align: center;
+      overflow: hidden;
+      text-overflow: ellipsis;
       touch-action: none;
     }
     .hud-item i {
-      margin-right: 6px;
+      margin-right: 4px;
       color: #3498db;
-      font-size: 22px;
+      font-size: 13px;
+      flex-shrink: 0;
     }
     #tools-hud {
       position: fixed;
@@ -1392,7 +1398,15 @@
           <option value="">All Users</option>
         </select>
       </div>
-      <table class="alert-table" id="alert-table"></table>
+      <table class="alert-table" id="alert-table">
+        <tr>
+          <th>Type</th>
+          <th>Notes</th>
+          <th>Timestamp</th>
+          <th>User</th>
+          <th>Action</th>
+        </tr>
+      </table>
       <div class="pagination" id="alert-pagination"></div>
     </div>
   </div>
