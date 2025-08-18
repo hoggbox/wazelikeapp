@@ -1,4 +1,4 @@
-const VERSION = '1.0.46'; // Updated version for cache busting
+const VERSION = '1.0.47'; // Updated for performance optimizations
 // Global variables
 let map;
 let routePolyline;
@@ -58,13 +58,18 @@ if ('speechSynthesis' in window) {
 }
 
 // Utility functions
-function showToastMessage(message, duration = 5000) {
+function showToastMessage(message, duration = 5000, isError = false) {
   const toastMessage = document.getElementById('toast-message');
   if (toastMessage) {
     toastMessage.textContent = message;
+    toastMessage.classList.toggle('error', isError);
     toastMessage.style.display = 'block';
+    toastMessage.style.opacity = '1';
     setTimeout(() => {
-      toastMessage.style.display = 'none';
+      toastMessage.style.opacity = '0';
+      setTimeout(() => {
+        toastMessage.style.display = 'none';
+      }, 200);
     }, duration);
   } else {
     console.warn('toastMessage element not found, message:', message);
@@ -168,6 +173,7 @@ function checkHazardsOnRoute() {
     const reroutePrompt = document.getElementById('reroutePrompt');
     if (reroutePrompt && reroutePrompt.style.display !== 'flex') {
       reroutePrompt.style.display = 'flex';
+      showToastMessage('Hazard detected on route.', 5000);
       console.log('Hazard detected on route, showing reroute prompt:', currentHazards);
     }
   } else {
@@ -179,6 +185,7 @@ function checkHazardsOnRoute() {
 function rerouteAroundHazards(hazards) {
   if (!currentDestination || !isNavigating) {
     console.warn('No destination or navigation active, cannot reroute');
+    showToastMessage('No active navigation to reroute.', 5000, true);
     return;
   }
   console.log('Rerouting around hazards:', hazards);
@@ -188,7 +195,8 @@ function rerouteAroundHazards(hazards) {
     reroutePrompt.style.display = 'none';
     console.log('Reroute prompt hidden after rerouting');
   }
-  ignoredHazards.push(...hazards.map(h => h._id)); // Ignore these hazards to prevent re-prompting
+  ignoredHazards.push(...hazards.map(h => h._id));
+  showToastMessage('Rerouted around hazards.', 5000);
 }
 
 function ignoreHazards(hazards) {
@@ -198,6 +206,7 @@ function ignoreHazards(hazards) {
     reroutePrompt.style.display = 'none';
     console.log('Ignoring hazards:', hazards);
   }
+  showToastMessage('Hazards ignored.', 5000);
 }
 
 async function updateRoute(start, end, avoidHazards = false) {
@@ -209,7 +218,7 @@ async function updateRoute(start, end, avoidHazards = false) {
       origin: new google.maps.LatLng(start[0], start[1]),
       destination: new google.maps.LatLng(end[0], end[1]),
       travelMode: google.maps.TravelMode.DRIVING,
-      provideRouteAlternatives: avoidHazards, // Request alternative routes if avoiding hazards
+      provideRouteAlternatives: avoidHazards,
       avoidTolls: true,
       avoidHighways: false,
       avoidFerries: true
@@ -264,7 +273,7 @@ async function updateRoute(start, end, avoidHazards = false) {
     console.timeEnd('Route calculation');
   } catch (err) {
     console.error('Route calculation failed:', err);
-    showToastMessage('Failed to calculate route. Please try again.', 7000);
+    showToastMessage('Failed to calculate route. Please try again.', 7000, true);
   }
 }
 
@@ -305,7 +314,7 @@ function addMarker(type, notes = '', position) {
       hazardMarkers.push({ marker, timestamp, type, _id: null });
       alertMarkers.set(null, marker);
       console.timeEnd(timerName);
-      showToastMessage('No user logged in, alert queued offline.', 7000);
+      showToastMessage('No user logged in, alert queued offline.', 7000, true);
       return;
     }
     fetch(`${BASE_URL}/api/map/alert`, {
@@ -325,7 +334,7 @@ function addMarker(type, notes = '', position) {
         if (data.msg === 'Error: Cannot post duplicate alert or alert in same exact location, please try a different location') {
           console.log('Duplicate alert not saved:', data.alert._id);
           marker.setMap(null);
-          showToastMessage(data.msg, 7000);
+          showToastMessage(data.msg, 7000, true);
           return;
         }
         alertData._id = data._id;
@@ -360,7 +369,7 @@ function addMarker(type, notes = '', position) {
           hazardMarkers.push({ marker, timestamp, type, _id: null });
           alertMarkers.set(null, marker);
           console.timeEnd(timerName);
-          showToastMessage('Failed to save alert to server, queued offline.', 7000);
+          showToastMessage('Failed to save alert to server, queued offline.', 7000, true);
         }
       });
   }
@@ -420,7 +429,7 @@ function fetchAlerts() {
   const token = localStorage.getItem('token');
   if (!token || !currentUser) {
     console.warn('No token or user available, skipping alert fetch');
-    showToastMessage('Please log in to view alerts.', 5000);
+    showToastMessage('Please log in to view alerts.', 5000, true);
     logout();
     return;
   }
@@ -462,7 +471,7 @@ function fetchAlerts() {
     })
     .catch(err => {
       console.error('Failed to fetch alerts:', err.message);
-      showToastMessage(`Failed to fetch alerts: ${err.message}`, 7000);
+      showToastMessage(`Failed to fetch alerts: ${err.message}`, 7000, true);
       if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
         logout();
       }
@@ -487,6 +496,7 @@ function checkUsernameAvailability(username) {
     })
     .catch(err => {
       console.error('Username availability check error:', err.message);
+      showToastMessage(`Username check failed: ${err.message}`, 7000, true);
       throw err;
     });
 }
@@ -494,14 +504,14 @@ function checkUsernameAvailability(username) {
 function fetchUserProfile() {
   if (!currentUser) {
     console.warn('No current user, skipping profile fetch');
-    showToastMessage('Please log in to view profile.', 5000);
+    showToastMessage('Please log in to view profile.', 5000, true);
     logout();
     return;
   }
   const token = localStorage.getItem('token');
   if (!token) {
     console.warn('No token available, skipping user profile fetch');
-    showToastMessage('Please log in to view profile.', 5000);
+    showToastMessage('Please log in to view profile.', 5000, true);
     logout();
     return;
   }
@@ -521,7 +531,7 @@ function fetchUserProfile() {
     })
     .catch(err => {
       console.error('Failed to fetch user profile:', err.message);
-      showToastMessage(`Failed to fetch profile: ${err.message}`, 7000);
+      showToastMessage(`Failed to fetch profile: ${err.message}`, 7000, true);
       if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
         logout();
       }
@@ -676,6 +686,7 @@ function fetchWithTokenRefresh(url, options = {}) {
   const token = localStorage.getItem('token');
   if (!token) {
     console.error('No token available');
+    showToastMessage('No token available, please log in.', 5000, true);
     logout();
     return Promise.reject(new Error('No token available'));
   }
@@ -694,6 +705,7 @@ function fetchWithTokenRefresh(url, options = {}) {
         return Promise.reject(new Error('Refresh failed, no new token'));
       }).catch(err => {
         console.error('Refresh failed:', err);
+        showToastMessage('Session expired, please log in again.', 5000, true);
         logout();
         return Promise.reject(err);
       });
@@ -706,6 +718,7 @@ function refreshToken() {
   const refreshToken = localStorage.getItem('refreshToken');
   if (!refreshToken) {
     console.error('No refresh token available, prompting re-login');
+    showToastMessage('No refresh token, please log in again.', 5000, true);
     logout();
     return Promise.resolve(null);
   }
@@ -721,6 +734,7 @@ function refreshToken() {
     .then(data => data.token || null)
     .catch(err => {
       console.error('Token refresh failed:', err);
+      showToastMessage('Failed to refresh session, please log in again.', 5000, true);
       logout();
       return Promise.resolve(null);
     });
@@ -729,7 +743,7 @@ function refreshToken() {
 function login(username, password, loginBtn, loginUsername, loginPassword) {
   if (!username || !password) {
     console.error('Login attempt with missing username or password:', { username, password });
-    showToastMessage('Username or email and password are required.', 5000);
+    showToastMessage('Username or email and password are required.', 5000, true);
     return;
   }
   const trimmedUsername = username.trim();
@@ -764,10 +778,11 @@ function login(username, password, loginBtn, loginUsername, loginPassword) {
       const loginScreen = document.getElementById('login-screen');
       if (loginScreen) loginScreen.style.display = 'none';
       initializeMapAfterLogin();
+      showToastMessage('Logged in successfully.', 5000);
     })
     .catch(err => {
       console.error('Login error:', err.message);
-      showToastMessage(`Login failed: ${err.message}`, 7000);
+      showToastMessage(`Login failed: ${err.message}`, 7000, true);
     });
 }
 
@@ -791,19 +806,20 @@ function logout() {
   if (settingsHud && settingsHud.classList) settingsHud.classList.remove('active');
   if (profileHud) profileHud.style.display = 'none';
   console.log('Logged out, resetting to login screen');
+  showToastMessage('Logged out successfully.', 5000);
 }
 
 function alertAtCurrentLocation() {
   const alertType = document.getElementById('alertType');
   if (!alertType) {
     console.error('alertType element not found');
-    showToastMessage('Error: Alert type not found.', 7000);
+    showToastMessage('Error: Alert type not found.', 7000, true);
     return;
   }
   const type = alertType.value;
   if (!currentUser) {
     console.warn('No current user, cannot post alert');
-    showToastMessage('Please log in to post alerts.', 5000);
+    showToastMessage('Please log in to post alerts.', 5000, true);
     logout();
     return;
   }
@@ -822,9 +838,10 @@ function alertAtCurrentLocation() {
             detailedAlertBox.style.display = 'none';
           }
           console.log('Alert posted at current location:', userLocation);
+          showToastMessage('Alert posted at current location.', 5000);
         }).catch(err => {
           console.error('Failed to post alert at current location:', err);
-          showToastMessage('Failed to post alert at current location.', 7000);
+          showToastMessage(err.message || 'Failed to post alert at current location.', 7000, true);
         });
       },
       (err) => {
@@ -839,7 +856,7 @@ function alertAtCurrentLocation() {
         } else {
           errorMessage += 'An unknown error occurred. Using last known location.';
         }
-        showToastMessage(errorMessage, 7000);
+        showToastMessage(errorMessage, 7000, true);
         const fallbackLocation = userLocation.lat && userLocation.lng
           ? new google.maps.LatLng(userLocation.lat, userLocation.lng)
           : new google.maps.LatLng(33.0891264, -83.2372736);
@@ -851,16 +868,17 @@ function alertAtCurrentLocation() {
             detailedAlertBox.style.display = 'none';
           }
           console.log('Alert posted with fallback location');
+          showToastMessage('Alert posted with fallback location.', 5000);
         }).catch(err => {
           console.error('Failed to post alert with fallback:', err);
-          showToastMessage('Failed to post alert with fallback.', 7000);
+          showToastMessage(err.message || 'Failed to post alert with fallback.', 7000, true);
         });
       },
       { maximumAge: 10000, timeout: 30000, enableHighAccuracy: true }
     );
   } else {
     console.error('Geolocation unavailable');
-    showToastMessage('Geolocation not supported. Using default location.', 7000);
+    showToastMessage('Geolocation not supported. Using default location.', 7000, true);
     const defaultLocation = new google.maps.LatLng(33.0891264, -83.2372736);
     console.log('Using default location for alert:', defaultLocation.toString());
     addAlert('Hazard', '', defaultLocation).then(() => {
@@ -870,9 +888,10 @@ function alertAtCurrentLocation() {
         detailedAlertBox.style.display = 'none';
       }
       console.log('Alert posted with default location');
+      showToastMessage('Alert posted with default location.', 5000);
     }).catch(err => {
       console.error('Failed to post alert with default:', err);
-      showToastMessage('Failed to post alert with default.', 7000);
+      showToastMessage(err.message || 'Failed to post alert with default.', 7000, true);
     });
   }
 }
@@ -889,7 +908,10 @@ function initializeMapAfterLogin() {
     script.defer = true;
     document.head.appendChild(script);
     script.onload = () => window.initMap();
-    script.onerror = () => console.error('Google Maps API failed to load');
+    script.onerror = () => {
+      console.error('Google Maps API failed to load');
+      showToastMessage('Failed to load map.', 7000, true);
+    };
   }
 }
 
@@ -897,7 +919,7 @@ window.removeAlert = function(alertId) {
   const token = localStorage.getItem('token');
   if (!token) {
     console.error('No token available, cannot remove alert');
-    showToastMessage('Please log in to remove alerts.', 7000);
+    showToastMessage('Please log in to remove alerts.', 7000, true);
     return;
   }
   fetchWithTokenRefresh(`${BASE_URL}/api/map/alert/${alertId}`, {
@@ -915,7 +937,7 @@ window.removeAlert = function(alertId) {
     })
     .catch(err => {
       console.error('Error removing alert:', err.message);
-      showToastMessage(`Failed to remove alert: ${err.message}`, 7000);
+      showToastMessage(`Failed to remove alert: ${err.message}`, 7000, true);
       if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
         logout();
       }
@@ -959,6 +981,7 @@ window.initMap = function() {
     if (mapElement) mapElement.style.display = 'none';
     localStorage.removeItem('token');
     localStorage.removeItem('refreshToken');
+    showToastMessage('Invalid session, please log in again.', 5000, true);
     return;
   }
   map = new google.maps.Map(mapElement, {
@@ -978,6 +1001,7 @@ window.initMap = function() {
   });
   if (!map) {
     console.error('Map initialization failed');
+    showToastMessage('Failed to initialize map.', 7000, true);
     return;
   }
   autocompleteService = new google.maps.places.AutocompleteService();
@@ -987,16 +1011,19 @@ window.initMap = function() {
   console.log('Map, Directions, and Places initialized');
   mapReadyResolve();
   if (navigator.geolocation) {
+    let lastPositionUpdate = 0;
     navigator.geolocation.watchPosition(
       (position) => {
         const now = Date.now();
+        if (now - lastPositionUpdate < 1000) return; // Throttle to 1s
+        lastPositionUpdate = now;
         let currentPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
         userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
         lastLocationUpdate = now;
         console.log('WatchPosition updated user location:', userLocation, 'Time:', now);
         if (isNavigating && routePath.length > 0) {
           const closest = findClosestPointOnRoute(currentPos, routePath);
-          if (closest.distance < 50) { // Snap if within 50m
+          if (closest.distance < 50) {
             currentPos = routePath[closest.index];
             console.log('Snapped position to route at index:', closest.index);
           }
@@ -1103,7 +1130,6 @@ window.addEventListener('DOMContentLoaded', () => {
   const hud = document.getElementById('hud');
   const controlHud = document.getElementById('control-hud');
   const speedLimit = document.getElementById('speedLimit');
-  const currentSpeed = document.getElementById('currentSpeed');
   const eta = document.getElementById('eta');
   const dta = document.getElementById('dta');
   const time = document.getElementById('time');
@@ -1280,6 +1306,7 @@ window.addEventListener('DOMContentLoaded', () => {
         });
         socket.on('connect_error', (err) => {
           console.warn('Socket.IO connection error:', err.message);
+          showToastMessage('Failed to connect to server.', 5000, true);
         });
       })
       .catch(err => {
@@ -1316,8 +1343,10 @@ window.addEventListener('DOMContentLoaded', () => {
         });
         recentLocations.appendChild(item);
       });
+      showToastMessage('Navigation overlay opened.', 5000);
     } else {
       console.error('navOverlay not found');
+      showToastMessage('Failed to open navigation overlay.', 5000, true);
     }
     console.timeEnd('Show overlay');
   }
@@ -1353,16 +1382,19 @@ window.addEventListener('DOMContentLoaded', () => {
           map.setZoom(18);
           map.setTilt(45);
           checkHazardsOnRoute();
+          showToastMessage('Navigation started.', 5000);
         } catch (err) {
           console.error('Route update failed:', err);
+          showToastMessage('Failed to start navigation.', 7000, true);
         }
       } else {
         console.error('Invalid coordinates, using fallback:', userLocation);
         await updateRoute([userLocation.lat, userLocation.lng], destination);
         checkHazardsOnRoute();
+        showToastMessage('Navigation started with fallback location.', 5000);
       }
     } else {
-      alert('Could not geocode address. Please check your internet connection.');
+      showToastMessage('Could not geocode address. Please check your input.', 7000, true);
       isNavigating = false;
       if (hud) hud.classList.remove('navigating');
       if (controlHud) controlHud.classList.remove('navigating');
@@ -1391,6 +1423,7 @@ window.addEventListener('DOMContentLoaded', () => {
     map.setZoom(13);
     map.setTilt(0);
     map.setHeading(0);
+    showToastMessage('Navigation stopped.', 5000);
   }
 
   function recenterMap() {
@@ -1414,8 +1447,12 @@ window.addEventListener('DOMContentLoaded', () => {
           map.setZoom(18);
           map.setTilt(45);
           console.log('Map recentered at:', currentPos.toString());
+          showToastMessage('Map recentered.', 5000);
         },
-        (err) => console.log('Recenter geolocation error:', err),
+        (err) => {
+          console.log('Recenter geolocation error:', err);
+          showToastMessage('Failed to recenter map.', 7000, true);
+        },
         { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
       );
     }
@@ -1423,7 +1460,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   function startVoiceRecognition() {
     if (!('webkitSpeechRecognition' in window)) {
-      alert('Voice recognition not supported in this browser.');
+      showToastMessage('Voice recognition not supported in this browser.', 7000, true);
       return;
     }
     if (recognition) recognition.stop();
@@ -1436,6 +1473,7 @@ window.addEventListener('DOMContentLoaded', () => {
       if (voiceOverlay) voiceOverlay.style.display = 'flex';
       if (pulsator) pulsator.classList.add('active');
       if (voiceInstruction) voiceInstruction.textContent = 'Speak the address or location...';
+      showToastMessage('Voice recognition started.', 5000);
     };
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript.trim();
@@ -1446,11 +1484,13 @@ window.addEventListener('DOMContentLoaded', () => {
         confirmVoiceInput(transcript);
       } else {
         if (voiceInstruction) voiceInstruction.textContent = 'No input detected, please try again...';
+        showToastMessage('No voice input detected.', 5000, true);
       }
     };
     recognition.onerror = (event) => {
       console.error('Voice recognition error:', event.error);
       if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
+      showToastMessage(`Voice recognition error: ${event.error}`, 7000, true);
       stopVoiceRecognition();
     };
     recognition.onend = () => {
@@ -1468,6 +1508,7 @@ window.addEventListener('DOMContentLoaded', () => {
       recognition = null;
       if (pulsator) pulsator.classList.remove('active');
       console.log('Voice recognition stopped');
+      showToastMessage('Voice recognition stopped.', 5000);
     }
   }
 
@@ -1510,6 +1551,7 @@ window.addEventListener('DOMContentLoaded', () => {
       recognition.onerror = (event) => {
         console.error('Confirmation error:', event.error);
         if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
+        showToastMessage(`Voice confirmation error: ${event.error}`, 7000, true);
         stopVoiceRecognition();
         setTimeout(() => confirmVoiceInput(transcript), 1000);
       };
@@ -1520,7 +1562,7 @@ window.addEventListener('DOMContentLoaded', () => {
       };
       recognition.start();
     } else {
-      alert('Text-to-speech not supported or no voice available in this browser.');
+      showToastMessage('Text-to-speech not supported or no voice available.', 7000, true);
       startNavigation(transcript);
     }
   }
@@ -1534,6 +1576,7 @@ window.addEventListener('DOMContentLoaded', () => {
       detailedAlertBox.style.display = 'flex';
       detailedAlertBox.style.left = '50%';
       detailedAlertBox.style.top = '50%';
+      detailedAlertBox.style.transform = 'translate(-50%, -50%)';
       console.log('Added active class, new class list:', detailedAlertBox.classList, 'display style:', window.getComputedStyle(detailedAlertBox).display);
       detailedAlertBox.style.opacity = '0';
       setTimeout(() => {
@@ -1549,8 +1592,10 @@ window.addEventListener('DOMContentLoaded', () => {
       if (postAlertBtn) postAlertBtn.style.display = 'none';
       if (cancelAlertBtn) cancelAlertBtn.style.display = 'none';
       if (toastMessage) toastMessage.style.display = 'none';
+      showToastMessage('Detailed alert box opened.', 5000);
     } else {
       console.error('detailedAlertBox element not found');
+      showToastMessage('Error: Detailed alert box not found.', 7000, true);
     }
     console.timeEnd('Show detailed alert box');
   }
@@ -1564,18 +1609,17 @@ window.addEventListener('DOMContentLoaded', () => {
       }
       if (!currentUser) {
         console.warn('No current user, cannot post alert');
-        showToastMessage('Please log in to post alerts.', 5000);
+        showToastMessage('Please log in to post alerts.', 5000, true);
         logout();
         reject(new Error('No authenticated user'));
         return;
       }
       addMarker(type, notes, position).then(() => {
-        showToastMessage('Your post has been added. Thank you!', 5000);
         console.timeEnd(`Add ${type} alert`);
         resolve();
       }).catch(err => {
         console.error('Failed to post alert:', err);
-        showToastMessage('Failed to post alert.', 7000);
+        showToastMessage(err.message || 'Failed to post alert.', 7000, true);
         console.timeEnd(`Add ${type} alert`);
         reject(err);
       });
@@ -1592,7 +1636,7 @@ window.addEventListener('DOMContentLoaded', () => {
     console.log('Hazard button clicked, checking geolocation...');
     if (!currentUser) {
       console.warn('No current user, cannot post hazard');
-      showToastMessage('Please log in to post alerts.', 5000);
+      showToastMessage('Please log in to post alerts.', 5000, true);
       logout();
       return;
     }
@@ -1602,13 +1646,14 @@ window.addEventListener('DOMContentLoaded', () => {
         (position) => {
           const { latitude, longitude } = position.coords;
           userLocation = { lat: latitude, lng: longitude };
-          lastLocationUpdate = Date.now();
+          lastLocationUpdate = now;
           console.log('Current location retrieved for hazard:', userLocation);
           addAlert('Hazard', '', new google.maps.LatLng(latitude, longitude)).then(() => {
             console.log('Hazard alert posted at:', userLocation);
+            showToastMessage('Hazard alert posted successfully.', 5000);
           }).catch(err => {
             console.error('Failed to post hazard alert:', err);
-            showToastMessage('Failed to post hazard alert.', 7000);
+            showToastMessage(err.message || 'Failed to post hazard alert.', 7000, true);
           });
         },
         (err) => {
@@ -1623,672 +1668,411 @@ window.addEventListener('DOMContentLoaded', () => {
           } else {
             errorMessage += 'An unknown error occurred. Using last known location.';
           }
-          showToastMessage(errorMessage, 7000);
+          showToastMessage(errorMessage, 7000, true);
           const fallbackLocation = userLocation.lat && userLocation.lng
             ? new google.maps.LatLng(userLocation.lat, userLocation.lng)
             : new google.maps.LatLng(33.0891264, -83.2372736);
           console.log('Using fallback location for hazard:', fallbackLocation.toString());
           addAlert('Hazard', '', fallbackLocation).then(() => {
             console.log('Hazard alert posted with fallback location');
+            showToastMessage('Hazard alert posted with fallback location.', 5000);
           }).catch(err => {
             console.error('Failed to post hazard alert with fallback:', err);
-            showToastMessage('Failed to post hazard alert with fallback.', 7000);
+            showToastMessage(err.message || 'Failed to post hazard alert with fallback.', 7000, true);
           });
         },
         { maximumAge: 10000, timeout: 30000, enableHighAccuracy: true }
       );
     } else {
       console.error('Geolocation unavailable');
-      showToastMessage('Geolocation not supported. Using default location for hazard.', 7000);
+      showToastMessage('Geolocation not supported. Using default location for hazard.', 7000, true);
       const defaultLocation = new google.maps.LatLng(33.0891264, -83.2372736);
       console.log('Using default location for hazard:', defaultLocation.toString());
       addAlert('Hazard', '', defaultLocation).then(() => {
         console.log('Hazard alert posted with default location');
+        showToastMessage('Hazard alert posted with default location.', 5000);
       }).catch(err => {
         console.error('Failed to post hazard alert with default:', err);
-        showToastMessage('Failed to post hazard alert with default.', 7000);
+        showToastMessage(err.message || 'Failed to post hazard alert with default.', 7000, true);
       });
     }
   }
 
-function enableMapClick() {
-  isSelectingLocation = true;
-  if (detailedAlertBox) {
-    detailedAlertBox.classList.remove('active');
-    detailedAlertBox.style.display = 'none';
-  }
-  showToastMessage('Waiting for click or press a location on the map.', 5000);
-  const clickListener = map.addListener('click', (event) => {
-    const lat = event.latLng.lat();
-    const lng = event.latLng.lng();
-    reverseGeocode(lat, lng).then(address => {
-      if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-      if (detailedAlertBox) {
-        detailedAlertBox.classList.add('active');
-        detailedAlertBox.style.display = 'flex';
-        detailedAlertBox.style.left = '50%';
-        detailedAlertBox.style.top = '50%';
-        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
-      }
-      if (locationDisplay) locationDisplay.style.display = 'block';
-      if (alertType) alertType.style.display = 'none';
-      const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
-      if (alertTypeLabel) alertTypeLabel.style.display = 'none';
-      if (clickLocationBtn) clickLocationBtn.style.display = 'none';
-      if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
-      if (postAlertBtn) postAlertBtn.style.display = 'block';
-      if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
-      isSelectingLocation = false;
-      google.maps.event.removeListener(clickListener);
-    }).catch(err => {
-      console.error('Reverse geocode error:', err);
-      if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-      if (detailedAlertBox) {
-        detailedAlertBox.classList.add('active');
-        detailedAlertBox.style.display = 'flex';
-        detailedAlertBox.style.left = '50%';
-        detailedAlertBox.style.top = '50%';
-        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
-      }
-      if (locationDisplay) locationDisplay.style.display = 'block';
-      if (alertType) alertType.style.display = 'none';
-      const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
-      if (alertTypeLabel) alertTypeLabel.style.display = 'none';
-      if (clickLocationBtn) clickLocationBtn.style.display = 'none';
-      if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
-      if (postAlertBtn) postAlertBtn.style.display = 'block';
-      if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
-      isSelectingLocation = false;
-      google.maps.event.removeListener(clickListener);
-    });
-  });
-}
-
-function reverseGeocode(lat, lng) {
-  return new Promise((resolve, reject) => {
-    if (!window.google || !google.maps) {
-      reject(new Error('Google Maps API not loaded'));
-      return;
-    }
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-      if (status === 'OK' && results[0]) {
-        resolve(results[0].formatted_address);
-      } else {
-        reject(new Error(`Reverse geocode failed: ${status}`));
-      }
-    });
-  });
-}
-
-function postSelectedAlert() {
-  const alertType = document.getElementById('alertType');
-  const alertNotes = document.getElementById('alertNotes');
-  const selectedLocation = document.getElementById('selected-location');
-  if (!alertType || !alertNotes || !selectedLocation) {
-    console.error('Missing elements for posting alert:', { alertType: !!alertType, alertNotes: !!alertNotes, selectedLocation: !!selectedLocation });
-    showToastMessage('Error: Required elements not found.', 7000);
-    return;
-  }
-  const type = alertType.value;
-  const notes = alertNotes.value.trim();
-  const [lat, lng] = selectedLocation.textContent.split(', ').map(Number);
-  const detailedAlertBox = document.getElementById('detailedAlertBox');
-  if (detailedAlertBox) {
-    detailedAlertBox.style.opacity = '0';
-    setTimeout(() => {
+  function enableMapClick() {
+    if (isSelectingLocation) return; // Debounce
+    isSelectingLocation = true;
+    const detailedAlertBox = document.getElementById('detailedAlertBox');
+    if (detailedAlertBox) {
       detailedAlertBox.classList.remove('active');
       detailedAlertBox.style.display = 'none';
-      addAlert(type, notes, new google.maps.LatLng(lat, lng)).then(() => {
-        showToastMessage('Your alert has been posted. Thank you!', 5000);
-      });
-    }, 300); // Wait for fade-out transition
-  }
-}
-
-function closeDetailedAlertBox() {
-  const detailedAlertBox = document.getElementById('detailedAlertBox');
-  if (detailedAlertBox) {
-    detailedAlertBox.classList.remove('active');
-    detailedAlertBox.style.display = 'none';
-    if (isSelectingLocation) {
-      google.maps.event.clearListeners(map, 'click');
-      isSelectingLocation = false;
     }
-    if (toastMessage) toastMessage.style.display = 'none';
-    if (locationDisplay) locationDisplay.style.display = 'none';
-    if (alertType) alertType.style.display = 'block';
-    const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
-    if (alertTypeLabel) alertTypeLabel.style.display = 'block';
-    if (clickLocationBtn) clickLocationBtn.style.display = 'block';
-    if (alertCurrentBtn) alertCurrentBtn.style.display = 'block';
-    if (postAlertBtn) postAlertBtn.style.display = 'none';
-    if (cancelAlertBtn) cancelAlertBtn.style.display = 'none';
-    if (alertNotes) alertNotes.value = '';
-  }
-}
-
-// Drag functionality for detailedAlertBox
-function makeDraggable(element) {
-  let isDragging = false;
-  let currentX;
-  let currentY;
-  let initialX;
-  let initialY;
-  let xOffset = 0;
-  let yOffset = 0;
-  element.style.position = 'fixed';
-  element.style.left = '50%';
-  element.style.top = '50%';
-  element.style.transform = 'translate(-50%, -50%)';
-  const h3 = element.querySelector('h3');
-  if (h3) {
-    h3.addEventListener('mousedown', (e) => {
-      if (e.target !== h3) return;
-      initialX = e.clientX - xOffset;
-      initialY = e.clientY - yOffset;
-      isDragging = true;
-      element.classList.add('dragging');
-      console.log('Started dragging detailedAlertBox');
+    showToastMessage('Waiting for click or press a location on the map.', 5000);
+    const clickListener = map.addListener('click', (event) => {
+      const lat = event.latLng.lat();
+      const lng = event.latLng.lng();
+      reverseGeocode(lat, lng).then(address => {
+        if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        if (detailedAlertBox) {
+          detailedAlertBox.classList.add('active');
+          detailedAlertBox.style.display = 'flex';
+          detailedAlertBox.style.left = '50%';
+          detailedAlertBox.style.top = '50%';
+          detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+        }
+        if (locationDisplay) locationDisplay.style.display = 'block';
+        if (alertType) alertType.style.display = 'none';
+        const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+        if (alertTypeLabel) alertTypeLabel.style.display = 'none';
+        if (clickLocationBtn) clickLocationBtn.style.display = 'none';
+        if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
+        if (postAlertBtn) postAlertBtn.style.display = 'block';
+        if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
+        isSelectingLocation = false;
+        google.maps.event.removeListener(clickListener);
+      }).catch(err => {
+        console.error('Reverse geocode error:', err);
+        if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        if (detailedAlertBox) {
+          detailedAlertBox.classList.add('active');
+          detailedAlertBox.style.display = 'flex';
+          detailedAlertBox.style.left = '50%';
+          detailedAlertBox.style.top = '50%';
+          detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+        }
+        if (locationDisplay) locationDisplay.style.display = 'block';
+        if (alertType) alertType.style.display = 'none';
+        const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+        if (alertTypeLabel) alertTypeLabel.style.display = 'none';
+        if (clickLocationBtn) clickLocationBtn.style.display = 'none';
+        if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
+        if (postAlertBtn) postAlertBtn.style.display = 'block';
+        if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
+        isSelectingLocation = false;
+        google.maps.event.removeListener(clickListener);
+      });
     });
-    h3.addEventListener('touchstart', (e) => {
-      if (e.target !== h3) return;
-      const touch = e.touches[0];
-      initialX = touch.clientX - xOffset;
-      initialY = touch.clientY - yOffset;
-      isDragging = true;
-      element.classList.add('dragging');
-      console.log('Started touch dragging detailedAlertBox');
+  }
+
+  function postSelectedAlert() {
+    const alertType = document.getElementById('alertType');
+    const alertNotes = document.getElementById('alertNotes');
+    const selectedLocation = document.getElementById('selected-location');
+    if (!alertType || !alertNotes || !selectedLocation) {
+      console.error('Missing elements for posting alert:', { alertType: !!alertType, alertNotes: !!alertNotes, selectedLocation: !!selectedLocation });
+      showToastMessage('Error: Required elements not found.', 7000, true);
+      return;
+    }
+    const type = alertType.value;
+    const notes = alertNotes.value.trim();
+    const [lat, lng] = selectedLocation.textContent.split(', ').map(Number);
+    const detailedAlertBox = document.getElementById('detailedAlertBox');
+    if (detailedAlertBox) {
+      detailedAlertBox.style.opacity = '0';
+      setTimeout(() => {
+        detailedAlertBox.classList.remove('active');
+        detailedAlertBox.style.display = 'none';
+        detailedAlertBox.style.left = '50%';
+        detailedAlertBox.style.top = '50%';
+        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+        addAlert(type, notes, new google.maps.LatLng(lat, lng)).then(() => {
+          showToastMessage('Your alert has been posted. Thank you!', 5000);
+        }).catch(err => {
+          showToastMessage(err.message || 'Failed to post alert.', 7000, true);
+        });
+      }, 200); // Match CSS transition duration
+    }
+  }
+
+  function reverseGeocode(lat, lng) {
+    return new Promise((resolve, reject) => {
+      if (!window.google || !google.maps) {
+        reject(new Error('Google Maps API not loaded'));
+        return;
+      }
+      const geocoder = new google.maps.Geocoder();
+      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+        if (status === google.maps.GeocoderStatus.OK && results[0]) {
+          resolve(results[0].formatted_address);
+        } else {
+          reject(new Error('Reverse geocoding failed'));
+        }
+      });
+    });
+  }
+
+  function makeDraggable(element) {
+    let isDragging = false;
+    let currentX = window.innerWidth / 2;
+    let currentY = window.innerHeight / 2;
+    let initialX = 0;
+    let initialY = 0;
+    let xOffset = 0;
+    let yOffset = 0;
+    element.style.position = 'fixed';
+    element.style.left = '50%';
+    element.style.top = '50%';
+    element.style.transform = 'translate(-50%, -50%)';
+    const h3 = element.querySelector('h3');
+    if (h3) {
+      h3.addEventListener('mousedown', (e) => {
+        if (e.target !== h3) return;
+        initialX = e.clientX - xOffset;
+        initialY = e.clientY - yOffset;
+        isDragging = true;
+        element.classList.add('dragging');
+        console.log('Started dragging detailedAlertBox');
+      });
+      h3.addEventListener('touchstart', (e) => {
+        if (e.target !== h3) return;
+        const touch = e.touches[0];
+        initialX = touch.clientX - xOffset;
+        initialY = touch.clientY - yOffset;
+        isDragging = true;
+        element.classList.add('dragging');
+        console.log('Started touch dragging detailedAlertBox');
+        e.preventDefault();
+      }, { passive: false });
+    }
+    function updatePosition(clientX, clientY) {
+      if (isDragging) {
+        currentX = clientX - initialX;
+        currentY = clientY - initialY;
+        xOffset = currentX;
+        yOffset = currentY;
+        const rect = element.getBoundingClientRect();
+        const maxX = window.innerWidth - rect.width - 15;
+        const maxY = window.innerHeight - rect.height - 15;
+        currentX = Math.max(15, Math.min(currentX, maxX));
+        currentY = Math.max(15, Math.min(currentY, maxY));
+        element.style.left = currentX + 'px';
+        element.style.top = currentY + 'px';
+        element.style.transform = 'none';
+        if (isDragging) requestAnimationFrame(() => updatePosition(clientX, clientY));
+      }
+    }
+    document.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        updatePosition(e.clientX, e.clientY);
+      }
+    });
+    document.addEventListener('touchmove', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        updatePosition(touch.clientX, touch.clientY);
+      }
+    }, { passive: false });
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+      element.classList.remove('dragging');
+      console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
+    });
+    document.addEventListener('touchend', (e) => {
+      isDragging = false;
+      element.classList.remove('dragging');
+      console.log('Stopped touch dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
       e.preventDefault();
     }, { passive: false });
   }
-  function updatePosition(clientX, clientY) {
-    if (isDragging) {
-      currentX = clientX - initialX;
-      currentY = clientY - initialY;
-      xOffset = currentX;
-      yOffset = currentY;
-      const rect = element.getBoundingClientRect();
-      const maxX = window.innerWidth - rect.width - 15; // Account for padding
-      const maxY = window.innerHeight - rect.height - 15;
-      currentX = Math.max(15, Math.min(currentX, maxX));
-      currentY = Math.max(15, Math.min(currentY, maxY));
-      element.style.left = currentX + 'px';
-      element.style.top = currentY + 'px';
-      element.style.transform = 'none'; // Reset transform for absolute positioning
-      requestAnimationFrame(() => updatePosition(clientX, clientY));
-    }
-  }
-  document.addEventListener('mousemove', (e) => {
-    if (isDragging) {
-      e.preventDefault();
-      updatePosition(e.clientX, e.clientY);
-    }
-  });
-  document.addEventListener('touchmove', (e) => {
-    if (isDragging) {
-      e.preventDefault();
-      const touch = e.touches[0];
-      updatePosition(touch.clientX, touch.clientY);
-    }
-  }, { passive: false });
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-    element.classList.remove('dragging');
-    console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
-  });
-  document.addEventListener('touchend', (e) => {
-    isDragging = false;
-    element.classList.remove('dragging');
-    console.log('Stopped touch dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
-    e.preventDefault();
-  }, { passive: false });
-}
 
-// Login/Logout Handling
-if (loginBtn && loginUsername && loginPassword) {
-  loginBtn.removeEventListener('click', () => {});
-  loginBtn.addEventListener('click', () => {
-    const username = loginUsername.value ? loginUsername.value.trim() : '';
-    const password = loginPassword.value ? loginPassword.value.trim() : '';
-    console.log('Login button clicked, input values:', { username, password: '[provided]' });
-    if (username && password) {
-      console.log('Attempting login with:', { username, password: '[provided]' });
-      login(username, password, loginBtn, loginUsername, loginPassword);
-    } else {
-      console.error('Login attempt with missing username or password:', { username, password });
-      showToastMessage('Username or email and password are required.', 5000);
-    }
-  });
-  loginUsername.addEventListener('input', () => {
-    console.log('Username input changed:', loginUsername.value);
-  });
-  loginPassword.addEventListener('input', () => {
-    console.log('Password input changed: [provided]');
-  });
-} else {
-  console.error('Login elements missing:', { loginBtn: !!loginBtn, loginUsername: !!loginUsername, loginPassword: !!loginPassword });
-  setTimeout(() => {
-    const retryLoginBtn = document.getElementById('login-btn');
-    const retryLoginUsername = document.getElementById('login-username');
-    const retryLoginPassword = document.getElementById('login-password');
-    if (retryLoginBtn && retryLoginUsername && retryLoginPassword) {
-      retryLoginBtn.removeEventListener('click', () => {});
-      retryLoginBtn.addEventListener('click', () => {
-        const username = retryLoginUsername.value ? retryLoginUsername.value.trim() : '';
-        const password = retryLoginPassword.value ? retryLoginPassword.value.trim() : '';
-        console.log('Retry login button clicked, input values:', { username, password: '[provided]' });
-        if (username && password) {
-          console.log('Attempting retry login with:', { username, password: '[provided]' });
-          login(username, password, retryLoginBtn, retryLoginUsername, retryLoginPassword);
-        } else {
-          console.error('Retry login attempt with missing username or password:', { username, password });
-          showToastMessage('Username or email and password are required.', 5000);
-        }
-      });
-    } else {
-      console.error('Retry login elements still missing:', { loginBtn: !!retryLoginBtn, loginUsername: !!retryLoginUsername, loginPassword: !!retryLoginPassword });
-    }
-  }, 1000);
-}
-
-if (profileBtn) {
-  profileBtn.addEventListener('click', () => {
-    console.log('Profile button clicked, currentUser:', currentUser);
-    if (currentUser) {
-      if (profileHud) {
-        if (detailedAlertBox) {
-          detailedAlertBox.classList.remove('active');
-          detailedAlertBox.style.display = 'none';
-          console.log('Closed detailedAlertBox on profile button click');
-        }
-        profileHud.classList.add('active');
-        profileHud.style.display = 'flex';
-        fetchUserProfile();
-        currentTab = 'edit';
-        if (tabButtons && tabButtons.length > 0) {
-          tabButtons.forEach(button => button.classList.remove('active'));
-          const editButton = document.querySelector('.tab-button[data-tab="edit"]');
-          if (editButton) editButton.classList.add('active');
-          if (accountInfo) accountInfo.classList.remove('active');
-          if (editProfile) editProfile.classList.add('active');
-          if (alertsTab) alertsTab.classList.remove('active');
-          console.log('Edit profile tab activated');
-        } else {
-          console.error('Tab buttons not found');
-        }
-      } else {
-        console.error('profileHud element not found');
-      }
-    } else {
-      console.warn('No current user, profile action skipped');
-      showToastMessage('Please log in to view profile.', 5000);
-      logout();
-    }
-  });
-}
-
-if (closeBtn) {
-  closeBtn.addEventListener('click', () => {
-    if (profileHud) {
-      profileHud.classList.remove('active');
-      profileHud.style.display = 'none';
-      const loginScreen = document.getElementById('login-screen');
-      if (loginScreen) loginScreen.style.display = 'none';
-    }
-  });
-}
-
-if (saveProfileBtn) {
-  saveProfileBtn.addEventListener('click', () => {
-    const name = document.getElementById('edit-name')?.value.trim();
-    const username = document.getElementById('edit-username')?.value.trim();
-    const email = document.getElementById('edit-email')?.value.trim();
-    const age = parseInt(document.getElementById('edit-age')?.value.trim());
-    const dob = document.getElementById('edit-dob')?.value.trim();
-    const location = document.getElementById('edit-location')?.value.trim();
-    console.log('Saving profile:', { name, username, email, age, dob, location });
-    if (!name || !username || !email || !age || !dob || !location) {
-      showToastMessage('All fields are required.', 5000);
-      return;
-    }
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dob)) {
-      showToastMessage('DOB must be in MM/DD/YYYY format.', 5000);
-      return;
-    }
-    if (isNaN(age) || age < 13) {
-      showToastMessage('Age must be 13 or older.', 5000);
-      return;
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      showToastMessage('Invalid email format.', 5000);
-      return;
-    }
-    if (!/^[a-z0-9_]{3,20}$/.test(username)) {
-      showToastMessage('Username must be 3-20 characters, letters, numbers, or underscores.', 5000);
-      return;
-    }
-    // Check 3-month username change limit
-    if (username !== currentUser.username && userProfile.lastUsernameChange) {
-      const threeMonthsAgo = new Date();
-      threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-      if (new Date(userProfile.lastUsernameChange) > threeMonthsAgo) {
-        showToastMessage('You can only change your username once every 3 months.', 5000);
-        return;
-      }
-    }
-    // Check username availability
-    if (username !== currentUser.username) {
-      checkUsernameAvailability(username)
-        .then(available => {
-          if (!available) {
-            showToastMessage('Username already taken.', 5000);
-            return;
-          }
-          // Proceed with profile update
-          fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, username, email, age, dob, location })
-          })
-            .then(response => {
-              if (!response.ok) return response.json().then(data => { throw new Error(data.msg || 'Update failed') });
-              return response.json();
-            })
-            .then(data => {
-              userProfile = data;
-              currentUser = { ...currentUser, username: data.username, id: data._id };
-              console.log('Profile updated:', userProfile);
-              showToastMessage('Profile updated successfully!', 5000);
-              updateProfileDisplay();
-            })
-            .catch(err => {
-              console.error('Profile update error:', err.message);
-              showToastMessage(`Failed to update profile: ${err.message}`, 7000);
-              if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
-                logout();
-              }
-            });
-        })
-        .catch(err => {
-          console.error('Username availability check error:', err.message);
-          showToastMessage(err.message, 5000);
-        });
-    } else {
-      // No username change, proceed with update
-      fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, username, email, age, dob, location })
-      })
-        .then(response => {
-          if (!response.ok) return response.json().then(data => { throw new Error(data.msg || 'Update failed') });
-          return response.json();
-        })
-        .then(data => {
-          userProfile = data;
-          currentUser = { ...currentUser, username: data.username, id: data._id };
-          console.log('Profile updated:', userProfile);
-          showToastMessage('Profile updated successfully!', 5000);
-          updateProfileDisplay();
-        })
-        .catch(err => {
-          console.error('Profile update error:', err.message);
-          showToastMessage(`Failed to update profile: ${err.message}`, 7000);
-          if (err.message.includes('User not found') || err.message.includes('Invalid token')) {
-            logout();
-          }
-        });
-    }
-  });
-}
-
-if (tabButtons && tabButtons.length > 0) {
-  tabButtons.forEach(button => {
-    button.addEventListener('click', () => {
-      tabButtons.forEach(btn => btn.classList.remove('active'));
-      button.classList.add('active');
-      currentTab = button.getAttribute('data-tab');
-      if (accountInfo) accountInfo.classList.remove('active');
-      if (editProfile) editProfile.classList.remove('active');
-      if (alertsTab) alertsTab.classList.remove('active');
-      let activeTab;
-      if (currentTab === 'account') activeTab = accountInfo;
-      else if (currentTab === 'edit') activeTab = editProfile;
-      else if (currentTab === 'alerts') activeTab = alertsTab;
-      if (activeTab) activeTab.classList.add('active');
-      else console.error(`Tab content for ${currentTab} not found`);
-      if (currentTab === 'alerts') {
-        fetchAlerts();
-      } else if (currentTab === 'account') {
-        updateProfileDisplay();
-        const loginScreen = document.getElementById('login-screen');
-        if (loginScreen) loginScreen.style.display = 'none';
-      }
-      if (detailedAlertBox) {
-        detailedAlertBox.classList.remove('active');
-        detailedAlertBox.style.display = 'none';
-        console.log('Closed detailedAlertBox on tab switch');
-      }
-    });
-  });
-} else {
-  console.error('Tab buttons not initialized');
-}
-
-if (detailedAlertBtn) {
-  detailedAlertBtn.addEventListener('click', () => {
-    console.log('Detailed Alert button clicked');
-    if (profileHud) {
-      profileHud.classList.remove('active');
-      profileHud.style.display = 'none';
-      console.log('Closed profileHud on detailed alert button click');
-    }
-    showDetailedAlertBox();
-  });
-}
-
-if (settingsBtn) {
-  settingsBtn.addEventListener('click', () => {
-    if (currentUser) {
-      if (settingsHud) {
-        settingsHud.classList.add('active');
-        settingsHud.style.display = 'flex';
-      } else console.error('settingsHud element not found');
-    } else {
-      showToastMessage('Please log in to access settings.', 5000);
-      logout();
-    }
-  });
-}
-
-if (closeSettings) {
-  closeSettings.addEventListener('click', () => {
-    if (settingsHud) {
-      settingsHud.classList.remove('active');
-      settingsHud.style.display = 'none';
-    } else console.error('closeSettings element not found');
-  });
-}
-
-if (navAddress) {
-  navAddress.addEventListener('click', showOverlay);
-  navAddress.addEventListener('touchstart', showOverlay);
-}
-
-if (micButton) micButton.addEventListener('click', startVoiceRecognition);
-
-if (navAddress) {
-  navAddress.addEventListener('input', () => {
-    console.time('Autocomplete process');
-    console.log('Input detected:', navAddress.value);
-    const query = navAddress.value;
-    if (query.length > 2 && userLocation) {
-      autocompleteService.getPlacePredictions(
-        { input: query, location: new google.maps.LatLng(userLocation.lat, userLocation.lng), radius: 50000 },
-        (predictions, status) => {
-          console.log('Autocomplete status:', status);
+  // Initialize event listeners
+  if (navAddress) {
+    navAddress.addEventListener('input', () => {
+      const query = navAddress.value.trim();
+      if (query.length > 2) {
+        autocompleteService.getPlacePredictions({ input: query }, (predictions, status) => {
           if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
-            if (suggestions) suggestions.innerHTML = '';
+            suggestions.innerHTML = '';
             predictions.forEach(prediction => {
               const item = document.createElement('div');
               item.className = 'suggestion-item';
               item.textContent = prediction.description;
               item.addEventListener('click', () => {
-                if (navAddress) navAddress.value = prediction.description;
-                if (isNavigating) stopNavigation();
+                navAddress.value = prediction.description;
                 startNavigation(prediction.description);
-                if (navOverlay) navOverlay.style.display = 'none';
+                navOverlay.style.display = 'none';
               });
-              if (suggestions) suggestions.appendChild(item);
+              suggestions.appendChild(item);
             });
-          } else {
-            if (suggestions) suggestions.innerHTML = '';
-            console.log('No predictions or error:', status);
+            showOverlay();
           }
-          console.timeEnd('Autocomplete process');
+        });
+      }
+    });
+  }
+
+  if (closeOverlay) {
+    closeOverlay.addEventListener('click', () => {
+      navOverlay.style.display = 'none';
+      showToastMessage('Navigation overlay closed.', 5000);
+    });
+  }
+
+  if (cancelBtn) {
+    cancelBtn.addEventListener('click', stopNavigation);
+  }
+
+  if (recenterBtn) {
+    recenterBtn.addEventListener('click', recenterMap);
+  }
+
+  if (muteBtn) {
+    muteBtn.addEventListener('click', () => {
+      isMuted = !isMuted;
+      muteBtn.classList.toggle('muted', isMuted);
+      showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
+    });
+  }
+
+  if (hazardBtn) {
+    hazardBtn.addEventListener('click', addHazardMarker);
+  }
+
+  if (micButton) {
+    micButton.addEventListener('click', startVoiceRecognition);
+  }
+
+  if (closeVoiceOverlay) {
+    closeVoiceOverlay.addEventListener('click', () => {
+      stopVoiceRecognition();
+      voiceOverlay.style.display = 'none';
+      showToastMessage('Voice overlay closed.', 5000);
+    });
+  }
+
+  if (detailedAlertBtn) {
+    detailedAlertBtn.addEventListener('click', showDetailedAlertBox);
+  }
+
+  if (closeDetailedAlertBtn) {
+    closeDetailedAlertBtn.addEventListener('click', () => {
+      detailedAlertBox.classList.remove('active');
+      detailedAlertBox.style.display = 'none';
+      showToastMessage('Detailed alert box closed.', 5000);
+    });
+  }
+
+  if (clickLocationBtn) {
+    clickLocationBtn.addEventListener('click', enableMapClick);
+  }
+
+  if (alertCurrentBtn) {
+    alertCurrentBtn.addEventListener('click', alertAtCurrentLocation);
+  }
+
+  if (postAlertBtn) {
+    postAlertBtn.addEventListener('click', postSelectedAlert);
+  }
+
+  if (cancelAlertBtn) {
+    cancelAlertBtn.addEventListener('click', () => {
+      detailedAlertBox.classList.remove('active');
+      detailedAlertBox.style.display = 'none';
+      showToastMessage('Alert creation cancelled.', 5000);
+    });
+  }
+
+  if (profileBtn) {
+    profileBtn.addEventListener('click', () => {
+      profileHud.style.display = 'flex';
+      profileHud.classList.add('active');
+    });
+  }
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', () => {
+      profileHud.classList.remove('active');
+      profileHud.style.display = 'none';
+    });
+  }
+
+  if (tabButtons) {
+    tabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
+        currentTab = button.dataset.tab;
+        accountInfo.classList.remove('active');
+        editProfile.classList.remove('active');
+        alertsTab.classList.remove('active');
+        if (currentTab === 'account') accountInfo.classList.add('active');
+        else if (currentTab === 'edit') editProfile.classList.add('active');
+        else if (currentTab === 'alerts') {
+          alertsTab.classList.add('active');
+          updateAlertTable();
         }
-      );
-    } else {
-      if (suggestions) suggestions.innerHTML = '';
-    }
-  });
-}
-
-if (closeOverlay) closeOverlay.addEventListener('click', () => {
-  if (navOverlay) navOverlay.style.display = 'none';
-});
-
-if (closeVoiceOverlay) closeVoiceOverlay.addEventListener('click', () => {
-  stopVoiceRecognition();
-  if (voiceOverlay) voiceOverlay.style.display = 'none';
-  if (voiceInstruction) voiceInstruction.textContent = 'Speak the address or location...';
-});
-
-if (closeDetailedAlertBtn) closeDetailedAlertBtn.addEventListener('click', closeDetailedAlertBox);
-
-if (clickLocationBtn) clickLocationBtn.addEventListener('click', enableMapClick);
-
-if (alertCurrentBtn) {
-  alertCurrentBtn.removeEventListener('click', alertAtCurrentLocation);
-  alertCurrentBtn.addEventListener('click', alertAtCurrentLocation);
-  console.log('alert-current-location button listener updated');
-}
-
-if (postAlertBtn) postAlertBtn.addEventListener('click', postSelectedAlert);
-
-if (cancelAlertBtn) cancelAlertBtn.addEventListener('click', closeDetailedAlertBox);
-
-if (hazardBtn) {
-  hazardBtn.removeEventListener('click', addHazardMarker);
-  hazardBtn.addEventListener('click', addHazardMarker);
-  console.log('hazard-btn listener updated');
-}
-
-if (cancelBtn) cancelBtn.addEventListener('click', stopNavigation);
-
-if (recenterBtn) recenterBtn.addEventListener('click', recenterMap);
-
-if (muteBtn) {
-  muteBtn.addEventListener('click', () => {
-    isMuted = !isMuted;
-    muteBtn.classList.toggle('muted');
-    console.log('Mute toggled:', isMuted);
-  });
-}
-
-if (rerouteYes) rerouteYes.addEventListener('click', () => {
-  rerouteAroundHazards(currentHazards);
-});
-
-if (rerouteNo) rerouteNo.addEventListener('click', () => {
-  ignoreHazards(currentHazards);
-});
-
-// Initialize drag functionality for detailedAlertBox
-if (detailedAlertBox) {
-  makeDraggable(detailedAlertBox);
-  console.log('Drag functionality initialized for detailedAlertBox');
-}
-
-// Filter events
-if (document.getElementById('alert-type-filter')) {
-  document.getElementById('alert-type-filter').addEventListener('change', () => {
-    currentPage = 1;
-    updateAlertTable();
-  });
-}
-if (document.getElementById('alert-user-filter')) {
-  document.getElementById('alert-user-filter').addEventListener('change', () => {
-    currentPage = 1;
-    updateAlertTable();
-  });
-}
-
-// Sync with real-time updates
-function initializeSocket() {
-  if (socket) {
-    socket.on('hazard', (data) => {
-      if (map && !alertMarkers.has(data._id)) {
-        addMarkerFromDB(data);
-        fetchAlerts();
-      }
+      });
     });
-    socket.on('detailedAlert', (data) => {
-      if (map && !alertMarkers.has(data._id)) {
-        addMarkerFromDB(data);
-        fetchAlerts();
+  }
+
+  if (saveProfileBtn) {
+    saveProfileBtn.addEventListener('click', () => {
+      const updates = {
+        name: document.getElementById('edit-name')?.value.trim() || '',
+        username: document.getElementById('edit-username')?.value.trim() || '',
+        email: document.getElementById('edit-email')?.value.trim() || '',
+        age: document.getElementById('edit-age')?.value.trim() || '',
+        dob: document.getElementById('edit-dob')?.value.trim() || '',
+        location: document.getElementById('edit-location')?.value.trim() || ''
+      };
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token available for profile update');
+        return;
       }
-    });
-    socket.on('alert', (data) => {
-      if (map) {
-        new google.maps.Marker({
-          position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
-          map: map,
-          title: data.type
+      fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(updates)
+      })
+        .then(response => {
+          if (!response.ok) throw new Error(`Profile update failed: ${response.status}`);
+          return response.json();
+        })
+        .then(data => {
+          userProfile = data;
+          currentUser = { ...currentUser, username: data.username, id: data._id };
+          updateProfileDisplay();
+          updateEditProfileForm();
+        })
+        .catch(err => {
+          console.error('Profile update error:', err.message);
         });
-      }
-    });
-    socket.on('alertRemoved', (data) => {
-      if (alertMarkers.has(data._id)) {
-        alertMarkers.get(data._id).setMap(null);
-        alertMarkers.delete(data._id);
-        hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
-        allAlerts = allAlerts.filter(a => a._id !== data._id);
-        updateAlertTable();
-      }
-      console.log('Alert removed via socket:', data._id);
-    });
-    socket.on('locationUpdate', (data) => {
-      if (map) {
-        new google.maps.Marker({
-          position: { lat: data.latitude, lng: data.longitude },
-          map: map,
-          title: 'User Location'
-        });
-      }
     });
   }
-}
 
-// Force Profile HUD width on load and resize
-window.addEventListener('load', () => {
-  const profileHud = document.getElementById('profile-hud');
-  if (profileHud) {
-    profileHud.style.width = '100%';
-    profileHud.style.maxWidth = '650px';
-    console.log('Forced Profile HUD width to 100% and max-width to 650px');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      settingsHud.style.display = 'flex';
+      settingsHud.classList.add('active');
+    });
   }
-});
-window.addEventListener('resize', () => {
-  const profileHud = document.getElementById('profile-hud');
-  if (profileHud) {
-    profileHud.style.width = '100%';
-    profileHud.style.maxWidth = '650px';
-    console.log('Resized Profile HUD to 100% and max-width to 650px');
-  }
-});
 
-// Periodic cleanup of expired markers
-setInterval(cleanExpiredMarkers, 60000); // Run every minute
+  if (closeSettings) {
+    closeSettings.addEventListener('click', () => {
+      settingsHud.classList.remove('active');
+      settingsHud.style.display = 'none';
+    });
+  }
+
+  if (loginBtn && loginUsername && loginPassword) {
+    loginBtn.addEventListener('click', () => {
+      login(loginUsername.value, loginPassword.value, loginBtn, loginUsername, loginPassword);
+    });
+  }
+
+  if (rerouteYes) {
+    rerouteYes.addEventListener('click', () => rerouteAroundHazards(currentHazards));
+  }
+
+  if (rerouteNo) {
+    rerouteNo.addEventListener('click', () => ignoreHazards(currentHazards));
+  }
+
+  if (detailedAlertBox) {
+    makeDraggable(detailedAlertBox);
+  }
+
+  console.timeEnd('DOM initialization');
 });
