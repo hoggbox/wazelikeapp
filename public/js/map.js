@@ -1,4 +1,4 @@
-const VERSION = '1.0.44'; // Updated version for cache busting
+const VERSION = '1.0.45'; // Updated version for cache busting
 // Global variables
 let map;
 let routePolyline;
@@ -118,7 +118,7 @@ function provideVoiceNavigation(coords) {
           utterance.voice = femaleVoice;
           utterance.lang = 'en-US';
           utterance.volume = 1.0;
-          utterance.rate = 1.1;
+          utterance.rate = 1.0;
           window.speechSynthesis.speak(utterance);
           console.log('Voice navigation:', instruction, 'with:', femaleVoice.name);
         } else if (!femaleVoice) {
@@ -325,6 +325,7 @@ function addMarker(type, notes = '', position) {
         if (data.msg === 'Duplicate alert detected') {
           console.log('Duplicate alert not saved:', data.alert._id);
           marker.setMap(null);
+          showToastMessage('Error: Cannot post duplicate alert or alert in same exact location, please try a different location.', 7000);
           return;
         }
         alertData._id = data._id;

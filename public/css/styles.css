@@ -102,60 +102,69 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(135deg, #1a2636, #0f1c2c);
-  padding: 10px;
+  padding: 8px;
   border-radius: 10px;
   display: flex;
-  gap: 10px;
+  gap: 6px;
   z-index: 1000;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
   max-width: 90%;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .hud-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 4px;
+  padding: 5px 8px;
   background: rgba(26, 38, 54, 0.8);
   border-radius: 5px;
-  font-size: 14px;
+  font-size: 13px;
+  flex: 0 1 auto;
+  min-width: 80px;
 }
 
 .hud-item i {
-  font-size: 14px;
+  font-size: 13px;
   color: #00c853;
 }
 
 .hud-item span {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: bold;
   color: #e0e0e0;
+  white-space: nowrap;
 }
 
 #control-hud {
   position: absolute;
-  bottom: 80px;
+  bottom: 70px;
   left: 50%;
   transform: translateX(-50%);
   background: #1a2636;
-  padding: 10px;
+  padding: 8px;
   border-radius: 5px;
   display: flex;
-  gap: 10px;
+  gap: 6px;
   z-index: 1000;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: 90%;
 }
 
 #control-hud .btn {
   background: #00c853;
   border: none;
   color: white;
-  padding: 8px 16px;
+  padding: 6px 12px;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 13px;
   transition: background 0.3s;
+  flex: 0 1 auto;
 }
 
 #control-hud .btn:hover {
@@ -189,49 +198,59 @@ body {
 @media (max-width: 600px) {
   #nav-input {
     flex-direction: row;
-    gap: 5px;
-    padding: 5px;
+    gap: 4px;
+    padding: 6px;
     width: 95%;
-    max-width: 350px;
+    max-width: 340px;
   }
   #navAddress {
     font-size: 14px;
   }
   .mic-button {
-    width: 35px;
-    padding: 6px;
+    width: 32px;
+    padding: 5px;
   }
   #hud {
     flex-direction: row;
     flex-wrap: wrap;
-    gap: 5px;
-    padding: 5px;
+    gap: 4px;
+    padding: 6px;
     max-width: 95%;
+    box-sizing: border-box;
   }
   .hud-item {
-    flex: 1 1 45%;
-    font-size: 12px;
-    padding: 5px;
+    flex: 0 1 45%;
+    font-size: 11px;
+    padding: 4px 6px;
+    gap: 3px;
+    min-width: 70px;
+  }
+  .hud-item i {
+    font-size: 11px;
+  }
+  .hud-item span {
+    font-size: 11px;
   }
   #control-hud {
     flex-direction: row;
-    gap: 5px;
-    padding: 5px;
-    bottom: 70px;
+    gap: 4px;
+    padding: 6px;
+    bottom: 65px;
     max-width: 95%;
+    box-sizing: border-box;
   }
   #control-hud .btn {
-    flex: 1 1 20%;
-    font-size: 12px;
-    padding: 5px;
+    flex: 0 1 22%;
+    font-size: 11px;
+    padding: 4px 8px;
   }
   #profile-hud, #settings-hud, #detailedAlertBox {
     width: 95%;
-    max-width: 350px;
+    max-width: 340px;
     padding: 10px;
   }
   #profile-hud .tab-button, #profile-hud .alerts th, #profile-hud .alerts td {
-    font-size: 12px;
+    font-size: 11px;
   }
 }
 
@@ -251,15 +270,15 @@ body {
   }
   #hud {
     bottom: 5px;
-    max-width: 75%;
+    max-width: 80%;
   }
   #control-hud {
-    bottom: 65px;
-    max-width: 75%;
+    bottom: 60px;
+    max-width: 80%;
   }
   #nav-input {
-    width: 70%;
-    max-width: 500px;
+    width: 75%;
+    max-width: 480px;
   }
 }
 
@@ -516,7 +535,7 @@ body {
   max-height: 80vh;
   border: 2px solid #3498db;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5), 0 0 5px rgba(52, 152, 219, 0.5);
-  overflow-y: auto;
+  overflow: auto;
 }
 
 #detailedAlertBox.dragging {
@@ -536,25 +555,6 @@ body {
   opacity: 0.1;
   pointer-events: none;
   transition: opacity 0.3s ease;
-}
-
-#detailedAlertBox .close-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  padding: 8px 15px;
-  background: linear-gradient(45deg, #ff4444, #cc0000);
-  border: none;
-  border-radius: 5px;
-  color: #ffffff;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  margin: 0;
-}
-
-#detailedAlertBox .close-btn:hover {
-  background: linear-gradient(45deg, #cc0000, #ff4444);
-  transform: scale(1.1);
 }
 
 #detailedAlertBox label {
@@ -731,4 +731,20 @@ body {
 
 #rerouteNo:hover {
   transform: scale(1.05);
+}
+
+#toast-message {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #e74c3c;
+  color: #ffffff;
+  padding: 10px 20px;
+  border-radius: 5px;
+  z-index: 1003;
+  display: none;
+  font-size: 14px;
+  text-align: center;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
