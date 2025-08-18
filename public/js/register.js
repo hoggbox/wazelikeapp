@@ -1,5 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('register.js loaded, version 1.0.32');
+  console.log('register.js loaded, version 1.0.33');
+
+  // Determine API base URL based on environment
+  const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
+  const BASE_URL = isLocal ? 'http://127.0.0.1:3000' : 'https://wazelikeapp.onrender.com';
+  console.log(`Environment: ${isLocal ? 'Local' : 'Render'}, Base URL: ${BASE_URL}`);
 
   // DOM elements
   const fullNameInput = document.getElementById('name');
@@ -46,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function checkAvailability(username, email) {
     try {
       console.log('Checking availability:', { username, email });
-      const response = await fetch('http://127.0.0.1:3000/api/auth/check-availability', {
+      const response = await fetch(`${BASE_URL}/api/auth/check-availability`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, email })
@@ -99,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
           showError('password', 'Password must be at least 8 characters');
           return false;
         }
-        console.log('Password validated, length:', value.length, 'value:', value);
+        console.log('Password validated, length:', value.length);
         clearError('password');
         validateField('confirm-password', confirmPasswordInput.value);
         return true;
@@ -112,7 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
           showError('confirm-password', 'Password must be at least 8 characters');
           return false;
         }
-        console.log('Confirm password validated, length:', value.length, 'value:', value);
+        console.log('Confirm password validated, length:', value.length);
         clearError('confirm-password');
         return true;
       case 'fullName':
@@ -163,12 +168,12 @@ document.addEventListener('DOMContentLoaded', () => {
     validateField('email', emailInput.value);
   });
   passwordInput.addEventListener('input', () => {
-    console.log('Password input, length:', passwordInput.value.length, 'value:', passwordInput.value);
+    console.log('Password input, length:', passwordInput.value.length);
     validateField('password', passwordInput.value);
     validateField('confirm-password', confirmPasswordInput.value);
   });
   confirmPasswordInput.addEventListener('input', () => {
-    console.log('Confirm password input, length:', confirmPasswordInput.value.length, 'value:', confirmPasswordInput.value);
+    console.log('Confirm password input, length:', confirmPasswordInput.value.length);
     validateField('confirm-password', confirmPasswordInput.value);
   });
   ageInput.addEventListener('input', () => {
@@ -201,9 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
       username,
       email,
       passwordLength: password.length,
-      passwordValue: password,
       confirmPasswordLength: confirmPassword.length,
-      confirmPasswordValue: confirmPassword,
       age,
       dob,
       location
@@ -228,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     console.log('Submitting registration:', { username, email, passwordLength: password.length, name: fullName, age, dob, location });
-    fetch('http://127.0.0.1:3000/api/auth/register', {
+    fetch(`${BASE_URL}/api/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, email, name: fullName, age, dob, location })

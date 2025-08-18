@@ -20,11 +20,16 @@ const io = socketIo(server, {
 });
 
 const PORT = process.env.PORT || 3000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://jhogg39:!Snake1988@cluster0.0uyxp2y.mongodb.net/waze-app?retryWrites=true&w=majority&appName=Cluster0';
+
+// Validate critical environment variables
+if (!process.env.MONGODB_URI || !process.env.JWT_SECRET || !process.env.REFRESH_SECRET) {
+  console.error('FATAL ERROR: Missing critical environment variables (MONGODB_URI, JWT_SECRET, or REFRESH_SECRET)');
+  process.exit(1);
+}
 
 // Connect to MongoDB with retry and timeout options
 const connectWithRetry = () => {
-  mongoose.connect(MONGODB_URI, {
+  mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
     serverSelectionTimeoutMS: 5000, // Timeout after 5s
@@ -32,7 +37,7 @@ const connectWithRetry = () => {
   })
     .then(() => console.log('MongoDB connected successfully to waze-app'))
     .catch(err => {
-      console.error('MongoDB connection error:', err.message);
+      console.error('MongoDB connection error:', err.message, err.stack);
       console.log('Retrying MongoDB connection in 5 seconds...');
       setTimeout(connectWithRetry, 5000);
     });
@@ -52,18 +57,18 @@ const authenticateToken = (req, res, next) => {
   console.log('Authenticating token:', token ? '[provided]' : 'none');
   if (!token) return res.status(401).json({ msg: 'No token provided' });
 
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      console.error('Token verification failed:', err.message, 'Token:', token);
-      if (err.name === 'TokenExpiredError') {
-        return res.status(403).json({ msg: 'Token expired' });
-      }
-      return res.status(403).json({ msg: 'Invalid token' });
-    }
-    console.log('Token authenticated:', { userId: user._id, username: user.username });
-    req.user = user;
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('Token authenticated:', { userId: decoded._id, username: decoded.username });
+    req.user = decoded;
     next();
-  });
+  } catch (err) {
+    console.error('Token verification failed:', err.message, err.stack);
+    if (err.name === 'TokenExpiredError') {
+      return res.status(403).json({ msg: 'Token expired' });
+    }
+    return res.status(403).json({ msg: 'Invalid token', error: err.message });
+  }
 };
 
 // Routes
@@ -76,20 +81,20 @@ app.post('/api/auth/refresh', (req, res) => {
   console.log('Refresh token request:', { refreshToken: refreshToken ? '[provided]' : 'none' });
   if (!refreshToken) return res.status(400).json({ msg: 'No refresh token provided' });
 
-  jwt.verify(refreshToken, process.env.REFRESH_SECRET, (err, user) => {
-    if (err) {
-      console.error('Refresh token error:', err.message);
-      return res.status(403).json({ msg: 'Invalid refresh token', error: err.message });
-    }
-    console.log('Refresh token decoded:', { userId: user._id, username: user.username });
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
+    console.log('Refresh token decoded:', { userId: decoded._id, username: decoded.username });
     const newAccessToken = jwt.sign(
-      { _id: user._id, username: user.username },
+      { _id: decoded._id, username: decoded.username },
       process.env.JWT_SECRET,
       { expiresIn: '1h' }
     );
-    console.log('New access token generated for user:', user.username);
+    console.log('New access token generated for user:', decoded.username);
     res.json({ token: newAccessToken });
-  });
+  } catch (err) {
+    console.error('Refresh token error:', err.message, err.stack);
+    return res.status(403).json({ msg: 'Invalid refresh token', error: err.message });
+  }
 });
 
 // Health check endpoint
@@ -124,7 +129,7 @@ io.on('connection', (socket) => {
 
 // Error handling for uncaught exceptions
 process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
+  console.error('Unhandled Rejection:', err.message, err.stack);
 });
 
 server.listen(PORT, '0.0.0.0', () => console.log(`Server running on http://0.0.0.0:${PORT}`));
