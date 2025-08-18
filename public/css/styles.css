@@ -102,69 +102,77 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background: linear-gradient(135deg, #1a2636, #0f1c2c);
-  padding: 8px;
+  padding: 6px;
   border-radius: 10px;
   display: flex;
-  gap: 6px;
+  gap: 3px;
   z-index: 1000;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
-  max-width: 90%;
+  max-width: 95%;
   flex-wrap: wrap;
   justify-content: center;
+  box-sizing: border-box;
 }
 
 .hud-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 8px;
+  gap: 3px;
+  padding: 4px 6px;
   background: rgba(26, 38, 54, 0.8);
   border-radius: 5px;
-  font-size: 13px;
-  flex: 0 1 auto;
-  min-width: 80px;
+  font-size: 10px;
+  flex: 0 1 18%;
+  min-width: 60px;
+  max-width: 80px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hud-item i {
-  font-size: 13px;
+  font-size: 10px;
   color: #00c853;
 }
 
 .hud-item span {
-  font-size: 13px;
+  font-size: 10px;
   font-weight: bold;
   color: #e0e0e0;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #control-hud {
   position: absolute;
-  bottom: 70px;
+  bottom: 65px;
   left: 50%;
   transform: translateX(-50%);
   background: #1a2636;
-  padding: 8px;
+  padding: 6px;
   border-radius: 5px;
   display: flex;
-  gap: 6px;
+  gap: 4px;
   z-index: 1000;
   flex-wrap: wrap;
   justify-content: center;
-  max-width: 90%;
+  max-width: 95%;
+  box-sizing: border-box;
 }
 
 #control-hud .btn {
   background: #00c853;
   border: none;
   color: white;
-  padding: 6px 12px;
+  padding: 4px 8px;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 11px;
   transition: background 0.3s;
-  flex: 0 1 auto;
+  flex: 0 1 22%;
 }
 
 #control-hud .btn:hover {
@@ -178,15 +186,16 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 90%;
-  max-width: 400px;
+  max-width: 340px;
   background: linear-gradient(135deg, #2c3e50, #34495e);
   z-index: 1002;
-  padding: 15px;
+  padding: 10px;
   border: 2px solid #34495e;
   border-radius: 10px;
   box-shadow: 0 6px 12px rgba(0, 0, 0, 0.5);
   color: #ecf0f1;
   font-family: 'Roboto', sans-serif;
+  transition: transform 0.2s ease-out, opacity 0.2s ease-out;
 }
 
 #profile-hud.active, #settings-hud.active, #detailedAlertBox.active {
@@ -213,44 +222,45 @@ body {
   #hud {
     flex-direction: row;
     flex-wrap: wrap;
-    gap: 4px;
-    padding: 6px;
+    gap: 3px;
+    padding: 5px;
     max-width: 95%;
     box-sizing: border-box;
   }
   .hud-item {
-    flex: 0 1 45%;
-    font-size: 11px;
-    padding: 4px 6px;
-    gap: 3px;
-    min-width: 70px;
+    flex: 0 1 18%;
+    font-size: 9px;
+    padding: 3px 5px;
+    gap: 2px;
+    min-width: 55px;
+    max-width: 75px;
   }
   .hud-item i {
-    font-size: 11px;
+    font-size: 9px;
   }
   .hud-item span {
-    font-size: 11px;
+    font-size: 9px;
   }
   #control-hud {
     flex-direction: row;
-    gap: 4px;
-    padding: 6px;
-    bottom: 65px;
+    gap: 3px;
+    padding: 5px;
+    bottom: 60px;
     max-width: 95%;
     box-sizing: border-box;
   }
   #control-hud .btn {
     flex: 0 1 22%;
-    font-size: 11px;
-    padding: 4px 8px;
+    font-size: 10px;
+    padding: 3px 6px;
   }
   #profile-hud, #settings-hud, #detailedAlertBox {
     width: 95%;
-    max-width: 340px;
-    padding: 10px;
+    max-width: 320px;
+    padding: 8px;
   }
   #profile-hud .tab-button, #profile-hud .alerts th, #profile-hud .alerts td {
-    font-size: 11px;
+    font-size: 10px;
   }
 }
 
@@ -536,6 +546,7 @@ body {
   border: 2px solid #3498db;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5), 0 0 5px rgba(52, 152, 219, 0.5);
   overflow: auto;
+  touch-action: none;
 }
 
 #detailedAlertBox.dragging {
@@ -544,6 +555,10 @@ body {
 
 #detailedAlertBox h3 {
   cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  touch-action: none;
 }
 
 #detailedAlertBox.debug {
@@ -554,7 +569,7 @@ body {
 #detailedAlertBox.transparent {
   opacity: 0.1;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.2s ease;
 }
 
 #detailedAlertBox label {
