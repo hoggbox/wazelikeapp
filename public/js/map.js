@@ -1,4 +1,4 @@
-const VERSION = '1.0.49'; // Updated for instant touch response and mobile performance
+const VERSION = '1.0.50'; // Updated for instant touch response, full-screen, and single-finger map
 // Global variables
 let map;
 let routePolyline;
@@ -562,6 +562,10 @@ function updateProfileDisplay() {
       logout();
       window.location.href = '/';
     });
+    logoutButton.addEventListener('touchend', () => {
+      logout();
+      window.location.href = '/';
+    }, { passive: false });
     accountInfo.appendChild(logoutButton);
   }
 }
@@ -643,6 +647,10 @@ function updatePagination(totalAlerts) {
       currentPage = i;
       updateAlertTable();
     });
+    button.addEventListener('touchend', () => {
+      currentPage = i;
+      updateAlertTable();
+    }, { passive: false });
     pagination.appendChild(button);
   }
   const prevButton = document.createElement('button');
@@ -653,6 +661,12 @@ function updatePagination(totalAlerts) {
       updateAlertTable();
     }
   });
+  prevButton.addEventListener('touchend', () => {
+    if (currentPage > 1) {
+      currentPage--;
+      updateAlertTable();
+    }
+  }, { passive: false });
   pagination.insertBefore(prevButton, pagination.firstChild);
   const nextButton = document.createElement('button');
   nextButton.textContent = '>';
@@ -662,6 +676,12 @@ function updatePagination(totalAlerts) {
       updateAlertTable();
     }
   });
+  nextButton.addEventListener('touchend', () => {
+    if (currentPage < totalPages) {
+      currentPage++;
+      updateAlertTable();
+    }
+  }, { passive: false });
   pagination.appendChild(nextButton);
 }
 
@@ -996,7 +1016,8 @@ window.initMap = function() {
     ],
     disableDefaultUI: true,
     fullscreenControl: false,
-    mapTypeControl: false
+    mapTypeControl: false,
+    gestureHandling: 'greedy' // Enable single-finger panning
   });
   if (!map) {
     console.error('Map initialization failed');
@@ -1157,18 +1178,6 @@ window.addEventListener('DOMContentLoaded', () => {
     console.log('reroutePrompt set to hidden on load');
   }
 
-  // Handle screen orientation change
-  window.addEventListener('orientationchange', () => {
-    console.log('Orientation changed to:', window.orientation || 'not supported');
-    if ((window.orientation === 90 || window.orientation === -90) && window.orientation !== undefined) {
-      document.body.classList.add('landscape');
-      document.body.classList.remove('portrait');
-    } else {
-      document.body.classList.add('portrait');
-      document.body.classList.remove('landscape');
-    }
-  });
-
   // Initialize Socket.IO with retry logic
   function loadSocketIOScript() {
     return new Promise((resolve, reject) => {
@@ -1271,11 +1280,13 @@ window.addEventListener('DOMContentLoaded', () => {
         const item = document.createElement('div');
         item.className = 'recent-item';
         item.textContent = dest;
-        item.addEventListener('click', () => {
+        const handleSelect = () => {
           if (navAddress) navAddress.value = dest;
           startNavigation(dest);
           if (navOverlay) navOverlay.style.display = 'none';
-        });
+        };
+        item.addEventListener('click', handleSelect);
+        item.addEventListener('touchend', handleSelect, { passive: false });
         recentLocations.appendChild(item);
       });
       showToastMessage('Navigation overlay opened.', 5000);
@@ -1639,7 +1650,7 @@ window.addEventListener('DOMContentLoaded', () => {
       detailedAlertBox.classList.remove('active');
       detailedAlertBox.style.display = 'none';
     }
-    showToastMessage('Waiting for click or press a location on the map.', 5000);
+  showToastMessage('Waiting for click or press a location on the map.', 5000);
     const clickListener = map.addListener('click', (event) => {
       const lat = event.latLng.lat();
       const lng = event.latLng.lng();
@@ -1683,6 +1694,53 @@ window.addEventListener('DOMContentLoaded', () => {
         isSelectingLocation = false;
         google.maps.event.removeListener(clickListener);
       });
+    });
+    // Add touchend listener for map click to ensure single-tap response
+    const touchListener = map.addListener('click', (event) => {
+      if (event.domEvent.type === 'touchend') {
+        const lat = event.latLng.lat();
+        const lng = event.latLng.lng();
+        reverseGeocode(lat, lng).then(address => {
+          if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+          if (detailedAlertBox) {
+            detailedAlertBox.classList.add('active');
+            detailedAlertBox.style.display = 'flex';
+            detailedAlertBox.style.left = '50%';
+            detailedAlertBox.style.top = '50%';
+            detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+          }
+          if (locationDisplay) locationDisplay.style.display = 'block';
+          if (alertType) alertType.style.display = 'none';
+          const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+          if (alertTypeLabel) alertTypeLabel.style.display = 'none';
+          if (clickLocationBtn) clickLocationBtn.style.display = 'none';
+          if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
+          if (postAlertBtn) postAlertBtn.style.display = 'block';
+          if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
+          isSelectingLocation = false;
+          google.maps.event.removeListener(touchListener);
+        }).catch(err => {
+          console.error('Reverse geocode error:', err);
+          if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+          if (detailedAlertBox) {
+            detailedAlertBox.classList.add('active');
+            detailedAlertBox.style.display = 'flex';
+            detailedAlertBox.style.left = '50%';
+            detailedAlertBox.style.top = '50%';
+            detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+          }
+          if (locationDisplay) locationDisplay.style.display = 'block';
+          if (alertType) alertType.style.display = 'none';
+          const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+          if (alertTypeLabel) alertTypeLabel.style.display = 'none';
+          if (clickLocationBtn) clickLocationBtn.style.display = 'none';
+          if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
+          if (postAlertBtn) postAlertBtn.style.display = 'block';
+          if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
+          isSelectingLocation = false;
+          google.maps.event.removeListener(touchListener);
+        });
+      }
     });
   }
 
@@ -1814,16 +1872,13 @@ window.addEventListener('DOMContentLoaded', () => {
               const item = document.createElement('div');
               item.className = 'suggestion-item';
               item.textContent = prediction.description;
-              item.addEventListener('click', () => {
+              const handleSelect = () => {
                 navAddress.value = prediction.description;
                 startNavigation(prediction.description);
                 navOverlay.style.display = 'none';
-              });
-              item.addEventListener('touchend', () => {
-                navAddress.value = prediction.description;
-                startNavigation(prediction.description);
-                navOverlay.style.display = 'none';
-              }, { passive: false });
+              };
+              item.addEventListener('click', handleSelect);
+              item.addEventListener('touchend', handleSelect, { passive: false });
               suggestions.appendChild(item);
             });
             showOverlay();
@@ -1834,128 +1889,118 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   if (closeOverlay) {
-    closeOverlay.addEventListener('click', () => {
+    const handleCloseOverlay = () => {
       navOverlay.style.display = 'none';
       showToastMessage('Navigation overlay closed.', 5000);
-    });
-    closeOverlay.addEventListener('touchend', () => {
-      navOverlay.style.display = 'none';
-      showToastMessage('Navigation overlay closed.', 5000);
-    }, { passive: false });
+    };
+    closeOverlay.addEventListener('click', handleCloseOverlay);
+    closeOverlay.addEventListener('touchend', handleCloseOverlay, { passive: false });
   }
 
   if (cancelBtn) {
-    cancelBtn.addEventListener('click', stopNavigation);
-    cancelBtn.addEventListener('touchend', stopNavigation, { passive: false });
+    const handleCancel = () => stopNavigation();
+    cancelBtn.addEventListener('click', handleCancel);
+    cancelBtn.addEventListener('touchend', handleCancel, { passive: false });
   }
 
   if (recenterBtn) {
-    recenterBtn.addEventListener('click', recenterMap);
-    recenterBtn.addEventListener('touchend', recenterMap, { passive: false });
+    const handleRecenter = () => recenterMap();
+    recenterBtn.addEventListener('click', handleRecenter);
+    recenterBtn.addEventListener('touchend', handleRecenter, { passive: false });
   }
 
   if (muteBtn) {
-    muteBtn.addEventListener('click', () => {
+    const handleMute = () => {
       isMuted = !isMuted;
       muteBtn.classList.toggle('muted', isMuted);
       showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
-    });
-    muteBtn.addEventListener('touchend', () => {
-      isMuted = !isMuted;
-      muteBtn.classList.toggle('muted', isMuted);
-      showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
-    }, { passive: false });
+    };
+    muteBtn.addEventListener('click', handleMute);
+    muteBtn.addEventListener('touchend', handleMute, { passive: false });
   }
 
   if (hazardBtn) {
-    hazardBtn.addEventListener('click', addHazardMarker);
-    hazardBtn.addEventListener('touchend', addHazardMarker, { passive: false });
+    const handleHazard = () => addHazardMarker();
+    hazardBtn.addEventListener('click', handleHazard);
+    hazardBtn.addEventListener('touchend', handleHazard, { passive: false });
   }
 
   if (micButton) {
-    micButton.addEventListener('click', startVoiceRecognition);
-    micButton.addEventListener('touchend', startVoiceRecognition, { passive: false });
+    const handleMic = () => startVoiceRecognition();
+    micButton.addEventListener('click', handleMic);
+    micButton.addEventListener('touchend', handleMic, { passive: false });
   }
 
   if (closeVoiceOverlay) {
-    closeVoiceOverlay.addEventListener('click', () => {
+    const handleCloseVoice = () => {
       stopVoiceRecognition();
       voiceOverlay.style.display = 'none';
       showToastMessage('Voice overlay closed.', 5000);
-    });
-    closeVoiceOverlay.addEventListener('touchend', () => {
-      stopVoiceRecognition();
-      voiceOverlay.style.display = 'none';
-      showToastMessage('Voice overlay closed.', 5000);
-    }, { passive: false });
+    };
+    closeVoiceOverlay.addEventListener('click', handleCloseVoice);
+    closeVoiceOverlay.addEventListener('touchend', handleCloseVoice, { passive: false });
   }
 
   if (detailedAlertBtn) {
-    detailedAlertBtn.addEventListener('click', showDetailedAlertBox);
-    detailedAlertBtn.addEventListener('touchend', showDetailedAlertBox, { passive: false });
+    const handleDetailedAlert = () => showDetailedAlertBox();
+    detailedAlertBtn.addEventListener('click', handleDetailedAlert);
+    detailedAlertBtn.addEventListener('touchend', handleDetailedAlert, { passive: false });
   }
 
   if (closeDetailedAlertBtn) {
-    closeDetailedAlertBtn.addEventListener('click', () => {
+    const handleCloseDetailed = () => {
       detailedAlertBox.classList.remove('active');
       detailedAlertBox.style.display = 'none';
       showToastMessage('Detailed alert box closed.', 5000);
-    });
-    closeDetailedAlertBtn.addEventListener('touchend', () => {
-      detailedAlertBox.classList.remove('active');
-      detailedAlertBox.style.display = 'none';
-      showToastMessage('Detailed alert box closed.', 5000);
-    }, { passive: false });
+    };
+    closeDetailedAlertBtn.addEventListener('click', handleCloseDetailed);
+    closeDetailedAlertBtn.addEventListener('touchend', handleCloseDetailed, { passive: false });
   }
 
   if (clickLocationBtn) {
-    clickLocationBtn.addEventListener('click', enableMapClick);
-    clickLocationBtn.addEventListener('touchend', enableMapClick, { passive: false });
+    const handleClickLocation = () => enableMapClick();
+    clickLocationBtn.addEventListener('click', handleClickLocation);
+    clickLocationBtn.addEventListener('touchend', handleClickLocation, { passive: false });
   }
 
   if (alertCurrentBtn) {
-    alertCurrentBtn.addEventListener('click', alertAtCurrentLocation);
-    alertCurrentBtn.addEventListener('touchend', alertAtCurrentLocation, { passive: false });
+    const handleAlertCurrent = () => alertAtCurrentLocation();
+    alertCurrentBtn.addEventListener('click', handleAlertCurrent);
+    alertCurrentBtn.addEventListener('touchend', handleAlertCurrent, { passive: false });
   }
 
   if (postAlertBtn) {
-    postAlertBtn.addEventListener('click', postSelectedAlert);
-    postAlertBtn.addEventListener('touchend', postSelectedAlert, { passive: false });
+    const handlePostAlert = () => postSelectedAlert();
+    postAlertBtn.addEventListener('click', handlePostAlert);
+    postAlertBtn.addEventListener('touchend', handlePostAlert, { passive: false });
   }
 
   if (cancelAlertBtn) {
-    cancelAlertBtn.addEventListener('click', () => {
+    const handleCancelAlert = () => {
       detailedAlertBox.classList.remove('active');
       detailedAlertBox.style.display = 'none';
       showToastMessage('Alert creation cancelled.', 5000);
-    });
-    cancelAlertBtn.addEventListener('touchend', () => {
-      detailedAlertBox.classList.remove('active');
-      detailedAlertBox.style.display = 'none';
-      showToastMessage('Alert creation cancelled.', 5000);
-    }, { passive: false });
+    };
+    cancelAlertBtn.addEventListener('click', handleCancelAlert);
+    cancelAlertBtn.addEventListener('touchend', handleCancelAlert, { passive: false });
   }
 
   if (profileBtn) {
-    profileBtn.addEventListener('click', () => {
+    const handleProfile = () => {
       profileHud.style.display = 'flex';
       profileHud.classList.add('active');
-    });
-    profileBtn.addEventListener('touchend', () => {
-      profileHud.style.display = 'flex';
-      profileHud.classList.add('active');
-    }, { passive: false });
+    };
+    profileBtn.addEventListener('click', handleProfile);
+    profileBtn.addEventListener('touchend', handleProfile, { passive: false });
   }
 
   if (closeBtn) {
-    closeBtn.addEventListener('click', () => {
+    const handleCloseProfile = () => {
       profileHud.classList.remove('active');
       profileHud.style.display = 'none';
-    });
-    closeBtn.addEventListener('touchend', () => {
-      profileHud.classList.remove('active');
-      profileHud.style.display = 'none';
-    }, { passive: false });
+    };
+    closeBtn.addEventListener('click', handleCloseProfile);
+    closeBtn.addEventListener('touchend', handleCloseProfile, { passive: false });
   }
 
   if (tabButtons) {
@@ -1980,7 +2025,7 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   if (saveProfileBtn) {
-    saveProfileBtn.addEventListener('click', () => {
+    const handleSaveProfile = () => {
       const updates = {
         name: document.getElementById('edit-name')?.value.trim() || '',
         username: document.getElementById('edit-username')?.value.trim() || '',
@@ -2012,62 +2057,27 @@ window.addEventListener('DOMContentLoaded', () => {
         .catch(err => {
           console.error('Profile update error:', err.message);
         });
-    });
-    saveProfileBtn.addEventListener('touchend', () => {
-      const updates = {
-        name: document.getElementById('edit-name')?.value.trim() || '',
-        username: document.getElementById('edit-username')?.value.trim() || '',
-        email: document.getElementById('edit-email')?.value.trim() || '',
-        age: document.getElementById('edit-age')?.value.trim() || '',
-        dob: document.getElementById('edit-dob')?.value.trim() || '',
-        location: document.getElementById('edit-location')?.value.trim() || ''
-      };
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('No token available for profile update');
-        return;
-      }
-      fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(updates)
-      })
-        .then(response => {
-          if (!response.ok) throw new Error(`Profile update failed: ${response.status}`);
-          return response.json();
-        })
-        .then(data => {
-          userProfile = data;
-          currentUser = { ...currentUser, username: data.username, id: data._id };
-          updateProfileDisplay();
-          updateEditProfileForm();
-        })
-        .catch(err => {
-          console.error('Profile update error:', err.message);
-        });
-    }, { passive: false });
+    };
+    saveProfileBtn.addEventListener('click', handleSaveProfile);
+    saveProfileBtn.addEventListener('touchend', handleSaveProfile, { passive: false });
   }
 
   if (settingsBtn) {
-    settingsBtn.addEventListener('click', () => {
+    const handleSettings = () => {
       settingsHud.style.display = 'flex';
       settingsHud.classList.add('active');
-    });
-    settingsBtn.addEventListener('touchend', () => {
-      settingsHud.style.display = 'flex';
-      settingsHud.classList.add('active');
-    }, { passive: false });
+    };
+    settingsBtn.addEventListener('click', handleSettings);
+    settingsBtn.addEventListener('touchend', handleSettings, { passive: false });
   }
 
   if (closeSettings) {
-    closeSettings.addEventListener('click', () => {
+    const handleCloseSettings = () => {
       settingsHud.classList.remove('active');
       settingsHud.style.display = 'none';
-    });
-    closeSettings.addEventListener('touchend', () => {
-      settingsHud.classList.remove('active');
-      settingsHud.style.display = 'none';
-    }, { passive: false });
+    };
+    closeSettings.addEventListener('click', handleCloseSettings);
+    closeSettings.addEventListener('touchend', handleCloseSettings, { passive: false });
   }
 
   if (loginBtn && loginUsername && loginPassword) {
@@ -2079,18 +2089,46 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   if (rerouteYes) {
-    rerouteYes.addEventListener('click', () => rerouteAroundHazards(currentHazards));
-    rerouteYes.addEventListener('touchend', () => rerouteAroundHazards(currentHazards), { passive: false });
+    const handleRerouteYes = () => rerouteAroundHazards(currentHazards);
+    rerouteYes.addEventListener('click', handleRerouteYes);
+    rerouteYes.addEventListener('touchend', handleRerouteYes, { passive: false });
   }
 
   if (rerouteNo) {
-    rerouteNo.addEventListener('click', () => ignoreHazards(currentHazards));
-    rerouteNo.addEventListener('touchend', () => ignoreHazards(currentHazards), { passive: false });
+    const handleRerouteNo = () => ignoreHazards(currentHazards);
+    rerouteNo.addEventListener('click', handleRerouteNo);
+    rerouteNo.addEventListener('touchend', handleRerouteNo, { passive: false });
   }
 
   if (detailedAlertBox) {
     makeDraggable(detailedAlertBox);
   }
+
+  if (addAlertBtn) {
+    const handleAddAlert = () => showDetailedAlertBox();
+    addAlertBtn.addEventListener('click', handleAddAlert);
+    addAlertBtn.addEventListener('touchend', handleAddAlert, { passive: false });
+  }
+
+  // Prevent default touch behaviors globally
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  // Disable context menu on long press
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  });
 
   console.timeEnd('DOM initialization');
 });
