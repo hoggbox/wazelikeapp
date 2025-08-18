@@ -1,4 +1,4 @@
-const VERSION = '1.0.45'; // Updated version for cache busting
+const VERSION = '1.0.46'; // Updated version for cache busting
 // Global variables
 let map;
 let routePolyline;
@@ -322,10 +322,10 @@ function addMarker(type, notes = '', position) {
         return response.json();
       })
       .then(data => {
-        if (data.msg === 'Duplicate alert detected') {
+        if (data.msg === 'Error: Cannot post duplicate alert or alert in same exact location, please try a different location') {
           console.log('Duplicate alert not saved:', data.alert._id);
           marker.setMap(null);
-          showToastMessage('Error: Cannot post duplicate alert or alert in same exact location, please try a different location.', 7000);
+          showToastMessage(data.msg, 7000);
           return;
         }
         alertData._id = data._id;
@@ -1570,7 +1570,7 @@ window.addEventListener('DOMContentLoaded', () => {
         return;
       }
       addMarker(type, notes, position).then(() => {
-        showToastMessage('Your alert has been posted.', 5000);
+        showToastMessage('Your post has been added. Thank you!', 5000);
         console.timeEnd(`Add ${type} alert`);
         resolve();
       }).catch(err => {
@@ -1817,10 +1817,12 @@ function makeDraggable(element) {
     isDragging = true;
     element.classList.add('dragging');
     console.log('Started touch dragging detailedAlertBox');
+    e.stopPropagation();
   }, { passive: false });
   document.addEventListener('touchmove', (e) => {
     if (isDragging) {
       e.preventDefault();
+      e.stopPropagation();
       const touch = e.touches[0];
       currentX = touch.clientX - initialX;
       currentY = touch.clientY - initialY;
@@ -1835,10 +1837,11 @@ function makeDraggable(element) {
       element.style.top = currentY + 'px';
     }
   }, { passive: false });
-  document.addEventListener('touchend', () => {
+  document.addEventListener('touchend', (e) => {
     isDragging = false;
     element.classList.remove('dragging');
     console.log('Stopped touch dragging detailedAlertBox at:', { left: element.style.left || '50%', top: element.style.top || '50%' });
+    e.stopPropagation();
   }, { passive: false });
 }
 
