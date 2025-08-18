@@ -1,4 +1,4 @@
-const VERSION = '1.0.43'; // Updated version for cache busting
+const VERSION = '1.0.44'; // Updated version for cache busting
 // Global variables
 let map;
 let routePolyline;
@@ -35,6 +35,9 @@ let accountInfo, editProfile, alertsTab, tabButtons;
 let femaleVoice = null;
 let mapReadyResolve;
 const mapReady = new Promise((resolve) => mapReadyResolve = resolve);
+let lastInstruction = '';
+let lastNavIndex = -1;
+let lastDistanceToNext = Infinity;
 
 // Determine API and Socket.IO base URL based on environment
 const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
@@ -97,7 +100,7 @@ function provideVoiceNavigation(coords) {
     const distance = closest.distance;
     const nextPoint = routePath[nextIndex];
     console.log('Navigation check:', { distance, nextIndex, heading: coords.heading });
-    if (distance < 50 && nextIndex < routePath.length - 1) {
+    if (distance < 50 && nextIndex < routePath.length - 1 && closest.index > lastNavIndex) {
       const nextNextPoint = routePath[nextIndex + 1];
       const heading = google.maps.geometry.spherical.computeHeading(currentPos, nextNextPoint);
       const currentHeading = coords.heading;
@@ -109,18 +112,23 @@ function provideVoiceNavigation(coords) {
       } else {
         instruction = 'Continue straight for 50 meters.';
       }
-      if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
-        const utterance = new SpeechSynthesisUtterance(instruction);
-        utterance.voice = femaleVoice;
-        utterance.lang = 'en-US';
-        utterance.volume = 1.0;
-        utterance.rate = 1.1;
-        window.speechSynthesis.speak(utterance);
-        console.log('Voice navigation:', instruction, 'with:', femaleVoice.name);
-      } else if (!femaleVoice) {
-        console.warn('No female voice available, skipping navigation instruction');
+      if (instruction !== lastInstruction) {
+        if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
+          const utterance = new SpeechSynthesisUtterance(instruction);
+          utterance.voice = femaleVoice;
+          utterance.lang = 'en-US';
+          utterance.volume = 1.0;
+          utterance.rate = 1.1;
+          window.speechSynthesis.speak(utterance);
+          console.log('Voice navigation:', instruction, 'with:', femaleVoice.name);
+        } else if (!femaleVoice) {
+          console.warn('No female voice available, skipping navigation instruction');
+        }
+        lastInstruction = instruction;
       }
+      lastNavIndex = closest.index;
     }
+    lastDistanceToNext = distance;
   } else if (isNavigating && routePath.length > 0) {
     console.warn('Missing heading or route data for voice navigation:', { heading: coords.heading, routePathLength: routePath.length });
   }
@@ -981,11 +989,23 @@ window.initMap = function() {
     navigator.geolocation.watchPosition(
       (position) => {
         const now = Date.now();
+        let currentPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
         userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
         lastLocationUpdate = now;
         console.log('WatchPosition updated user location:', userLocation, 'Time:', now);
+        if (isNavigating && routePath.length > 0) {
+          const closest = findClosestPointOnRoute(currentPos, routePath);
+          if (closest.distance < 50) { // Snap if within 50m
+            currentPos = routePath[closest.index];
+            console.log('Snapped position to route at index:', closest.index);
+          }
+          map.setCenter(currentPos);
+          map.setZoom(18);
+          map.setTilt(45);
+          map.setHeading(position.coords.heading || 0);
+          provideVoiceNavigation(position.coords);
+        }
         if (map) {
-          const currentPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
           if (liveLocationMarker) liveLocationMarker.setMap(null);
           const canvas = document.createElement('canvas');
           const ctx = canvas.getContext('2d');
@@ -1329,6 +1349,8 @@ window.addEventListener('DOMContentLoaded', () => {
           } else if (!femaleVoice) {
             console.warn('No female voice available, skipping speech');
           }
+          map.setZoom(18);
+          map.setTilt(45);
           checkHazardsOnRoute();
         } catch (err) {
           console.error('Route update failed:', err);
@@ -1365,6 +1387,9 @@ window.addEventListener('DOMContentLoaded', () => {
     if (eta) eta.textContent = 'N/A';
     if (dta) dta.textContent = 'N/A';
     if (time) time.textContent = '0:00';
+    map.setZoom(13);
+    map.setTilt(0);
+    map.setHeading(0);
   }
 
   function recenterMap() {
@@ -1372,16 +1397,21 @@ window.addEventListener('DOMContentLoaded', () => {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude } = position.coords;
-          const currentPos = new google.maps.LatLng(latitude, longitude);
-          if (map) map.setCenter(currentPos);
+          let currentPos = new google.maps.LatLng(latitude, longitude);
           if (routePath.length > 0) {
-            const closestPoint = findClosestPointOnRoute(currentPos, routePath);
-            const nextPointIndex = routePath.findIndex((point, index) => index > closestPoint.index && point) || 1;
-            if (nextPointIndex > 0 && nextPointIndex < routePath.length) {
+            const closest = findClosestPointOnRoute(currentPos, routePath);
+            if (closest.distance < 50) {
+              currentPos = routePath[closest.index];
+            }
+            const nextPointIndex = Math.min(closest.index + 1, routePath.length - 1);
+            if (nextPointIndex < routePath.length) {
               const nextPoint = routePath[nextPointIndex];
-              if (map) map.setHeading(google.maps.geometry.spherical.computeHeading(currentPos, nextPoint));
+              map.setHeading(google.maps.geometry.spherical.computeHeading(currentPos, nextPoint));
             }
           }
+          map.setCenter(currentPos);
+          map.setZoom(18);
+          map.setTilt(45);
           console.log('Map recentered at:', currentPos.toString());
         },
         (err) => console.log('Recenter geolocation error:', err),
