@@ -1668,6 +1668,7 @@ function enableMapClick() {
         detailedAlertBox.style.display = 'flex';
         detailedAlertBox.style.left = '50%';
         detailedAlertBox.style.top = '50%';
+        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
       }
       if (locationDisplay) locationDisplay.style.display = 'block';
       if (alertType) alertType.style.display = 'none';
@@ -1687,6 +1688,7 @@ function enableMapClick() {
         detailedAlertBox.style.display = 'flex';
         detailedAlertBox.style.left = '50%';
         detailedAlertBox.style.top = '50%';
+        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
       }
       if (locationDisplay) locationDisplay.style.display = 'block';
       if (alertType) alertType.style.display = 'none';
@@ -1731,13 +1733,17 @@ function postSelectedAlert() {
   const type = alertType.value;
   const notes = alertNotes.value.trim();
   const [lat, lng] = selectedLocation.textContent.split(', ').map(Number);
-  addAlert(type, notes, new google.maps.LatLng(lat, lng)).then(() => {
-    const detailedAlertBox = document.getElementById('detailedAlertBox');
-    if (detailedAlertBox) {
+  const detailedAlertBox = document.getElementById('detailedAlertBox');
+  if (detailedAlertBox) {
+    detailedAlertBox.style.opacity = '0';
+    setTimeout(() => {
       detailedAlertBox.classList.remove('active');
       detailedAlertBox.style.display = 'none';
-    }
-  });
+      addAlert(type, notes, new google.maps.LatLng(lat, lng)).then(() => {
+        showToastMessage('Your alert has been posted. Thank you!', 5000);
+      });
+    }, 300); // Wait for fade-out transition
+  }
 }
 
 function closeDetailedAlertBox() {
@@ -1771,11 +1777,10 @@ function makeDraggable(element) {
   let initialY;
   let xOffset = 0;
   let yOffset = 0;
-  if (!element.style.left || !element.style.top) {
-    element.style.left = '50%';
-    element.style.top = '50%';
-    console.log('Initialized detailedAlertBox position to center');
-  }
+  element.style.position = 'fixed';
+  element.style.left = '50%';
+  element.style.top = '50%';
+  element.style.transform = 'translate(-50%, -50%)';
   const h3 = element.querySelector('h3');
   if (h3) {
     h3.addEventListener('mousedown', (e) => {
@@ -1786,62 +1791,57 @@ function makeDraggable(element) {
       element.classList.add('dragging');
       console.log('Started dragging detailedAlertBox');
     });
+    h3.addEventListener('touchstart', (e) => {
+      if (e.target !== h3) return;
+      const touch = e.touches[0];
+      initialX = touch.clientX - xOffset;
+      initialY = touch.clientY - yOffset;
+      isDragging = true;
+      element.classList.add('dragging');
+      console.log('Started touch dragging detailedAlertBox');
+      e.preventDefault();
+    }, { passive: false });
+  }
+  function updatePosition(clientX, clientY) {
+    if (isDragging) {
+      currentX = clientX - initialX;
+      currentY = clientY - initialY;
+      xOffset = currentX;
+      yOffset = currentY;
+      const rect = element.getBoundingClientRect();
+      const maxX = window.innerWidth - rect.width - 15; // Account for padding
+      const maxY = window.innerHeight - rect.height - 15;
+      currentX = Math.max(15, Math.min(currentX, maxX));
+      currentY = Math.max(15, Math.min(currentY, maxY));
+      element.style.left = currentX + 'px';
+      element.style.top = currentY + 'px';
+      element.style.transform = 'none'; // Reset transform for absolute positioning
+      requestAnimationFrame(() => updatePosition(clientX, clientY));
+    }
   }
   document.addEventListener('mousemove', (e) => {
     if (isDragging) {
       e.preventDefault();
-      currentX = e.clientX - initialX;
-      currentY = e.clientY - initialY;
-      xOffset = currentX;
-      yOffset = currentY;
-      const rect = element.getBoundingClientRect();
-      const maxX = window.innerWidth - rect.width;
-      const maxY = window.innerHeight - rect.height;
-      currentX = Math.max(0, Math.min(currentX, maxX));
-      currentY = Math.max(0, Math.min(currentY, maxY));
-      element.style.left = currentX + 'px';
-      element.style.top = currentY + 'px';
+      updatePosition(e.clientX, e.clientY);
     }
   });
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-    element.classList.remove('dragging');
-    console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left || '50%', top: element.style.top || '50%' });
-  });
-  // Touch events
-  h3.addEventListener('touchstart', (e) => {
-    if (e.target !== h3) return;
-    const touch = e.touches[0];
-    initialX = touch.clientX - xOffset;
-    initialY = touch.clientY - yOffset;
-    isDragging = true;
-    element.classList.add('dragging');
-    console.log('Started touch dragging detailedAlertBox');
-    e.stopPropagation();
-  }, { passive: false });
   document.addEventListener('touchmove', (e) => {
     if (isDragging) {
       e.preventDefault();
-      e.stopPropagation();
       const touch = e.touches[0];
-      currentX = touch.clientX - initialX;
-      currentY = touch.clientY - initialY;
-      xOffset = currentX;
-      yOffset = currentY;
-      const rect = element.getBoundingClientRect();
-      const maxX = window.innerWidth - rect.width;
-      const maxY = window.innerHeight - rect.height;
-      currentX = Math.max(0, Math.min(currentX, maxX));
-      currentY = Math.max(0, Math.min(currentY, maxY));
-      element.style.left = currentX + 'px';
-      element.style.top = currentY + 'px';
+      updatePosition(touch.clientX, touch.clientY);
     }
   }, { passive: false });
+  document.addEventListener('mouseup', () => {
+    isDragging = false;
+    element.classList.remove('dragging');
+    console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
+  });
   document.addEventListener('touchend', (e) => {
     isDragging = false;
     element.classList.remove('dragging');
-    console.log('Stopped touch dragging detailedAlertBox at:', { left: element.style.left || '50%', top: element.style.top || '50%' });
-    e.stopPropagation();
+    console.log('Stopped touch dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
+    e.preventDefault();
   }, { passive: false });
 }
 

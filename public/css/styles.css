@@ -125,9 +125,10 @@ body {
   border-radius: 5px;
   font-size: 14px;
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 80px;
   text-align: center;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hud-item i {
@@ -151,22 +152,28 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background: #1a2636;
-  padding: 10px;
+  padding: 8px;
   border-radius: 5px;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   z-index: 1000;
+  flex-wrap: nowrap;
+  justify-content: space-around;
+  max-width: 90%;
+  box-sizing: border-box;
 }
 
 #control-hud .btn {
   background: #00c853;
   border: none;
   color: white;
-  padding: 8px 16px;
+  padding: 8px 12px;
   border-radius: 5px;
   cursor: pointer;
   font-size: 14px;
   transition: background 0.3s;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 #control-hud .btn:hover {
@@ -180,7 +187,7 @@ body {
   left: 50%;
   transform: translate(-50%, -50%);
   width: 90%;
-  max-width: 400px;
+  max-width: 350px;
   background: linear-gradient(135deg, #2c3e50, #34495e);
   z-index: 1002;
   padding: 15px;
@@ -190,6 +197,7 @@ body {
   color: #ecf0f1;
   font-family: 'Roboto', sans-serif;
   transition: transform 0.2s ease-out, opacity 0.2s ease-out;
+  touch-action: none;
 }
 
 #profile-hud.active, #settings-hud.active, #detailedAlertBox.active {
@@ -204,7 +212,7 @@ body {
     gap: 5px;
     padding: 5px;
     width: 95%;
-    max-width: 350px;
+    max-width: 340px;
   }
   #navAddress {
     font-size: 14px;
@@ -215,22 +223,21 @@ body {
   }
   #hud {
     flex-direction: row;
+    flex-wrap: nowrap;
     gap: 5px;
     padding: 5px;
     max-width: 95%;
-    flex-wrap: nowrap;
-    justify-content: space-around;
+    box-sizing: border-box;
   }
   .hud-item {
     flex: 1 1 0;
     font-size: 12px;
-    padding: 4px 6px;
+    padding: 4px 8px;
     gap: 4px;
-    min-width: 0;
+    min-width: 85px;
   }
   .hud-item i {
     font-size: 12px;
-    flex-shrink: 0;
   }
   .hud-item span {
     font-size: 12px;
@@ -247,11 +254,11 @@ body {
   #control-hud .btn {
     flex: 1 1 20%;
     font-size: 12px;
-    padding: 5px;
+    padding: 5px 8px;
   }
   #profile-hud, #settings-hud, #detailedAlertBox {
     width: 95%;
-    max-width: 350px;
+    max-width: 320px;
     padding: 10px;
   }
   #profile-hud .tab-button, #profile-hud .alerts th, #profile-hud .alerts td {
@@ -275,15 +282,15 @@ body {
   }
   #hud {
     bottom: 5px;
-    max-width: 75%;
+    max-width: 80%;
   }
   #control-hud {
     bottom: 65px;
-    max-width: 75%;
+    max-width: 80%;
   }
   #nav-input {
-    width: 70%;
-    max-width: 500px;
+    width: 75%;
+    max-width: 480px;
   }
 }
 
@@ -541,6 +548,9 @@ body {
   border: 2px solid #3498db;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5), 0 0 5px rgba(52, 152, 219, 0.5);
   overflow: auto;
+  touch-action: none;
+  position: fixed;
+  z-index: 1002;
 }
 
 #detailedAlertBox.dragging {
@@ -549,6 +559,16 @@ body {
 
 #detailedAlertBox h3 {
   cursor: move;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  touch-action: none;
+  padding: 10px;
+  background: #34495e;
+  border-radius: 5px 5px 0 0;
+  margin: -15px -15px 10px -15px;
+  text-align: center;
+  font-size: 16px;
 }
 
 #detailedAlertBox.debug {
@@ -557,7 +577,7 @@ body {
 }
 
 #detailedAlertBox.transparent {
-  opacity: 0.1;
+  opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s ease;
 }
@@ -601,6 +621,7 @@ body {
   text-align: center;
   font-size: 16px;
   margin: 10px 0;
+  display: none;
 }
 
 #detailedAlertBox button.add-alert, #detailedAlertBox button.post-alert, #detailedAlertBox button.press-to-alert {
@@ -740,16 +761,18 @@ body {
 
 #toast-message {
   position: fixed;
-  bottom: 20px;
+  bottom: 100px;
   left: 50%;
   transform: translateX(-50%);
-  background: #e74c3c;
+  background: #2ecc71;
   color: #ffffff;
-  padding: 10px 20px;
-  border-radius: 5px;
+  padding: 12px 24px;
+  border-radius: 8px;
   z-index: 1003;
   display: none;
   font-size: 14px;
   text-align: center;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  max-width: 90%;
+  transition: opacity 0.3s ease;
 }
