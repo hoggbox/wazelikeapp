@@ -6,6 +6,7 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation; /* Prevent browser pinch/zoom */
 }
 
 #map {
@@ -27,6 +28,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  touch-action: manipulation;
 }
 
 #login-screen input {
@@ -39,6 +41,10 @@ body {
   background: #3d566e;
   color: #ecf0f1;
   font-size: 14px;
+  touch-action: manipulation;
+  -webkit-user-select: text;
+  user-select: text;
+  outline: none;
 }
 
 #login-btn {
@@ -50,12 +56,16 @@ body {
   cursor: pointer;
   font-weight: bold;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  transition: background 0.2s ease, transform 0.2s ease;
+  touch-action: manipulation;
+}
+
+#login-btn:active {
+  background: #2980b9;
+  transform: scale(0.95); /* Immediate feedback */
 }
 
 #login-btn:hover {
   background: #2980b9;
-  transform: scale(1.05);
 }
 
 #nav-input {
@@ -80,6 +90,10 @@ body {
   border: none;
   border-radius: 3px;
   flex: 1;
+  touch-action: manipulation;
+  -webkit-user-select: text;
+  user-select: text;
+  outline: none;
 }
 
 .mic-button {
@@ -93,7 +107,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s ease;
+  touch-action: manipulation;
+}
+
+.mic-button:active {
+  background: #2980b9;
+  transform: scale(0.95);
 }
 
 .mic-button:hover {
@@ -173,9 +192,12 @@ body {
   border-radius: 5px;
   cursor: pointer;
   font-size: 14px;
-  transition: background 0.2s ease;
-  flex: 1 1 0;
-  min-width: 0;
+  touch-action: manipulation;
+}
+
+#control-hud .btn:active {
+  background: #009639;
+  transform: scale(0.95);
 }
 
 #control-hud .btn:hover {
@@ -198,7 +220,6 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   color: #ecf0f1;
   font-family: 'Roboto', sans-serif;
-  transition: opacity 0.2s ease-out;
   touch-action: none;
   will-change: transform, opacity;
 }
@@ -314,13 +335,16 @@ body {
   color: #ffffff;
   font-size: 16px;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
-  z-index: 1003;
+  touch-action: manipulation;
+}
+
+#profile-hud .close-btn:active {
+  background: #cc0000;
+  transform: scale(0.95);
 }
 
 #profile-hud .close-btn:hover {
   background: #cc0000;
-  transform: scale(1.05);
 }
 
 #profile-hud .tabs {
@@ -339,11 +363,16 @@ body {
   border-radius: 5px 5px 0 0;
   color: #ecf0f1;
   cursor: pointer;
-  transition: background 0.2s ease;
   font-size: 14px;
   margin-bottom: -2px;
   flex: 1;
   text-align: center;
+  touch-action: manipulation;
+}
+
+#profile-hud .tab-button:active {
+  background: #3498db;
+  transform: scale(0.95);
 }
 
 #profile-hud .tab-button.active {
@@ -397,6 +426,10 @@ body {
   background: #3d566e;
   color: #ecf0f1;
   font-size: 14px;
+  touch-action: manipulation;
+  -webkit-user-select: text;
+  user-select: text;
+  outline: none;
 }
 
 #profile-hud .edit-profile button {
@@ -407,12 +440,16 @@ body {
   color: #000000;
   cursor: pointer;
   margin-top: 10px;
-  transition: background 0.2s ease, transform 0.2s ease;
+  touch-action: manipulation;
+}
+
+#profile-hud .edit-profile button:active {
+  background: #2980b9;
+  transform: scale(0.95);
 }
 
 #profile-hud .edit-profile button:hover {
   background: #2980b9;
-  transform: scale(1.05);
 }
 
 #profile-hud .alerts table {
@@ -444,13 +481,17 @@ body {
   border-radius: 3px;
   color: #ffffff;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
   font-size: 10px;
+  touch-action: manipulation;
+}
+
+#profile-hud .alerts .remove-btn:active {
+  background: #cc0000;
+  transform: scale(0.95);
 }
 
 #profile-hud .alerts .remove-btn:hover {
   background: #cc0000;
-  transform: scale(1.05);
 }
 
 #profile-hud .pagination {
@@ -467,8 +508,13 @@ body {
   border-radius: 3px;
   color: #ecf0f1;
   cursor: pointer;
-  transition: background 0.2s ease;
   font-size: 12px;
+  touch-action: manipulation;
+}
+
+#profile-hud .pagination button:active {
+  background: #3498db;
+  transform: scale(0.95);
 }
 
 #profile-hud .pagination button.active {
@@ -494,6 +540,7 @@ body {
   border-radius: 3px;
   color: #ecf0f1;
   font-size: 12px;
+  touch-action: manipulation;
 }
 
 #settings-hud h2 {
@@ -519,13 +566,16 @@ body {
   border-radius: 5px;
   color: #ffffff;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s ease;
-  margin-top: 10px;
+  touch-action: manipulation;
+}
+
+#settings-hud button:active {
+  background: #cc0000;
+  transform: scale(0.95);
 }
 
 #settings-hud button:hover {
   background: #cc0000;
-  transform: scale(1.05);
 }
 
 #closeSettings {
@@ -538,12 +588,16 @@ body {
   cursor: pointer;
   font-weight: bold;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  transition: background 0.2s ease, transform 0.2s ease;
+  touch-action: manipulation;
+}
+
+#closeSettings:active {
+  background: #2980b9;
+  transform: scale(0.95);
 }
 
 #closeSettings:hover {
   background: #2980b9;
-  transform: scale(1.05);
 }
 
 #detailedAlertBox {
@@ -602,10 +656,13 @@ body {
   color: #ecf0f1;
   resize: vertical;
   box-sizing: border-box;
+  touch-action: manipulation;
+  -webkit-user-select: text;
+  user-select: text;
+  outline: none;
 }
 
 #detailedAlertBox select:focus, #detailedAlertBox textarea:focus {
-  outline: none;
   background: #34495e;
 }
 
@@ -616,6 +673,10 @@ body {
   justify-content: center;
   border: 1px dashed #ecf0f1;
   cursor: pointer;
+}
+
+#detailedAlertBox .upload-area:active {
+  background: #34495e;
 }
 
 #detailedAlertBox .upload-area:hover {
@@ -639,13 +700,16 @@ body {
   font-weight: bold;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  transition: background 0.2s ease, transform 0.2s ease;
-  margin: 5px 0;
+  touch-action: manipulation;
+}
+
+#detailedAlertBox button.add-alert:active, #detailedAlertBox button.post-alert:active, #detailedAlertBox button.press-to-alert:active {
+  background: #2980b9;
+  transform: scale(0.95);
 }
 
 #detailedAlertBox button.add-alert:hover, #detailedAlertBox button.post-alert:hover, #detailedAlertBox button.press-to-alert:hover {
   background: #2980b9;
-  transform: scale(1.05);
 }
 
 #voiceOverlay {
@@ -701,12 +765,16 @@ body {
   cursor: pointer;
   font-weight: bold;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  transition: background 0.2s ease, transform 0.2s ease;
+  touch-action: manipulation;
+}
+
+#voiceOverlay .close-btn:active {
+  background: #2980b9;
+  transform: scale(0.95);
 }
 
 #voiceOverlay .close-btn:hover {
   background: #2980b9;
-  transform: scale(1.05);
 }
 
 @keyframes pulse {
@@ -743,7 +811,11 @@ body {
   border-radius: 8px;
   cursor: pointer;
   font-weight: bold;
-  transition: transform 0.2s ease;
+  touch-action: manipulation;
+}
+
+#reroutePrompt button:active {
+  transform: scale(0.95);
 }
 
 #rerouteYes {
@@ -751,8 +823,12 @@ body {
   color: #ffffff;
 }
 
+#rerouteYes:active {
+  background: #009639;
+}
+
 #rerouteYes:hover {
-  transform: scale(1.05);
+  background: #009639;
 }
 
 #rerouteNo {
@@ -760,8 +836,12 @@ body {
   color: #ffffff;
 }
 
+#rerouteNo:active {
+  background: #cc0000;
+}
+
 #rerouteNo:hover {
-  transform: scale(1.05);
+  background: #cc0000;
 }
 
 #toast-message {

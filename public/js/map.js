@@ -1,4 +1,4 @@
-const VERSION = '1.0.47'; // Updated for performance optimizations
+const VERSION = '1.0.49'; // Updated for instant touch response and mobile performance
 // Global variables
 let map;
 let routePolyline;
@@ -10,9 +10,9 @@ let routePath = [];
 let recentDestinations = ['1827 Holly Hill Rd, Milledgeville, GA 31061', 'Walmart Milledgeville GA'];
 let autocompleteService;
 let placesService;
-let directionsService; // For Google Directions API
-let directionsRenderer; // For rendering routes
-let userLocation = { lat: 33.0891264, lng: -83.2372736 }; // Default position
+let directionsService;
+let directionsRenderer;
+let userLocation = { lat: 33.0891264, lng: -83.2372736 };
 let socket = null;
 let recognition = null;
 let isMuted = false;
@@ -442,7 +442,6 @@ function fetchAlerts() {
     })
     .then(alerts => {
       console.log('Raw API response for alerts:', JSON.stringify(alerts, null, 2));
-      // Deduplicate alerts by _id
       const uniqueAlerts = [];
       const seenIds = new Set();
       alerts.forEach(alert => {
@@ -1015,7 +1014,7 @@ window.initMap = function() {
     navigator.geolocation.watchPosition(
       (position) => {
         const now = Date.now();
-        if (now - lastPositionUpdate < 1000) return; // Throttle to 1s
+        if (now - lastPositionUpdate < 2000) return; // Throttle to 2s
         lastPositionUpdate = now;
         let currentPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
         userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
@@ -1035,72 +1034,20 @@ window.initMap = function() {
         }
         if (map) {
           if (liveLocationMarker) liveLocationMarker.setMap(null);
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-            canvas.width = 40;
-            canvas.height = 40;
-            ctx.shadowBlur = 4;
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-            ctx.shadowOffsetX = 2;
-            ctx.shadowOffsetY = 2;
-            ctx.save();
-            ctx.translate(20, 20);
-            let currentHeading = position.coords.heading || 0;
-            ctx.rotate(currentHeading * Math.PI / 180);
-            ctx.translate(-20, -20);
-            ctx.fillStyle = '#00bcd4';
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(20, 8);
-            ctx.lineTo(8, 32);
-            ctx.lineTo(32, 32);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-            ctx.restore();
-            const imageUrl = canvas.toDataURL();
-            if (imageUrl.startsWith('data:image')) {
-              liveLocationMarker = new google.maps.Marker({
-                position: currentPos,
-                map: map,
-                icon: { url: imageUrl, scaledSize: new google.maps.Size(40, 40) },
-                title: 'Live Location'
-              });
-              console.log('Triangle marker set at:', currentPos.toString());
-            } else {
-              liveLocationMarker = new google.maps.Marker({
-                position: currentPos,
-                map: map,
-                icon: {
-                  path: google.maps.SymbolPath.CIRCLE,
-                  fillColor: '#00bcd4',
-                  fillOpacity: 1,
-                  strokeWeight: 2,
-                  strokeColor: '#000000',
-                  scale: 10
-                },
-                title: 'Live Location (Fallback)'
-              });
-              console.log('Using fallback circle at:', currentPos.toString());
-            }
-          } else {
-            liveLocationMarker = new google.maps.Marker({
-              position: currentPos,
-              map: map,
-              icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                fillColor: '#00bcd4',
-                fillOpacity: 1,
-                strokeWeight: 2,
-                strokeColor: '#000000',
-                scale: 10
-              },
-              title: 'Live Location (Fallback)'
-            });
-            console.log('Using fallback circle at:', currentPos.toString());
-          }
+          liveLocationMarker = new google.maps.Marker({
+            position: currentPos,
+            map: map,
+            icon: {
+              path: google.maps.SymbolPath.CIRCLE,
+              fillColor: '#00bcd4',
+              fillOpacity: 1,
+              strokeWeight: 2,
+              strokeColor: '#000000',
+              scale: 8
+            },
+            title: 'Live Location'
+          });
+          console.log('Circle marker set at:', currentPos.toString());
         }
         if (isNavigating && routePath.length > 0 && position.coords.heading !== undefined) {
           provideVoiceNavigation(position.coords);
@@ -1186,40 +1133,28 @@ window.addEventListener('DOMContentLoaded', () => {
   if (navOverlay) {
     navOverlay.style.display = 'none';
     console.log('navOverlay set to hidden on load');
-  } else {
-    console.error('navOverlay not found on DOM load');
   }
   if (voiceOverlay) {
     voiceOverlay.style.display = 'none';
     console.log('voiceOverlay set to hidden on load');
-  } else {
-    console.error('voiceOverlay not found on DOM load');
   }
   if (detailedAlertBox) {
     detailedAlertBox.style.display = 'none';
     detailedAlertBox.style.left = '50%';
     detailedAlertBox.style.top = '50%';
     console.log('detailedAlertBox set to hidden on load, element:', detailedAlertBox);
-  } else {
-    console.error('detailedAlertBox not found on DOM load');
   }
   if (profileHud) {
     profileHud.style.display = 'none';
     console.log('profileHud set to hidden on load');
-  } else {
-    console.error('profileHud not found on DOM load');
   }
   if (settingsHud) {
     settingsHud.style.display = 'none';
     console.log('settingsHud set to hidden on load');
-  } else {
-    console.error('settingsHud not found on DOM load');
   }
   if (reroutePrompt) {
     reroutePrompt.style.display = 'none';
     console.log('reroutePrompt set to hidden on load');
-  } else {
-    console.error('reroutePrompt not found on DOM load');
   }
 
   // Handle screen orientation change
@@ -1571,13 +1506,11 @@ window.addEventListener('DOMContentLoaded', () => {
     console.time('Show detailed alert box');
     console.log('Showing detailed alert box, element:', detailedAlertBox);
     if (detailedAlertBox) {
-      console.log('Current class list:', detailedAlertBox.classList);
       detailedAlertBox.classList.add('active');
       detailedAlertBox.style.display = 'flex';
       detailedAlertBox.style.left = '50%';
       detailedAlertBox.style.top = '50%';
       detailedAlertBox.style.transform = 'translate(-50%, -50%)';
-      console.log('Added active class, new class list:', detailedAlertBox.classList, 'display style:', window.getComputedStyle(detailedAlertBox).display);
       detailedAlertBox.style.opacity = '0';
       setTimeout(() => {
         detailedAlertBox.style.opacity = '1';
@@ -1814,23 +1747,19 @@ window.addEventListener('DOMContentLoaded', () => {
     element.style.transform = 'translate(-50%, -50%)';
     const h3 = element.querySelector('h3');
     if (h3) {
-      h3.addEventListener('mousedown', (e) => {
+      const startDrag = (clientX, clientY, e) => {
         if (e.target !== h3) return;
-        initialX = e.clientX - xOffset;
-        initialY = e.clientY - yOffset;
+        initialX = clientX - xOffset;
+        initialY = clientY - yOffset;
         isDragging = true;
         element.classList.add('dragging');
         console.log('Started dragging detailedAlertBox');
-      });
-      h3.addEventListener('touchstart', (e) => {
-        if (e.target !== h3) return;
-        const touch = e.touches[0];
-        initialX = touch.clientX - xOffset;
-        initialY = touch.clientY - yOffset;
-        isDragging = true;
-        element.classList.add('dragging');
-        console.log('Started touch dragging detailedAlertBox');
         e.preventDefault();
+      };
+      h3.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY, e));
+      h3.addEventListener('touchstart', (e) => {
+        const touch = e.touches[0];
+        startDrag(touch.clientX, touch.clientY, e);
       }, { passive: false });
     }
     function updatePosition(clientX, clientY) {
@@ -1855,7 +1784,7 @@ window.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         updatePosition(e.clientX, e.clientY);
       }
-    });
+    }, { passive: false });
     document.addEventListener('touchmove', (e) => {
       if (isDragging) {
         e.preventDefault();
@@ -1863,17 +1792,14 @@ window.addEventListener('DOMContentLoaded', () => {
         updatePosition(touch.clientX, touch.clientY);
       }
     }, { passive: false });
-    document.addEventListener('mouseup', () => {
+    const stopDrag = (e) => {
       isDragging = false;
       element.classList.remove('dragging');
       console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
-    });
-    document.addEventListener('touchend', (e) => {
-      isDragging = false;
-      element.classList.remove('dragging');
-      console.log('Stopped touch dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
       e.preventDefault();
-    }, { passive: false });
+    };
+    document.addEventListener('mouseup', stopDrag);
+    document.addEventListener('touchend', stopDrag, { passive: false });
   }
 
   // Initialize event listeners
@@ -1893,6 +1819,11 @@ window.addEventListener('DOMContentLoaded', () => {
                 startNavigation(prediction.description);
                 navOverlay.style.display = 'none';
               });
+              item.addEventListener('touchend', () => {
+                navAddress.value = prediction.description;
+                startNavigation(prediction.description);
+                navOverlay.style.display = 'none';
+              }, { passive: false });
               suggestions.appendChild(item);
             });
             showOverlay();
@@ -1907,14 +1838,20 @@ window.addEventListener('DOMContentLoaded', () => {
       navOverlay.style.display = 'none';
       showToastMessage('Navigation overlay closed.', 5000);
     });
+    closeOverlay.addEventListener('touchend', () => {
+      navOverlay.style.display = 'none';
+      showToastMessage('Navigation overlay closed.', 5000);
+    }, { passive: false });
   }
 
   if (cancelBtn) {
     cancelBtn.addEventListener('click', stopNavigation);
+    cancelBtn.addEventListener('touchend', stopNavigation, { passive: false });
   }
 
   if (recenterBtn) {
     recenterBtn.addEventListener('click', recenterMap);
+    recenterBtn.addEventListener('touchend', recenterMap, { passive: false });
   }
 
   if (muteBtn) {
@@ -1923,14 +1860,21 @@ window.addEventListener('DOMContentLoaded', () => {
       muteBtn.classList.toggle('muted', isMuted);
       showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
     });
+    muteBtn.addEventListener('touchend', () => {
+      isMuted = !isMuted;
+      muteBtn.classList.toggle('muted', isMuted);
+      showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
+    }, { passive: false });
   }
 
   if (hazardBtn) {
     hazardBtn.addEventListener('click', addHazardMarker);
+    hazardBtn.addEventListener('touchend', addHazardMarker, { passive: false });
   }
 
   if (micButton) {
     micButton.addEventListener('click', startVoiceRecognition);
+    micButton.addEventListener('touchend', startVoiceRecognition, { passive: false });
   }
 
   if (closeVoiceOverlay) {
@@ -1939,10 +1883,16 @@ window.addEventListener('DOMContentLoaded', () => {
       voiceOverlay.style.display = 'none';
       showToastMessage('Voice overlay closed.', 5000);
     });
+    closeVoiceOverlay.addEventListener('touchend', () => {
+      stopVoiceRecognition();
+      voiceOverlay.style.display = 'none';
+      showToastMessage('Voice overlay closed.', 5000);
+    }, { passive: false });
   }
 
   if (detailedAlertBtn) {
     detailedAlertBtn.addEventListener('click', showDetailedAlertBox);
+    detailedAlertBtn.addEventListener('touchend', showDetailedAlertBox, { passive: false });
   }
 
   if (closeDetailedAlertBtn) {
@@ -1951,18 +1901,26 @@ window.addEventListener('DOMContentLoaded', () => {
       detailedAlertBox.style.display = 'none';
       showToastMessage('Detailed alert box closed.', 5000);
     });
+    closeDetailedAlertBtn.addEventListener('touchend', () => {
+      detailedAlertBox.classList.remove('active');
+      detailedAlertBox.style.display = 'none';
+      showToastMessage('Detailed alert box closed.', 5000);
+    }, { passive: false });
   }
 
   if (clickLocationBtn) {
     clickLocationBtn.addEventListener('click', enableMapClick);
+    clickLocationBtn.addEventListener('touchend', enableMapClick, { passive: false });
   }
 
   if (alertCurrentBtn) {
     alertCurrentBtn.addEventListener('click', alertAtCurrentLocation);
+    alertCurrentBtn.addEventListener('touchend', alertAtCurrentLocation, { passive: false });
   }
 
   if (postAlertBtn) {
     postAlertBtn.addEventListener('click', postSelectedAlert);
+    postAlertBtn.addEventListener('touchend', postSelectedAlert, { passive: false });
   }
 
   if (cancelAlertBtn) {
@@ -1971,6 +1929,11 @@ window.addEventListener('DOMContentLoaded', () => {
       detailedAlertBox.style.display = 'none';
       showToastMessage('Alert creation cancelled.', 5000);
     });
+    cancelAlertBtn.addEventListener('touchend', () => {
+      detailedAlertBox.classList.remove('active');
+      detailedAlertBox.style.display = 'none';
+      showToastMessage('Alert creation cancelled.', 5000);
+    }, { passive: false });
   }
 
   if (profileBtn) {
@@ -1978,6 +1941,10 @@ window.addEventListener('DOMContentLoaded', () => {
       profileHud.style.display = 'flex';
       profileHud.classList.add('active');
     });
+    profileBtn.addEventListener('touchend', () => {
+      profileHud.style.display = 'flex';
+      profileHud.classList.add('active');
+    }, { passive: false });
   }
 
   if (closeBtn) {
@@ -1985,11 +1952,15 @@ window.addEventListener('DOMContentLoaded', () => {
       profileHud.classList.remove('active');
       profileHud.style.display = 'none';
     });
+    closeBtn.addEventListener('touchend', () => {
+      profileHud.classList.remove('active');
+      profileHud.style.display = 'none';
+    }, { passive: false });
   }
 
   if (tabButtons) {
     tabButtons.forEach(button => {
-      button.addEventListener('click', () => {
+      const handleTabClick = () => {
         tabButtons.forEach(btn => btn.classList.remove('active'));
         button.classList.add('active');
         currentTab = button.dataset.tab;
@@ -2002,7 +1973,9 @@ window.addEventListener('DOMContentLoaded', () => {
           alertsTab.classList.add('active');
           updateAlertTable();
         }
-      });
+      };
+      button.addEventListener('click', handleTabClick);
+      button.addEventListener('touchend', handleTabClick, { passive: false });
     });
   }
 
@@ -2040,6 +2013,39 @@ window.addEventListener('DOMContentLoaded', () => {
           console.error('Profile update error:', err.message);
         });
     });
+    saveProfileBtn.addEventListener('touchend', () => {
+      const updates = {
+        name: document.getElementById('edit-name')?.value.trim() || '',
+        username: document.getElementById('edit-username')?.value.trim() || '',
+        email: document.getElementById('edit-email')?.value.trim() || '',
+        age: document.getElementById('edit-age')?.value.trim() || '',
+        dob: document.getElementById('edit-dob')?.value.trim() || '',
+        location: document.getElementById('edit-location')?.value.trim() || ''
+      };
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token available for profile update');
+        return;
+      }
+      fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(updates)
+      })
+        .then(response => {
+          if (!response.ok) throw new Error(`Profile update failed: ${response.status}`);
+          return response.json();
+        })
+        .then(data => {
+          userProfile = data;
+          currentUser = { ...currentUser, username: data.username, id: data._id };
+          updateProfileDisplay();
+          updateEditProfileForm();
+        })
+        .catch(err => {
+          console.error('Profile update error:', err.message);
+        });
+    }, { passive: false });
   }
 
   if (settingsBtn) {
@@ -2047,6 +2053,10 @@ window.addEventListener('DOMContentLoaded', () => {
       settingsHud.style.display = 'flex';
       settingsHud.classList.add('active');
     });
+    settingsBtn.addEventListener('touchend', () => {
+      settingsHud.style.display = 'flex';
+      settingsHud.classList.add('active');
+    }, { passive: false });
   }
 
   if (closeSettings) {
@@ -2054,20 +2064,28 @@ window.addEventListener('DOMContentLoaded', () => {
       settingsHud.classList.remove('active');
       settingsHud.style.display = 'none';
     });
+    closeSettings.addEventListener('touchend', () => {
+      settingsHud.classList.remove('active');
+      settingsHud.style.display = 'none';
+    }, { passive: false });
   }
 
   if (loginBtn && loginUsername && loginPassword) {
-    loginBtn.addEventListener('click', () => {
+    const handleLogin = () => {
       login(loginUsername.value, loginPassword.value, loginBtn, loginUsername, loginPassword);
-    });
+    };
+    loginBtn.addEventListener('click', handleLogin);
+    loginBtn.addEventListener('touchend', handleLogin, { passive: false });
   }
 
   if (rerouteYes) {
     rerouteYes.addEventListener('click', () => rerouteAroundHazards(currentHazards));
+    rerouteYes.addEventListener('touchend', () => rerouteAroundHazards(currentHazards), { passive: false });
   }
 
   if (rerouteNo) {
     rerouteNo.addEventListener('click', () => ignoreHazards(currentHazards));
+    rerouteNo.addEventListener('touchend', () => ignoreHazards(currentHazards), { passive: false });
   }
 
   if (detailedAlertBox) {
