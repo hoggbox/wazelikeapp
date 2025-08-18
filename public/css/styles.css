@@ -6,17 +6,13 @@ body {
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  touch-action: manipulation;
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
+  touch-action: manipulation; /* Prevent browser pinch/zoom */
 }
 
 #map {
   height: 100vh;
   width: 100vw;
   will-change: transform;
-  touch-action: auto;
 }
 
 #login-screen {
@@ -49,7 +45,6 @@ body {
   -webkit-user-select: text;
   user-select: text;
   outline: none;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #login-btn {
@@ -62,12 +57,11 @@ body {
   font-weight: bold;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #login-btn:active {
   background: #2980b9;
-  transform: scale(0.95);
+  transform: scale(0.95); /* Immediate feedback */
 }
 
 #login-btn:hover {
@@ -88,7 +82,6 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   width: 80%;
   max-width: 400px;
-  touch-action: manipulation;
 }
 
 #navAddress {
@@ -101,7 +94,6 @@ body {
   -webkit-user-select: text;
   user-select: text;
   outline: none;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .mic-button {
@@ -116,7 +108,6 @@ body {
   align-items: center;
   justify-content: center;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 .mic-button:active {
@@ -144,7 +135,6 @@ body {
   flex-wrap: nowrap;
   justify-content: space-around;
   box-sizing: border-box;
-  touch-action: none;
 }
 
 .hud-item {
@@ -160,7 +150,6 @@ body {
   text-align: center;
   overflow: hidden;
   text-overflow: ellipsis;
-  touch-action: none;
 }
 
 .hud-item i {
@@ -193,7 +182,6 @@ body {
   justify-content: space-around;
   max-width: 90%;
   box-sizing: border-box;
-  touch-action: manipulation;
 }
 
 #control-hud .btn {
@@ -205,7 +193,6 @@ body {
   cursor: pointer;
   font-size: 14px;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #control-hud .btn:active {
@@ -349,7 +336,6 @@ body {
   font-size: 16px;
   cursor: pointer;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #profile-hud .close-btn:active {
@@ -382,7 +368,6 @@ body {
   flex: 1;
   text-align: center;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #profile-hud .tab-button:active {
@@ -445,7 +430,6 @@ body {
   -webkit-user-select: text;
   user-select: text;
   outline: none;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #profile-hud .edit-profile button {
@@ -457,7 +441,6 @@ body {
   cursor: pointer;
   margin-top: 10px;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #profile-hud .edit-profile button:active {
@@ -500,7 +483,6 @@ body {
   cursor: pointer;
   font-size: 10px;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #profile-hud .alerts .remove-btn:active {
@@ -528,7 +510,6 @@ body {
   cursor: pointer;
   font-size: 12px;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #profile-hud .pagination button:active {
@@ -560,10 +541,6 @@ body {
   color: #ecf0f1;
   font-size: 12px;
   touch-action: manipulation;
-  -webkit-user-select: none;
-  user-select: none;
-  outline: none;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #settings-hud h2 {
@@ -590,7 +567,6 @@ body {
   color: #ffffff;
   cursor: pointer;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #settings-hud button:active {
@@ -613,7 +589,6 @@ body {
   font-weight: bold;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #closeSettings:active {
@@ -669,8 +644,6 @@ body {
 #detailedAlertBox label {
   margin: 10px 0 5px;
   font-size: 14px;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 #detailedAlertBox select, #detailedAlertBox textarea, #detailedAlertBox .upload-area, #detailedAlertBox .location-display {
@@ -687,7 +660,6 @@ body {
   -webkit-user-select: text;
   user-select: text;
   outline: none;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #detailedAlertBox select:focus, #detailedAlertBox textarea:focus {
@@ -701,9 +673,6 @@ body {
   justify-content: center;
   border: 1px dashed #ecf0f1;
   cursor: pointer;
-  touch-action: manipulation;
-  -webkit-user-select: none;
-  user-select: none;
 }
 
 #detailedAlertBox .upload-area:active {
@@ -732,7 +701,6 @@ body {
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #detailedAlertBox button.add-alert:active, #detailedAlertBox button.post-alert:active, #detailedAlertBox button.press-to-alert:active {
@@ -766,7 +734,6 @@ body {
   justify-content: center;
   color: #ecf0f1;
   font-family: 'Roboto', sans-serif;
-  touch-action: manipulation;
 }
 
 #voiceOverlay .pulsator {
@@ -799,7 +766,6 @@ body {
   font-weight: bold;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #voiceOverlay .close-btn:active {
@@ -832,7 +798,6 @@ body {
   text-align: center;
   flex-direction: column;
   gap: 10px;
-  touch-action: manipulation;
 }
 
 #reroutePrompt p {
@@ -847,7 +812,6 @@ body {
   cursor: pointer;
   font-weight: bold;
   touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #reroutePrompt button:active {
@@ -896,7 +860,6 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
   max-width: 90%;
   transition: opacity 0.2s ease;
-  touch-action: none;
 }
 
 #toast-message.error {
