@@ -444,9 +444,7 @@ function fetchAlerts() {
         return {
           ...alert,
           locationStr: `[${alert.location.coordinates[1].toFixed(6)}, ${alert.location.coordinates[0].toFixed(6)}]`,
-          distance: distance,
-          votes: alert.votes || 0, // Initialize votes
-          votedByUser: false // Track if current user voted
+          distance: distance
         };
       }).filter(alert => alert.distance <= 30);
       console.log('Fetched and deduplicated alerts:', JSON.stringify(allAlerts, null, 2));
@@ -576,9 +574,9 @@ function updateAlertTable() {
   const typeFilter = document.getElementById('alert-type-filter')?.value || '';
   const userFilter = document.getElementById('alert-user-filter')?.value || '';
   let filteredAlerts = allAlerts.filter(alert => {
-    const matchesType = !typeFilter || alert.type === typeFilter;
-    const matchesUser = !userFilter || (alert.user && alert.user.username === userFilter);
-    return matchesType && matchesUser && (currentTab === 'alerts' ? true : alert.user?._id.toString() === userProfile._id?.toString());
+    const MatchesType = !typeFilter || alert.type === typeFilter;
+    const MatchesUser = !userFilter || (alert.user && alert.user.username === userFilter);
+    return MatchesType && MatchesUser && (currentTab === 'alerts' ? true : alert.user?._id.toString() === userProfile._id?.toString());
   });
   const startIdx = (currentPage - 1) * ALERTS_PER_PAGE;
   const endIdx = startIdx + ALERTS_PER_PAGE;
@@ -597,7 +595,7 @@ function updateAlertTable() {
     const isAdmin = userProfile.email === 'imhoggbox@gmail.com';
     const canDelete = isOwnAlert || isAdmin;
     const userDisplay = alert.user?.username || 'Anonymous';
-    console.log('Processing alert:', { alertId: alert._id, isOwnAlert, isAdmin, canDelete, userDisplay, votes: alert.votes, votedByUser: alert.votedByUser });
+    console.log('Processing alert:', { alertId: alert._id, isOwnAlert, isAdmin, canDelete, userDisplay });
     const row = document.createElement('tr');
     row.innerHTML = `
       <td>${alert.type}</td>
@@ -618,10 +616,7 @@ function updateAlertTable() {
         <p><span>Timestamp:</span> ${new Date(alert.createdAt).toLocaleString()}</p>
         <p><span>Location:</span> ${alert.locationStr}</p>
         <p><span>Notes:</span> ${alert.notes || 'None'}</p>
-        <div class="buttons">
-          <button class="collapse-btn"><i class="fas fa-caret-up"></i></button>
-          <button class="vote-btn" data-id="${alert._id}">Vote to remove ${alert.votes}/8</button>
-        </div>
+        <button class="collapse-btn"><i class="fas fa-caret-up"></i></button>
       </td>
     `;
     table.appendChild(row);
@@ -630,7 +625,6 @@ function updateAlertTable() {
     const deleteBtn = row.querySelector('.delete-btn');
     const infoBtn = row.querySelector('.info-btn');
     const collapseBtn = detailsRow.querySelector('.collapse-btn');
-    const voteBtn = detailsRow.querySelector('.vote-btn');
 
     if (deleteBtn) {
       deleteBtn.addEventListener('click', () => {
@@ -660,38 +654,6 @@ function updateAlertTable() {
     collapseBtn.addEventListener('touchend', (e) => {
       e.preventDefault();
       collapseBtn.click();
-    }, { passive: false });
-
-    voteBtn.addEventListener('click', () => {
-      const alertIndex = allAlerts.findIndex(a => a._id === alert._id);
-      if (alertIndex === -1) {
-        console.error('Alert not found for voting:', alert._id);
-        return;
-      }
-      if (alert.votes >= 8) {
-        console.log('Max votes reached, removing alert:', alert._id);
-        window.removeAlert(alert._id);
-        return;
-      }
-      if (!allAlerts[alertIndex].votedByUser) {
-        allAlerts[alertIndex].votes += 1;
-        allAlerts[alertIndex].votedByUser = true;
-        showToastMessage('Vote added to remove alert.', 5000);
-      } else {
-        allAlerts[alertIndex].votes -= 1;
-        allAlerts[alertIndex].votedByUser = false;
-        showToastMessage('Vote removed.', 5000);
-      }
-      if (allAlerts[alertIndex].votes >= 8) {
-        console.log('Alert reached 8 votes, removing:', alert._id);
-        window.removeAlert(alert._id);
-      } else {
-        updateAlertTable();
-      }
-    });
-    voteBtn.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      voteBtn.click();
     }, { passive: false });
   });
   updatePagination(filteredAlerts.length);
@@ -1590,7 +1552,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     console.timeEnd('Show detailed alert box');
   }
-function addAlert(type, notes = '', position) {
+  function addAlert(type, notes = '', position) {
     return new Promise((resolve, reject) => {
       console.time(`Add ${type} alert`);
       if (!position) {
@@ -1615,14 +1577,13 @@ function addAlert(type, notes = '', position) {
       });
     });
   }
-
   function addHazardMarker() {
     const now = Date.now();
     if (now - lastHazardTime < 1000) {
       console.log('Hazard add debounced, too soon');
       return;
     }
-    lastHazardTime = now;
+lastHazardTime = now;
     console.log('Hazard button clicked, checking geolocation...');
     if (!currentUser) {
       console.warn('No current user, cannot post hazard');
@@ -1668,7 +1629,7 @@ function addAlert(type, notes = '', position) {
             showToastMessage('Hazard alert posted with fallback location.', 5000);
           }).catch(err => {
             console.error('Failed to post hazard alert with fallback:', err);
-            showToastMessage(err.message || 'Failed to post hazard alert with fallback.', 7007, true);
+            showToastMessage(err.message || 'Failed to post hazard alert with fallback.', 7000, true);
           });
         },
         { maximumAge: 10000, timeout: 30000, enableHighAccuracy: true }

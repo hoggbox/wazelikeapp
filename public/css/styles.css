@@ -572,6 +572,8 @@ body {
 #profile-hud .alerts .details-row {
   display: none;
   background: #34495e;
+  padding: 8px;
+  border-bottom: 1px solid #2c3e50;
 }
 
 #profile-hud .alerts .details-row.active {
@@ -579,31 +581,14 @@ body {
 }
 
 #profile-hud .alerts .details-content {
-  padding: 10px;
+  padding: 8px;
   font-size: 12px;
   color: #ecf0f1;
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 6px 10px;
-  align-items: start;
 }
 
 #profile-hud .alerts .details-content p {
-  margin: 0;
-  line-height: 1.6;
-}
-
-#profile-hud .alerts .details-content p span {
-  font-weight: bold;
-  color: #3498db;
-}
-
-#profile-hud .alerts .details-content .buttons {
-  grid-column: 1 / -1;
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 8px;
+  margin: 4px 0;
+  line-height: 1.4;
 }
 
 #profile-hud .alerts .collapse-btn {
@@ -619,6 +604,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  margin: 4px auto 0;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
@@ -633,28 +619,9 @@ body {
   transform: scale(0.95);
 }
 
-#profile-hud .alerts .vote-btn {
-  padding: 6px 12px;
-  background: linear-gradient(45deg, #3498db, #2980b9);
-  border: none;
-  border-radius: 5px;
-  color: #000000;
-  font-size: 12px;
+#profile-hud .alerts .details-content p span {
   font-weight: bold;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
-}
-
-#profile-hud .alerts .vote-btn:hover {
-  background: linear-gradient(45deg, #2980b9, #3498db);
-  transform: scale(1.05);
-}
-
-#profile-hud .alerts .vote-btn:active {
-  background: linear-gradient(45deg, #2980b9, #3498db);
-  transform: scale(0.95);
+  color: #3498db;
 }
 
 #profile-hud .pagination {
@@ -1068,18 +1035,11 @@ body {
   #profile-hud .alerts .details-content {
     font-size: 11px;
     padding: 6px;
-    grid-template-columns: 70px 1fr;
-    gap: 4px 8px;
   }
   #profile-hud .alerts .collapse-btn {
     width: 14px;
     height: 14px;
     font-size: 9px;
     margin: 3px auto 0;
-  }
-  #profile-hud .alerts .vote-btn {
-    padding: 5px 10px;
-    font-size: 11px;
-    min-width: 80px;
   }
 }
