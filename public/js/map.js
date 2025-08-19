@@ -251,7 +251,7 @@ async function updateRoute(start, end, avoidHazards = false) {
     routePolyline = new google.maps.Polyline({
       path: path,
       strokeColor: '#ff4444',
-      strokeOpacity: 1.0;
+      strokeOpacity: 1.0,
       strokeWeight: 4,
       map: map
     });
