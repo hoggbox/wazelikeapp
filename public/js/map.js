@@ -1,4 +1,4 @@
-const VERSION = '1.0.51'; // Updated for logout fix, edit profile updates, and comprehensive toasts
+const VERSION = '1.0.52'; // Updated for nav start focus and settings logout button
 // Global variables
 let map;
 let routePolyline;
@@ -28,7 +28,7 @@ let allAlerts = [];
 let ignoredHazards = [];
 let currentHazards = [];
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
-const ALERTS_PER_PAGE = 5; // Updated to 5 alerts per page
+const ALERTS_PER_PAGE = 5;
 let currentPage = 1;
 let currentTab = 'account';
 let accountInfo, editProfile, alertsTab, tabButtons;
@@ -268,6 +268,7 @@ async function updateRoute(start, end, avoidHazards = false) {
     showToastMessage('Failed to calculate route. Please try again.', 7000, true);
   }
 }
+
 function addMarker(type, notes = '', position) {
   const timerName = `Add ${type} marker ${Date.now()}`;
   console.time(timerName);
@@ -551,6 +552,18 @@ function updateProfileDisplay() {
   const logoutButton = document.createElement('button');
   logoutButton.textContent = 'Logout';
   logoutButton.className = 'logout-btn';
+  logoutButton.style.cssText = `
+    padding: 8px 15px;
+    background: #ff4444;
+    border: none;
+    border-radius: 5px;
+    color: #ffffff;
+    cursor: pointer;
+    font-family: 'Roboto', sans-serif;
+    margin-top: 10px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  `;
   logoutButton.addEventListener('click', () => {
     logout();
   });
@@ -1069,7 +1082,7 @@ window.initMap = function() {
     disableDefaultUI: true,
     fullscreenControl: false,
     mapTypeControl: false,
-    gestureHandling: 'greedy' // Enable single-finger panning
+    gestureHandling: 'greedy'
   });
   if (!map) {
     console.error('Map initialization failed');
@@ -1102,7 +1115,7 @@ window.initMap = function() {
             console.log('User off-route, rerouting...');
             showToastMessage('Rerouting...', 5000);
             updateRoute([position.coords.latitude, position.coords.longitude], currentDestination);
-            return; // Exit early to avoid updating with old route
+            return;
           }
           map.setCenter(currentPos);
           map.setZoom(18);
@@ -1243,6 +1256,35 @@ window.addEventListener('DOMContentLoaded', () => {
     reroutePrompt.style.display = 'none';
     console.log('reroutePrompt set to hidden on load');
   }
+  // Add logout button to settings HUD
+  if (settingsHud) {
+    const existingSettingsLogout = settingsHud.querySelector('.logout-btn');
+    if (!existingSettingsLogout) {
+      const settingsLogoutButton = document.createElement('button');
+      settingsLogoutButton.textContent = 'Logout';
+      settingsLogoutButton.className = 'logout-btn';
+      settingsLogoutButton.style.cssText = `
+        padding: 8px 15px;
+        background: #ff4444;
+        border: none;
+        border-radius: 5px;
+        color: #ffffff;
+        cursor: pointer;
+        font-family: 'Roboto', sans-serif;
+        margin-top: 10px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      `;
+      settingsLogoutButton.addEventListener('click', () => {
+        logout();
+      });
+      settingsLogoutButton.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        logout();
+      }, { passive: false });
+      settingsHud.appendChild(settingsLogoutButton);
+    }
+  }
   // Initialize Socket.IO with retry logic
   function loadSocketIOScript() {
     return new Promise((resolve, reject) => {
@@ -1374,34 +1416,62 @@ window.addEventListener('DOMContentLoaded', () => {
     const destination = await geocodeWithGoogle(address);
     if (destination) {
       currentDestination = destination;
-      const position = userLocation;
-      console.log(`Navigating from [${position.lat}, ${position.lng}] to [${destination[0]}, ${destination[1]}]`);
-      if (map && !isNaN(position.lat) && !isNaN(position.lng)) {
-        try {
-          await updateRoute([position.lat, position.lng], destination);
-          if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
-            const utterance = new SpeechSynthesisUtterance('Navigation started. Follow the route.');
-            utterance.voice = femaleVoice;
-            utterance.lang = 'en-US';
-            utterance.volume = 1.0;
-            window.speechSynthesis.speak(utterance);
-            console.log('Navigation voice test triggered with:', femaleVoice.name);
-          } else if (!femaleVoice) {
-            console.warn('No female voice available, skipping speech');
-          }
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const { latitude, longitude } = position.coords;
+            userLocation = { lat: latitude, lng: longitude };
+            lastLocationUpdate = Date.now();
+            console.log('Current location for navigation start:', userLocation);
+            map.setCenter(userLocation);
+            map.setZoom(18);
+            map.setTilt(45);
+            updateRoute([latitude, longitude], destination).then(() => {
+              if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
+                const utterance = new SpeechSynthesisUtterance('Navigation started. Follow the route.');
+                utterance.voice = femaleVoice;
+                utterance.lang = 'en-US';
+                utterance.volume = 1.0;
+                window.speechSynthesis.speak(utterance);
+                console.log('Navigation voice test triggered with:', femaleVoice.name);
+              } else if (!femaleVoice) {
+                console.warn('No female voice available, skipping speech');
+              }
+              checkHazardsOnRoute();
+              showToastMessage('Navigation focused on your location.', 5000);
+            }).catch(err => {
+              console.error('Route update failed:', err);
+              showToastMessage('Failed to start navigation.', 7000, true);
+            });
+          },
+          (err) => {
+            console.error('Geolocation error for navigation start:', err);
+            showToastMessage('Failed to get current location, using fallback.', 7000, true);
+            updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
+              map.setCenter(userLocation);
+              map.setZoom(18);
+              map.setTilt(45);
+              checkHazardsOnRoute();
+              showToastMessage('Navigation started with fallback location.', 5000);
+            }).catch(err => {
+              console.error('Route update with fallback failed:', err);
+              showToastMessage('Failed to start navigation.', 7000, true);
+            });
+          },
+          { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
+        );
+      } else {
+        console.error('Geolocation unavailable, using fallback:', userLocation);
+        updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
+          map.setCenter(userLocation);
           map.setZoom(18);
           map.setTilt(45);
           checkHazardsOnRoute();
-          showToastMessage('Navigation started.', 5000);
-        } catch (err) {
-          console.error('Route update failed:', err);
+          showToastMessage('Navigation started with fallback location.', 5000);
+        }).catch(err => {
+          console.error('Route update with fallback failed:', err);
           showToastMessage('Failed to start navigation.', 7000, true);
-        }
-      } else {
-        console.error('Invalid coordinates, using fallback:', userLocation);
-        await updateRoute([userLocation.lat, userLocation.lng], destination);
-        checkHazardsOnRoute();
-        showToastMessage('Navigation started with fallback location.', 5000);
+        });
       }
     } else {
       showToastMessage('Could not geocode address. Please check your input.', 7000, true);
@@ -1462,7 +1532,7 @@ window.addEventListener('DOMContentLoaded', () => {
           showToastMessage('Failed to recenter map.', 7000, true);
         },
         { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
-    );
+      );
     }
   }
   function startVoiceRecognition() {
@@ -1557,7 +1627,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }
         stopVoiceRecognition();
       };
-recognition.onerror = (event) => {
+      recognition.onerror = (event) => {
         console.error('Confirmation error:', event.error);
         if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
         showToastMessage(`Voice confirmation error: ${event.error}`, 7000, true);
@@ -1575,7 +1645,6 @@ recognition.onerror = (event) => {
       startNavigation(transcript);
     }
   }
-
   function showDetailedAlertBox() {
     console.time('Show detailed alert box');
     console.log('Showing detailed alert box, element:', detailedAlertBox);
@@ -1606,7 +1675,6 @@ recognition.onerror = (event) => {
     }
     console.timeEnd('Show detailed alert box');
   }
-
   function addAlert(type, notes = '', position) {
     return new Promise((resolve, reject) => {
       console.time(`Add ${type} alert`);
@@ -1632,7 +1700,6 @@ recognition.onerror = (event) => {
       });
     });
   }
-
   function addHazardMarker() {
     const now = Date.now();
     if (now - lastHazardTime < 1000) {
@@ -1705,7 +1772,6 @@ recognition.onerror = (event) => {
       });
     }
   }
-
   function enableMapClick() {
     if (isSelectingLocation) return; // Debounce
     isSelectingLocation = true;
@@ -1787,7 +1853,7 @@ recognition.onerror = (event) => {
           google.maps.event.removeListener(touchListener);
           showToastMessage('Location selected for alert.', 5000);
         }).catch(err => {
-          console.error('Reverse geocode error:', err);
+console.error('Reverse geocode error:', err);
           if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
           if (detailedAlertBox) {
             detailedAlertBox.classList.add('active');
