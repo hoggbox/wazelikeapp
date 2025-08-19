@@ -251,7 +251,7 @@ async function updateRoute(start, end, avoidHazards = false) {
     routePolyline = new google.maps.Polyline({
       path: path,
       strokeColor: '#ff4444',
-      strokeOpacity: 1.0,
+      strokeOpacity: 1.0;
       strokeWeight: 4,
       map: map
     });
@@ -574,9 +574,9 @@ function updateAlertTable() {
   const typeFilter = document.getElementById('alert-type-filter')?.value || '';
   const userFilter = document.getElementById('alert-user-filter')?.value || '';
   let filteredAlerts = allAlerts.filter(alert => {
-    const MatchesType = !typeFilter || alert.type === typeFilter;
-    const MatchesUser = !userFilter || (alert.user && alert.user.username === userFilter);
-    return MatchesType && MatchesUser && (currentTab === 'alerts' ? true : alert.user?._id.toString() === userProfile._id?.toString());
+    const matchesType = !typeFilter || alert.type === typeFilter;
+    const matchesUser = !userFilter || (alert.user && alert.user.username === userFilter);
+    return matchesType && matchesUser && (currentTab === 'alerts' ? true : alert.user?._id.toString() === userProfile._id?.toString());
   });
   const startIdx = (currentPage - 1) * ALERTS_PER_PAGE;
   const endIdx = startIdx + ALERTS_PER_PAGE;
@@ -621,11 +621,9 @@ function updateAlertTable() {
     `;
     table.appendChild(row);
     table.appendChild(detailsRow);
-
     const deleteBtn = row.querySelector('.delete-btn');
     const infoBtn = row.querySelector('.info-btn');
     const collapseBtn = detailsRow.querySelector('.collapse-btn');
-
     if (deleteBtn) {
       deleteBtn.addEventListener('click', () => {
         window.removeAlert(alert._id);
@@ -635,7 +633,6 @@ function updateAlertTable() {
         window.removeAlert(alert._id);
       }, { passive: false });
     }
-
     infoBtn.addEventListener('click', () => {
       const isActive = detailsRow.classList.contains('active');
       document.querySelectorAll('.details-row').forEach(row => row.classList.remove('active'));
@@ -647,7 +644,6 @@ function updateAlertTable() {
       e.preventDefault();
       infoBtn.click();
     }, { passive: false });
-
     collapseBtn.addEventListener('click', () => {
       detailsRow.classList.remove('active');
     });
@@ -1075,6 +1071,11 @@ window.initMap = function() {
           map.setTilt(45);
           map.setHeading(position.coords.heading || 0);
           provideVoiceNavigation(position.coords);
+          // Update route polyline to disappear behind user
+          if (routePolyline) {
+            const remainingPath = routePath.slice(closest.index);
+            routePolyline.setPath(remainingPath);
+          }
         }
         if (map) {
           if (liveLocationMarker) liveLocationMarker.setMap(null);
@@ -1583,7 +1584,7 @@ window.addEventListener('DOMContentLoaded', () => {
       console.log('Hazard add debounced, too soon');
       return;
     }
-lastHazardTime = now;
+    lastHazardTime = now;
     console.log('Hazard button clicked, checking geolocation...');
     if (!currentUser) {
       console.warn('No current user, cannot post hazard');
@@ -1648,7 +1649,6 @@ lastHazardTime = now;
       });
     }
   }
-
   function enableMapClick() {
     if (isSelectingLocation) return; // Debounce
     isSelectingLocation = true;
@@ -1657,7 +1657,7 @@ lastHazardTime = now;
       detailedAlertBox.classList.remove('active');
       detailedAlertBox.style.display = 'none';
     }
-    showToastMessage('Waiting for click or press a location on the map.', 5000);
+showToastMessage('Waiting for click or press a location on the map.', 5000);
     const clickListener = map.addListener('click', (event) => {
       const lat = event.latLng.lat();
       const lng = event.latLng.lng();
