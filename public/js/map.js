@@ -1065,6 +1065,12 @@ window.initMap = function() {
           if (closest.distance < 50) {
             currentPos = routePath[closest.index];
             console.log('Snapped position to route at index:', closest.index);
+          } else {
+            // User is off-route, reroute
+            console.log('User off-route, rerouting...');
+            showToastMessage('Rerouting...', 5000);
+            updateRoute([position.coords.latitude, position.coords.longitude], currentDestination);
+            return; // Exit early to avoid updating with old route
           }
           map.setCenter(currentPos);
           map.setZoom(18);
@@ -1657,7 +1663,7 @@ window.addEventListener('DOMContentLoaded', () => {
       detailedAlertBox.classList.remove('active');
       detailedAlertBox.style.display = 'none';
     }
-showToastMessage('Waiting for click or press a location on the map.', 5000);
+    showToastMessage('Waiting for click or press a location on the map.', 5000);
     const clickListener = map.addListener('click', (event) => {
       const lat = event.latLng.lat();
       const lng = event.latLng.lng();
