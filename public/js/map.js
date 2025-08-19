@@ -1,4 +1,4 @@
-const VERSION = '1.0.50'; // Updated for instant touch response, full-screen, and single-finger map
+const VERSION = '1.0.51'; // Updated for logout fix, edit profile updates, and comprehensive toasts
 // Global variables
 let map;
 let routePolyline;
@@ -88,6 +88,7 @@ function geocodeWithGoogle(address) {
     })
     .catch(err => {
       console.error('Google API geocode error:', err);
+      showToastMessage('Failed to geocode address.', 7000, true);
       return null;
     });
 }
@@ -120,6 +121,7 @@ function provideVoiceNavigation(coords) {
           utterance.rate = 1.0;
           window.speechSynthesis.speak(utterance);
           console.log('Voice navigation:', instruction, 'with:', femaleVoice.name);
+          showToastMessage(`Navigation: ${instruction}`, 5000);
         } else if (!femaleVoice) {
           console.warn('No female voice available, skipping navigation instruction');
         }
@@ -260,6 +262,7 @@ async function updateRoute(start, end, avoidHazards = false) {
     if (eta) eta.textContent = `${Math.round(timeMs / 60000)} min`;
     if (dta) dta.textContent = `${Math.round(distanceM / 1609.34)} mi`;
     console.timeEnd('Route calculation');
+    showToastMessage(avoidHazards ? 'Route updated to avoid hazards.' : 'Route updated.', 5000);
   } catch (err) {
     console.error('Route calculation failed:', err);
     showToastMessage('Failed to calculate route. Please try again.', 7000, true);
@@ -339,6 +342,7 @@ function addMarker(type, notes = '', position) {
           setTimeout(checkHazardsOnRoute, 1000);
         }
         console.timeEnd(timerName);
+        showToastMessage(`${type} alert posted successfully.`, 5000);
       })
       .catch(err => {
         console.error('Failed to save alert (attempt ' + attempts + '):', err.message);
@@ -452,6 +456,7 @@ function fetchAlerts() {
       updateAlertTable();
       populateUserFilter();
       checkHazardsOnRoute();
+      showToastMessage('Alerts fetched successfully.', 5000);
     })
     .catch(err => {
       console.error('Failed to fetch alerts:', err.message);
@@ -510,6 +515,7 @@ function fetchUserProfile() {
       console.log('Fetched user profile and updated currentUser:', { userProfile, currentUser });
       updateProfileDisplay();
       updateEditProfileForm();
+      showToastMessage('Profile fetched successfully.', 5000);
     })
     .catch(err => {
       console.error('Failed to fetch user profile:', err.message);
@@ -522,6 +528,7 @@ function fetchUserProfile() {
 function updateProfileDisplay() {
   if (!accountInfo) {
     console.error('accountInfo element not found in DOM');
+    showToastMessage('Profile display not found.', 7000, true);
     return;
   }
   const nameEl = document.getElementById('account-name');
@@ -536,20 +543,22 @@ function updateProfileDisplay() {
   if (ageEl) ageEl.textContent = `Age: ${userProfile.age || 'Not Provided'}`;
   if (dobEl) dobEl.textContent = `DOB: ${userProfile.dob ? new Date(userProfile.dob).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : 'Not Provided'}`;
   if (locationEl) locationEl.textContent = `Location: ${userProfile.location || 'Not Provided'}`;
-  if (!accountInfo.querySelector('.logout-btn')) {
-    const logoutButton = document.createElement('button');
-    logoutButton.textContent = 'Logout';
-    logoutButton.className = 'logout-btn';
-    logoutButton.addEventListener('click', () => {
-      logout();
-      window.location.href = '/';
-    });
-    logoutButton.addEventListener('touchend', () => {
-      logout();
-      window.location.href = '/';
-    }, { passive: false });
-    accountInfo.appendChild(logoutButton);
+  // Remove existing logout button to prevent duplicates
+  const existingLogoutButton = accountInfo.querySelector('.logout-btn');
+  if (existingLogoutButton) {
+    existingLogoutButton.remove();
   }
+  const logoutButton = document.createElement('button');
+  logoutButton.textContent = 'Logout';
+  logoutButton.className = 'logout-btn';
+  logoutButton.addEventListener('click', () => {
+    logout();
+  });
+  logoutButton.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    logout();
+  }, { passive: false });
+  accountInfo.appendChild(logoutButton);
 }
 function updateEditProfileForm() {
   const editName = document.getElementById('edit-name');
@@ -569,6 +578,7 @@ function updateAlertTable() {
   const table = document.getElementById('alert-table');
   if (!table) {
     console.error('Alert table not found in DOM');
+    showToastMessage('Alert table not found.', 7000, true);
     return;
   }
   const typeFilter = document.getElementById('alert-type-filter')?.value || '';
@@ -638,6 +648,7 @@ function updateAlertTable() {
       document.querySelectorAll('.details-row').forEach(row => row.classList.remove('active'));
       if (!isActive) {
         detailsRow.classList.add('active');
+        showToastMessage('Alert details expanded.', 5000);
       }
     });
     infoBtn.addEventListener('touchend', (e) => {
@@ -646,6 +657,7 @@ function updateAlertTable() {
     }, { passive: false });
     collapseBtn.addEventListener('click', () => {
       detailsRow.classList.remove('active');
+      showToastMessage('Alert details collapsed.', 5000);
     });
     collapseBtn.addEventListener('touchend', (e) => {
       e.preventDefault();
@@ -658,6 +670,7 @@ function updatePagination(totalAlerts) {
   const pagination = document.getElementById('alert-pagination');
   if (!pagination) {
     console.error('Pagination element not found in DOM');
+    showToastMessage('Pagination not found.', 7000, true);
     return;
   }
   pagination.innerHTML = '';
@@ -669,6 +682,7 @@ function updatePagination(totalAlerts) {
     if (currentPage > 1) {
       currentPage--;
       updateAlertTable();
+      showToastMessage(`Switched to page ${currentPage}.`, 5000);
     }
   });
   prevButton.addEventListener('touchend', (e) => {
@@ -676,6 +690,7 @@ function updatePagination(totalAlerts) {
     if (currentPage > 1) {
       currentPage--;
       updateAlertTable();
+      showToastMessage(`Switched to page ${currentPage}.`, 5000);
     }
   }, { passive: false });
   pagination.appendChild(prevButton);
@@ -686,11 +701,13 @@ function updatePagination(totalAlerts) {
     button.addEventListener('click', () => {
       currentPage = i;
       updateAlertTable();
+      showToastMessage(`Switched to page ${i}.`, 5000);
     });
     button.addEventListener('touchend', (e) => {
       e.preventDefault();
       currentPage = i;
       updateAlertTable();
+      showToastMessage(`Switched to page ${i}.`, 5000);
     }, { passive: false });
     pagination.appendChild(button);
   }
@@ -701,6 +718,7 @@ function updatePagination(totalAlerts) {
     if (currentPage < totalPages) {
       currentPage++;
       updateAlertTable();
+      showToastMessage(`Switched to page ${currentPage}.`, 5000);
     }
   });
   nextButton.addEventListener('touchend', (e) => {
@@ -708,6 +726,7 @@ function updatePagination(totalAlerts) {
     if (currentPage < totalPages) {
       currentPage++;
       updateAlertTable();
+      showToastMessage(`Switched to page ${currentPage}.`, 5000);
     }
   }, { passive: false });
   pagination.appendChild(nextButton);
@@ -716,6 +735,7 @@ function populateUserFilter() {
   const userFilter = document.getElementById('alert-user-filter');
   if (!userFilter) {
     console.error('User filter element not found in DOM');
+    showToastMessage('User filter not found.', 7000, true);
     return;
   }
   const uniqueUsers = [...new Set(allAlerts.map(alert => alert.user?.username).filter(Boolean))];
@@ -725,6 +745,9 @@ function populateUserFilter() {
     option.value = user;
     option.textContent = user;
     userFilter.appendChild(option);
+  });
+  userFilter.addEventListener('change', () => {
+    showToastMessage(`Filtered alerts by user: ${userFilter.value || 'All Users'}.`, 5000);
   });
 }
 function fetchWithTokenRefresh(url, options = {}) {
@@ -775,7 +798,10 @@ function refreshToken() {
       if (!response.ok) throw new Error(`Refresh failed with status: ${response.status}`);
       return response.json();
     })
-    .then(data => data.token || null)
+    .then(data => {
+      showToastMessage('Session refreshed successfully.', 5000);
+      return data.token || null;
+    })
     .catch(err => {
       console.error('Token refresh failed:', err);
       showToastMessage('Failed to refresh session, please log in again.', 5000, true);
@@ -829,26 +855,32 @@ function login(username, password, loginBtn, loginUsername, loginPassword) {
     });
 }
 function logout() {
-  localStorage.removeItem('token');
-  localStorage.removeItem('refreshToken');
-  currentUser = null;
-  userProfile = { name: '', username: '', email: '', age: '', dob: null, location: '', _id: null, lastUsernameChange: null };
-  ignoredHazards = [];
-  allAlerts = [];
-  hazardMarkers.forEach(h => h.marker.setMap(null));
-  hazardMarkers = [];
-  alertMarkers.clear();
-  const loginScreen = document.getElementById('login-screen');
-  const map = document.getElementById('map');
-  const profileHud = document.getElementById('profile-hud');
-  const settingsHud = document.getElementById('settings-hud');
-  if (loginScreen) loginScreen.style.display = 'flex';
-  if (map) map.style.display = 'none';
-  if (profileHud && profileHud.classList) profileHud.classList.remove('active');
-  if (settingsHud && settingsHud.classList) settingsHud.classList.remove('active');
-  if (profileHud) profileHud.style.display = 'none';
-  console.log('Logged out, resetting to login screen');
-  showToastMessage('Logged out successfully.', 5000);
+  try {
+    localStorage.removeItem('token');
+    localStorage.removeItem('refreshToken');
+    currentUser = null;
+    userProfile = { name: '', username: '', email: '', age: '', dob: null, location: '', _id: null, lastUsernameChange: null };
+    ignoredHazards = [];
+    allAlerts = [];
+    hazardMarkers.forEach(h => h.marker.setMap(null));
+    hazardMarkers = [];
+    alertMarkers.clear();
+    const loginScreen = document.getElementById('login-screen');
+    const map = document.getElementById('map');
+    const profileHud = document.getElementById('profile-hud');
+    const settingsHud = document.getElementById('settings-hud');
+    if (loginScreen) loginScreen.style.display = 'flex';
+    if (map) map.style.display = 'none';
+    if (profileHud && profileHud.classList) profileHud.classList.remove('active');
+    if (settingsHud && settingsHud.classList) settingsHud.classList.remove('active');
+    if (profileHud) profileHud.style.display = 'none';
+    console.log('Logged out, resetting to login screen');
+    showToastMessage('Logged out successfully.', 5000);
+    window.location.href = '/';
+  } catch (err) {
+    console.error('Logout error:', err);
+    showToastMessage('Failed to log out.', 7000, true);
+  }
 }
 function alertAtCurrentLocation() {
   const alertType = document.getElementById('alertType');
@@ -995,6 +1027,7 @@ window.initMap = function() {
   if (!token) {
     if (loginScreen) loginScreen.style.display = 'flex';
     if (mapElement) mapElement.style.display = 'none';
+    showToastMessage('Please log in to access the map.', 5000, true);
     return;
   }
   try {
@@ -1066,7 +1099,6 @@ window.initMap = function() {
             currentPos = routePath[closest.index];
             console.log('Snapped position to route at index:', closest.index);
           } else {
-            // User is off-route, reroute
             console.log('User off-route, rerouting...');
             showToastMessage('Rerouting...', 5000);
             updateRoute([position.coords.latitude, position.coords.longitude], currentDestination);
@@ -1077,7 +1109,6 @@ window.initMap = function() {
           map.setTilt(45);
           map.setHeading(position.coords.heading || 0);
           provideVoiceNavigation(position.coords);
-          // Update route polyline to disappear behind user
           if (routePolyline) {
             const remainingPath = routePath.slice(closest.index);
             routePolyline.setPath(remainingPath);
@@ -1105,7 +1136,10 @@ window.initMap = function() {
         }
         checkHazardsOnRoute();
       },
-      (err) => console.warn('WatchPosition error:', err),
+      (err) => {
+        console.warn('WatchPosition error:', err);
+        showToastMessage('Failed to update location.', 7000, true);
+      },
       { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
     );
     navigator.geolocation.getCurrentPosition(
@@ -1114,8 +1148,12 @@ window.initMap = function() {
         lastLocationUpdate = Date.now();
         console.log('Initial user location:', userLocation);
         if (map) map.setCenter(userLocation);
+        showToastMessage('Initial location acquired.', 5000);
       },
-      (err) => console.warn('Initial geolocation failed, using fallback:', err, userLocation),
+      (err) => {
+        console.warn('Initial geolocation failed, using fallback:', err, userLocation);
+        showToastMessage('Failed to get initial location, using fallback.', 7000, true);
+      },
       { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
     );
   }
@@ -1221,6 +1259,7 @@ window.addEventListener('DOMContentLoaded', () => {
       };
       script.onerror = () => {
         console.error('Failed to load Socket.IO script');
+        showToastMessage('Failed to load Socket.IO.', 7000, true);
         reject(new Error('Socket.IO script failed to load'));
       };
       document.head.appendChild(script);
@@ -1233,6 +1272,7 @@ window.addEventListener('DOMContentLoaded', () => {
         console.log('Socket.IO connected to:', BASE_URL);
         socket.on('connect', () => {
           console.log('Socket.IO connection established');
+          showToastMessage('Connected to server.', 5000);
           socket.on('hazard', (data) => {
             if (map && !alertMarkers.has(data._id)) {
               addMarkerFromDB(data);
@@ -1261,6 +1301,7 @@ window.addEventListener('DOMContentLoaded', () => {
               hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
               allAlerts = allAlerts.filter(a => a._id !== data._id);
               updateAlertTable();
+              showToastMessage('Alert removed from map.', 5000);
             }
             console.log('Alert removed via socket:', data._id);
           });
@@ -1307,6 +1348,7 @@ window.addEventListener('DOMContentLoaded', () => {
           if (navAddress) navAddress.value = dest;
           startNavigation(dest);
           if (navOverlay) navOverlay.style.display = 'none';
+          showToastMessage(`Selected recent destination: ${dest}`, 5000);
         };
         item.addEventListener('click', handleSelect);
         item.addEventListener('touchend', handleSelect, { passive: false });
@@ -1420,7 +1462,7 @@ window.addEventListener('DOMContentLoaded', () => {
           showToastMessage('Failed to recenter map.', 7000, true);
         },
         { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
-      );
+    );
     }
   }
   function startVoiceRecognition() {
@@ -1490,28 +1532,32 @@ window.addEventListener('DOMContentLoaded', () => {
         if (voiceOverlay) voiceOverlay.style.display = 'flex';
         if (pulsator) pulsator.classList.add('active');
         if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
+        showToastMessage('Waiting for voice confirmation.', 5000);
       };
       recognition.onresult = (event) => {
         const confirmation = event.results[0][0].transcript.toLowerCase().trim();
         console.log('Confirmation input:', confirmation);
         if (confirmation.includes('yes')) {
           startNavigation(transcript);
+          showToastMessage(`Confirmed destination: ${transcript}`, 5000);
         } else if (confirmation.includes('no')) {
           if (voiceInstruction) voiceInstruction.textContent = 'Please try again...';
           const retryUtterance = new SpeechSynthesisUtterance('Please try again.');
           retryUtterance.voice = femaleVoice;
           window.speechSynthesis.speak(retryUtterance);
+          showToastMessage('Voice input rejected, retrying.', 5000);
           setTimeout(() => startVoiceRecognition(), 1000);
         } else {
           if (voiceInstruction) voiceInstruction.textContent = 'Please say "yes" or "no"...';
           const promptUtterance = new SpeechSynthesisUtterance('Please say "yes" or "no".');
           promptUtterance.voice = femaleVoice;
           window.speechSynthesis.speak(promptUtterance);
+          showToastMessage('Please say "yes" or "no".', 5000);
           setTimeout(() => confirmVoiceInput(transcript), 1000);
         }
         stopVoiceRecognition();
       };
-      recognition.onerror = (event) => {
+recognition.onerror = (event) => {
         console.error('Confirmation error:', event.error);
         if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
         showToastMessage(`Voice confirmation error: ${event.error}`, 7000, true);
@@ -1529,6 +1575,7 @@ window.addEventListener('DOMContentLoaded', () => {
       startNavigation(transcript);
     }
   }
+
   function showDetailedAlertBox() {
     console.time('Show detailed alert box');
     console.log('Showing detailed alert box, element:', detailedAlertBox);
@@ -1559,6 +1606,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     console.timeEnd('Show detailed alert box');
   }
+
   function addAlert(type, notes = '', position) {
     return new Promise((resolve, reject) => {
       console.time(`Add ${type} alert`);
@@ -1584,10 +1632,12 @@ window.addEventListener('DOMContentLoaded', () => {
       });
     });
   }
+
   function addHazardMarker() {
     const now = Date.now();
     if (now - lastHazardTime < 1000) {
       console.log('Hazard add debounced, too soon');
+      showToastMessage('Please wait before posting another hazard.', 5000, true);
       return;
     }
     lastHazardTime = now;
@@ -1655,6 +1705,7 @@ window.addEventListener('DOMContentLoaded', () => {
       });
     }
   }
+
   function enableMapClick() {
     if (isSelectingLocation) return; // Debounce
     isSelectingLocation = true;
@@ -1686,6 +1737,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
         isSelectingLocation = false;
         google.maps.event.removeListener(clickListener);
+        showToastMessage('Location selected for alert.', 5000);
       }).catch(err => {
         console.error('Reverse geocode error:', err);
         if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
@@ -1706,6 +1758,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
         isSelectingLocation = false;
         google.maps.event.removeListener(clickListener);
+        showToastMessage('Failed to geocode selected location.', 7000, true);
       });
     });
     // Add touchend listener for map click to ensure single-tap response
@@ -1732,6 +1785,7 @@ window.addEventListener('DOMContentLoaded', () => {
           if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
           isSelectingLocation = false;
           google.maps.event.removeListener(touchListener);
+          showToastMessage('Location selected for alert.', 5000);
         }).catch(err => {
           console.error('Reverse geocode error:', err);
           if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
@@ -1752,6 +1806,7 @@ window.addEventListener('DOMContentLoaded', () => {
           if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
           isSelectingLocation = false;
           google.maps.event.removeListener(touchListener);
+          showToastMessage('Failed to geocode selected location.', 7000, true);
         });
       }
     });
@@ -1791,6 +1846,7 @@ window.addEventListener('DOMContentLoaded', () => {
     return new Promise((resolve, reject) => {
       if (!window.google || !google.maps) {
         reject(new Error('Google Maps API not loaded'));
+        showToastMessage('Google Maps API not loaded.', 7000, true);
         return;
       }
       const geocoder = new google.maps.Geocoder();
@@ -1825,6 +1881,7 @@ window.addEventListener('DOMContentLoaded', () => {
         isDragging = true;
         element.classList.add('dragging');
         console.log('Started dragging detailedAlertBox');
+        showToastMessage('Dragging alert box.', 5000);
         e.preventDefault();
       };
       h3.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY, e));
@@ -1867,6 +1924,7 @@ window.addEventListener('DOMContentLoaded', () => {
       isDragging = false;
       element.classList.remove('dragging');
       console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
+      showToastMessage('Alert box drag stopped.', 5000);
       e.preventDefault();
     };
     document.addEventListener('mouseup', stopDrag);
@@ -1889,6 +1947,7 @@ window.addEventListener('DOMContentLoaded', () => {
                 navAddress.value = prediction.description;
                 startNavigation(prediction.description);
                 navOverlay.style.display = 'none';
+                showToastMessage(`Selected destination: ${prediction.description}`, 5000);
               };
               item.addEventListener('click', handleSelect);
               item.addEventListener('touchend', handleSelect, { passive: false });
@@ -2002,6 +2061,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const handleProfile = () => {
       profileHud.style.display = 'flex';
       profileHud.classList.add('active');
+      showToastMessage('Profile opened.', 5000);
     };
     profileBtn.addEventListener('click', handleProfile);
     profileBtn.addEventListener('touchend', handleProfile, { passive: false });
@@ -2011,6 +2071,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const handleCloseProfile = () => {
       profileHud.classList.remove('active');
       profileHud.style.display = 'none';
+      showToastMessage('Profile closed.', 5000);
     };
     closeBtn.addEventListener('click', handleCloseProfile);
     closeBtn.addEventListener('touchend', handleCloseProfile, { passive: false });
@@ -2031,6 +2092,7 @@ window.addEventListener('DOMContentLoaded', () => {
           alertsTab.classList.add('active');
           updateAlertTable();
         }
+        showToastMessage(`Switched to ${currentTab} tab.`, 5000);
       };
       button.addEventListener('click', handleTabClick);
       button.addEventListener('touchend', handleTabClick, { passive: false });
@@ -2047,9 +2109,15 @@ window.addEventListener('DOMContentLoaded', () => {
         dob: document.getElementById('edit-dob')?.value.trim() || '',
         location: document.getElementById('edit-location')?.value.trim() || ''
       };
+      if (!updates.username || !updates.email) {
+        console.error('Username or email missing in profile update');
+        showToastMessage('Username and email are required.', 7000, true);
+        return;
+      }
       const token = localStorage.getItem('token');
       if (!token) {
         console.error('No token available for profile update');
+        showToastMessage('Please log in to update profile.', 5000, true);
         return;
       }
       fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
@@ -2062,11 +2130,15 @@ window.addEventListener('DOMContentLoaded', () => {
           return response.json();
         })
         .then(data => {
-          userProfile = data;
+          userProfile = { ...userProfile, ...data };
           currentUser = { ...currentUser, username: data.username, id: data._id };
           updateProfileDisplay();
           updateEditProfileForm();
+          console.log('Profile updated:', userProfile);
           showToastMessage('Profile updated successfully.', 5000);
+          profileHud.classList.remove('active');
+          profileHud.style.display = 'none';
+          accountInfo.classList.add('active');
         })
         .catch(err => {
           console.error('Profile update error:', err.message);
@@ -2081,6 +2153,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const handleSettings = () => {
       settingsHud.style.display = 'flex';
       settingsHud.classList.add('active');
+      showToastMessage('Settings opened.', 5000);
     };
     settingsBtn.addEventListener('click', handleSettings);
     settingsBtn.addEventListener('touchend', handleSettings, { passive: false });
