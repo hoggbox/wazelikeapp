@@ -1,4 +1,4 @@
-const VERSION = '1.0.54'; // Updated for Google Maps-like HUD instructions
+const VERSION = '1.0.55'; // Updated for triangle marker and HUD fixes
 // Global variables
 let map;
 let routePolyline;
@@ -837,7 +837,7 @@ function updatePagination(totalAlerts) {
     if (currentPage < totalPages) {
       currentPage++;
       updateAlertTable();
-            showToastMessage(`Switched to page ${currentPage}.`, 5000);
+      showToastMessage(`Switched to page ${currentPage}.`, 5000);
     }
   }, { passive: false });
   pagination.appendChild(nextButton);
@@ -1276,6 +1276,30 @@ function startGeolocationWatch() {
           }
         }
         lastHeading = heading || lastHeading;
+        // Update user location marker as a triangle
+        if (map) {
+          if (liveLocationMarker) {
+            liveLocationMarker.setPosition(currentPos); // Update existing marker position
+          } else {
+            liveLocationMarker = new google.maps.Marker({
+              position: currentPos,
+              map: map,
+              icon: {
+                path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+                fillColor: '#00bcd4',
+                fillOpacity: 1,
+                strokeColor: '#000000',
+                strokeWeight: 2,
+                scale: 1.5,
+                anchor: new google.maps.Point(0, 0),
+                rotation: heading || 0 // Rotate based on heading
+              },
+              title: 'Your Location',
+              zIndex: 1001 // Ensure marker is above route
+            });
+          }
+          console.log('Triangle marker updated at:', currentPos.toString(), 'Heading:', heading || 0);
+        }
         if (isNavigating && routePath.length > 0) {
           const closest = findClosestPointOnRoute(currentPos, routePath);
           if (closest.distance < 50) {
@@ -1303,26 +1327,6 @@ function startGeolocationWatch() {
           }
           provideVoiceNavigation({ ...position.coords, heading });
         }
-        if (map) {
-          if (liveLocationMarker) liveLocationMarker.setMap(null);
-          liveLocationMarker = new google.maps.Marker({
-            position: currentPos,
-            map: map,
-            icon: {
-              path: google.maps.SymbolPath.CIRCLE,
-              fillColor: '#00bcd4',
-              fillOpacity: 1,
-              strokeWeight: 2,
-              strokeColor: '#000000',
-              scale: 8
-            },
-            title: 'Live Location'
-          });
-          console.log('Circle marker set at:', currentPos.toString());
-        }
-        if (isNavigating && routePath.length > 0 && (position.coords.heading !== undefined || previousPosition)) {
-          provideVoiceNavigation(position.coords);
-        }
         previousPosition = { lat: position.coords.latitude, lng: position.coords.longitude };
         checkHazardsOnRoute();
       },
@@ -1347,6 +1351,26 @@ function startGeolocationWatch() {
           setTimeout(startGeolocationWatch, 5000);
         } else {
           showToastMessage('Geolocation failed after retries. Using last known location.', 7000, true);
+          // Display fallback marker
+          if (map && !liveLocationMarker) {
+            liveLocationMarker = new google.maps.Marker({
+              position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
+              map: map,
+              icon: {
+                path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+                fillColor: '#00bcd4',
+                fillOpacity: 1,
+                strokeColor: '#000000',
+                strokeWeight: 2,
+                scale: 1.5,
+                anchor: new google.maps.Point(0, 0),
+                rotation: lastHeading || 0
+              },
+              title: 'Your Location (Fallback)',
+              zIndex: 1001
+            });
+            console.log('Fallback triangle marker set at:', userLocation);
+          }
         }
       },
       { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
@@ -1356,12 +1380,52 @@ function startGeolocationWatch() {
         userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
         lastLocationUpdate = Date.now();
         console.log('Initial user location:', userLocation);
-        if (map) map.setCenter(userLocation);
+        if (map) {
+          map.setCenter(userLocation);
+          if (!liveLocationMarker) {
+            liveLocationMarker = new google.maps.Marker({
+              position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
+              map: map,
+              icon: {
+                path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+                fillColor: '#00bcd4',
+                fillOpacity: 1,
+                strokeColor: '#000000',
+                strokeWeight: 2,
+                scale: 1.5,
+                anchor: new google.maps.Point(0, 0),
+                rotation: position.coords.heading || 0
+              },
+              title: 'Your Location',
+              zIndex: 1001
+            });
+            console.log('Initial triangle marker set at:', userLocation);
+          }
+        }
         showToastMessage('Initial location acquired.', 5000);
       },
       (err) => {
         console.warn('Initial geolocation failed, using fallback:', err, userLocation);
         showToastMessage('Failed to get initial location, using fallback.', 7000, true);
+        if (map && !liveLocationMarker) {
+          liveLocationMarker = new google.maps.Marker({
+            position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
+            map: map,
+            icon: {
+              path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+              fillColor: '#00bcd4',
+              fillOpacity: 1,
+              strokeColor: '#000000',
+              strokeWeight: 2,
+              scale: 1.5,
+              anchor: new google.maps.Point(0, 0),
+              rotation: 0
+            },
+            title: 'Your Location (Fallback)',
+            zIndex: 1001
+          });
+          console.log('Fallback triangle marker set at:', userLocation);
+        }
       },
       { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
     );
@@ -1380,6 +1444,25 @@ function startGeolocationWatch() {
       }
     }
     if (navDistance) navDistance.textContent = 'N/A';
+    if (map && !liveLocationMarker) {
+      liveLocationMarker = new google.maps.Marker({
+        position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
+        map: map,
+        icon: {
+          path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+          fillColor: '#00bcd4',
+          fillOpacity: 1,
+          strokeColor: '#000000',
+          strokeWeight: 2,
+          scale: 1.5,
+          anchor: new google.maps.Point(0, 0),
+          rotation: 0
+        },
+        title: 'Your Location (Default)',
+        zIndex: 1001
+      });
+      console.log('Default triangle marker set at:', userLocation);
+    }
   }
 }
 window.addEventListener('DOMContentLoaded', () => {
@@ -2497,7 +2580,7 @@ window.addEventListener('DOMContentLoaded', () => {
     settingsBtn.addEventListener('click', handleSettings);
     settingsBtn.addEventListener('touchend', handleSettings, { passive: false });
   }
-    if (closeSettings) {
+  if (closeSettings) {
     const handleCloseSettings = () => {
       settingsHud.classList.remove('active');
       settingsHud.style.display = 'none';

@@ -189,15 +189,15 @@ body {
 
 .nav-hud-item#instruction-container {
   position: relative;
-  padding-left: 36px; /* Space for turn arrow */
+  padding-left: 40px; /* Space for turn arrow */
 }
 
 .nav-hud-item#instruction-container i.fa-arrow-left,
 .nav-hud-item#instruction-container i.fa-arrow-right {
   position: absolute;
   left: 12px;
-  font-size: 20px;
-  color: #00c853;
+  font-size: 24px;
+  color: #00c853; /* Green for visibility */
   display: none; /* Hidden by default */
 }
 
@@ -350,12 +350,12 @@ body {
     font-size: 14px;
   }
   .nav-hud-item#instruction-container {
-    padding-left: 30px;
+    padding-left: 32px;
   }
   .nav-hud-item#instruction-container i.fa-arrow-left,
   .nav-hud-item#instruction-container i.fa-arrow-right {
     left: 8px;
-    font-size: 16px;
+    font-size: 18px;
   }
   #hud {
     flex-direction: row;
@@ -766,7 +766,7 @@ body {
   padding: 5px;
   background: #3d566e;
   border: none;
-  daughter-radius: 3px;
+  border-radius: 3px;
   color: #ecf0f1;
   font-size: 12px;
   touch-action: manipulation;
@@ -1140,4 +1140,11 @@ body {
     font-size: 9px;
     margin: 3px auto 0;
   }
+}
+
+/* User location marker styling */
+.user-location-marker {
+  fill: #00bcd4; /* Cyan color matching previous circle */
+  stroke: #000000;
+  stroke-width: 2;
 }
