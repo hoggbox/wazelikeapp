@@ -1,13 +1,13 @@
-const VERSION = '1.0.57'; // Updated for HUD and navigation fixes
+const VERSION = '1.0.58'; // Updated for robust navigation, HUD fixes, and geolocation handling
 // Global variables
 let map;
 let routePolyline;
-let passedPolyline;
+let passedPolyline; // For the faded passed portion
 let currentDestination = null;
 let liveLocationMarker = null;
 let isNavigating = false;
-let isFollowing = false;
-let isManualInteraction = false;
+let isFollowing = false; // Whether to auto-follow user
+let isManualInteraction = false; // Flag for user manual map interaction
 let previousPosition = null;
 let routePath = [];
 let recentDestinations = ['1827 Holly Hill Rd, Milledgeville, GA 31061', 'Walmart Milledgeville GA'];
@@ -30,7 +30,7 @@ let userProfile = { name: '', username: '', email: '', age: '', dob: null, locat
 let allAlerts = [];
 let ignoredHazards = [];
 let currentHazards = [];
-let directionsResponse = null;
+let directionsResponse = null; // Store the full directions response
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
 const ALERTS_PER_PAGE = 5;
 let currentPage = 1;
@@ -42,11 +42,10 @@ const mapReady = new Promise((resolve) => mapReadyResolve = resolve);
 let lastInstruction = '';
 let lastNavIndex = -1;
 let lastDistanceToNext = Infinity;
-let lastHeading = 0;
-let geolocationWatchId = null;
+let lastHeading = 0; // For fallback when no device heading
+let geolocationWatchId = null; // To manage watchPosition
 let geolocationRetryCount = 0;
 const MAX_GEOLOCATION_RETRIES = 3;
-const MAX_NAVIGATION_RETRIES = 3;
 // Determine API and Socket.IO base URL based on environment
 const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
 const BASE_URL = isLocal ? 'http://127.0.0.1:3000' : 'https://wazelikeapp.onrender.com';
@@ -105,11 +104,16 @@ function provideVoiceNavigation(coords) {
   const navInstruction = document.getElementById('nav-instruction');
   const navDistance = document.getElementById('nav-distance');
   const instructionContainer = document.getElementById('instruction-container');
-  if (routePath.length > 1 && coords && directionsResponse) {
+  if (!navInstruction || !navDistance || !instructionContainer) {
+    console.error('HUD elements not found:', { navInstruction, navDistance, instructionContainer });
+    showToastMessage('HUD elements missing. Please reload the page.', 7000, true);
+    return;
+  }
+  if (routePath.length > 1 && coords.heading !== undefined && directionsResponse) {
     const currentPos = new google.maps.LatLng(coords.latitude, coords.longitude);
     const closest = findClosestPointOnRoute(currentPos, routePath);
     const nextIndex = Math.min(closest.index + 1, routePath.length - 1);
-    const distance = closest.distance;
+    let distance = closest.distance;
     console.log('Navigation check:', { distance, nextIndex, heading: coords.heading });
     // Check if user is near the destination (within 50 meters)
     if (currentDestination) {
@@ -132,7 +136,7 @@ function provideVoiceNavigation(coords) {
     if (distance < 50 && nextIndex < routePath.length - 1 && closest.index > lastNavIndex) {
       // Find the corresponding step in directionsResponse
       let currentStep = null;
-      let stepDistance = 0;
+      let stepDistance = distance;
       let stepIndex = 0;
       for (const leg of directionsResponse.routes[0].legs) {
         for (let i = 0; i < leg.steps.length; i++) {
@@ -176,51 +180,48 @@ function provideVoiceNavigation(coords) {
           console.warn('No female voice available, skipping navigation instruction');
         }
         lastInstruction = instruction;
-        if (navInstruction) {
-          navInstruction.textContent = instruction;
-          const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-          const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-          if (leftArrow && rightArrow) {
-            leftArrow.classList.remove('active');
-            rightArrow.classList.remove('active');
-            if (turnDirection === 'left') {
-              leftArrow.classList.add('active');
-            } else if (turnDirection === 'right') {
-              rightArrow.classList.add('active');
-            }
+        navInstruction.textContent = instruction;
+        // Update turn arrow
+        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+        if (leftArrow && rightArrow) {
+          leftArrow.classList.remove('active');
+          rightArrow.classList.remove('active');
+          if (turnDirection === 'left') {
+            leftArrow.classList.add('active');
+          } else if (turnDirection === 'right') {
+            rightArrow.classList.add('active');
           }
+        } else {
+          console.error('Turn arrows not found in instructionContainer');
         }
-        if (navDistance) navDistance.textContent = `${Math.round(stepDistance || distance)} m`;
+        navDistance.textContent = `${Math.round(stepDistance)} m`;
       }
       lastNavIndex = closest.index;
-    } else if (navInstruction && lastInstruction) {
+    } else if (lastInstruction) {
       navInstruction.textContent = lastInstruction;
-      if (navDistance) navDistance.textContent = `${Math.round(lastDistanceToNext)} m`;
+      navDistance.textContent = `${Math.round(lastDistanceToNext)} m`;
     }
-    lastDistanceToNext = stepDistance || distance;
+    lastDistanceToNext = stepDistance;
   } else if (isNavigating && routePath.length > 0) {
-    console.warn('Missing coords or route data for voice navigation:', { coords, routePathLength: routePath.length });
-    if (navInstruction) {
-      navInstruction.textContent = 'Waiting for navigation data...';
-      const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-      const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-      if (leftArrow && rightArrow) {
-        leftArrow.classList.remove('active');
-        rightArrow.classList.remove('active');
-      }
+    console.warn('Missing heading or route data for voice navigation:', { heading: coords.heading, routePathLength: routePath.length });
+    navInstruction.textContent = 'Waiting for navigation data...';
+    const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+    const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+    if (leftArrow && rightArrow) {
+      leftArrow.classList.remove('active');
+      rightArrow.classList.remove('active');
     }
-    if (navDistance) navDistance.textContent = 'N/A';
+    navDistance.textContent = 'N/A';
   } else {
-    if (navInstruction) {
-      navInstruction.textContent = 'No navigation active';
-      const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-      const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-      if (leftArrow && rightArrow) {
-        leftArrow.classList.remove('active');
-        rightArrow.classList.remove('active');
-      }
+    navInstruction.textContent = 'No navigation active';
+    const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+    const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+    if (leftArrow && rightArrow) {
+      leftArrow.classList.remove('active');
+      rightArrow.classList.remove('active');
     }
-    if (navDistance) navDistance.textContent = 'N/A';
+    navDistance.textContent = 'N/A';
   }
   checkHazardsOnRoute();
 }
@@ -337,7 +338,7 @@ async function updateRoute(start, end, avoidHazards = false) {
         console.log(`Selected alternative route index: ${selectedRouteIndex} with min hazard distance: ${maxMinDistance}m`);
       }
       const selectedRoute = response.routes[selectedRouteIndex];
-      directionsResponse = response;
+      directionsResponse = response; // Store the full response for navigation instructions
       directionsRenderer.setDirections(response);
       directionsRenderer.setRouteIndex(selectedRouteIndex);
       const path = selectedRoute.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
@@ -1010,10 +1011,6 @@ function logout() {
     if (navHud) {
       navHud.classList.remove('active');
       navHud.style.display = 'none';
-    }
-    if (liveLocationMarker) {
-      liveLocationMarker.setMap(null);
-      liveLocationMarker = null;
     }
     console.log('Logged out, resetting to login screen');
     showToastMessage('Logged out successfully.', 5000);
@@ -1821,7 +1818,7 @@ window.addEventListener('DOMContentLoaded', () => {
               }
               checkHazardsOnRoute();
               showToastMessage('Navigation started.', 5000);
-              // Explicitly trigger initial navigation instruction
+              // Trigger initial navigation instruction
               provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
             }).catch(err => {
               console.error('Route update failed:', err);
@@ -2239,7 +2236,7 @@ window.addEventListener('DOMContentLoaded', () => {
         showToastMessage('Hazard alert posted with default location.', 5000);
       }).catch(err => {
         console.error('Failed to post hazard alert with default:', err);
-        showToastMessage(err.message || 'Failed to post hazard alert with default.', 7007, true);
+        showToastMessage(err.message || 'Failed to post hazard alert with default.', 7000, true);
       });
     }
   }
