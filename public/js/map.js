@@ -2,9 +2,12 @@ const VERSION = '1.0.52'; // Updated for nav start focus and settings logout but
 // Global variables
 let map;
 let routePolyline;
+let passedPolyline; // For the faded passed portion
 let currentDestination = null;
 let liveLocationMarker = null;
 let isNavigating = false;
+let isFollowing = false; // Whether to auto-follow user
+let isManualInteraction = false; // Flag for user manual map interaction
 let previousPosition = null;
 let routePath = [];
 let recentDestinations = ['1827 Holly Hill Rd, Milledgeville, GA 31061', 'Walmart Milledgeville GA'];
@@ -38,6 +41,10 @@ const mapReady = new Promise((resolve) => mapReadyResolve = resolve);
 let lastInstruction = '';
 let lastNavIndex = -1;
 let lastDistanceToNext = Infinity;
+let lastHeading = 0; // For fallback when no device heading
+let geolocationWatchId = null; // To manage watchPosition
+let geolocationRetryCount = 0;
+const MAX_GEOLOCATION_RETRIES = 3;
 // Determine API and Socket.IO base URL based on environment
 const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
 const BASE_URL = isLocal ? 'http://127.0.0.1:3000' : 'https://wazelikeapp.onrender.com';
@@ -254,6 +261,14 @@ async function updateRoute(start, end, avoidHazards = false) {
       path: path,
       strokeColor: '#ff4444',
       strokeOpacity: 1.0,
+      strokeWeight: 4,
+      map: map
+    });
+    if (passedPolyline) passedPolyline.setMap(null);
+    passedPolyline = new google.maps.Polyline({
+      path: [],
+      strokeColor: '#ff4444',
+      strokeOpacity: 0.4, // Faded
       strokeWeight: 4,
       map: map
     });
@@ -1082,7 +1097,8 @@ window.initMap = function() {
     disableDefaultUI: true,
     fullscreenControl: false,
     mapTypeControl: false,
-    gestureHandling: 'greedy'
+    gestureHandling: 'greedy',
+    tilt: 0
   });
   if (!map) {
     console.error('Map initialization failed');
@@ -1095,17 +1111,53 @@ window.initMap = function() {
   directionsRenderer = new google.maps.DirectionsRenderer({ map: map, suppressMarkers: true });
   console.log('Map, Directions, and Places initialized');
   mapReadyResolve();
+  // Detect manual interactions to stop auto-following
+  map.addListener('dragstart', () => {
+    if (isNavigating) {
+      isManualInteraction = true;
+      isFollowing = false;
+      console.log('Manual drag detected, stopping auto-follow');
+      showToastMessage('Manual map interaction detected. Use recenter to re-engage navigation follow.', 5000);
+    }
+  });
+  map.addListener('zoom_changed', () => {
+    if (isNavigating && !isManualInteraction) {
+      isManualInteraction = true;
+      isFollowing = false;
+      console.log('Manual zoom detected, stopping auto-follow');
+      showToastMessage('Manual zoom detected. Use recenter to re-engage navigation follow.', 5000);
+    }
+  });
+  startGeolocationWatch();
+  console.timeEnd('Map initialization');
+};
+function startGeolocationWatch() {
   if (navigator.geolocation) {
-    let lastPositionUpdate = 0;
-    navigator.geolocation.watchPosition(
+    if (geolocationWatchId) {
+      navigator.geolocation.clearWatch(geolocationWatchId);
+    }
+    geolocationWatchId = navigator.geolocation.watchPosition(
       (position) => {
+        geolocationRetryCount = 0; // Reset retry on success
         const now = Date.now();
-        if (now - lastPositionUpdate < 2000) return; // Throttle to 2s
-        lastPositionUpdate = now;
+        if (now - lastLocationUpdate < 2000) return; // Throttle to 2s
+        lastLocationUpdate = now;
         let currentPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
         userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
-        lastLocationUpdate = now;
         console.log('WatchPosition updated user location:', userLocation, 'Time:', now);
+        let heading = position.coords.heading;
+        if (heading === null || heading === undefined) {
+          // Fallback to computed heading from movement
+          if (previousPosition) {
+            heading = google.maps.geometry.spherical.computeHeading(
+              new google.maps.LatLng(previousPosition.lat, previousPosition.lng),
+              currentPos
+            );
+          } else {
+            heading = lastHeading; // Use last known
+          }
+        }
+        lastHeading = heading || lastHeading;
         if (isNavigating && routePath.length > 0) {
           const closest = findClosestPointOnRoute(currentPos, routePath);
           if (closest.distance < 50) {
@@ -1117,15 +1169,22 @@ window.initMap = function() {
             updateRoute([position.coords.latitude, position.coords.longitude], currentDestination);
             return;
           }
-          map.setCenter(currentPos);
-          map.setZoom(18);
-          map.setTilt(45);
-          map.setHeading(position.coords.heading || 0);
-          provideVoiceNavigation(position.coords);
-          if (routePolyline) {
-            const remainingPath = routePath.slice(closest.index);
-            routePolyline.setPath(remainingPath);
+          // Update route lines: passed (faded) and future
+          const passedPath = routePath.slice(0, closest.index + 1);
+          const futurePath = routePath.slice(closest.index);
+          if (passedPolyline) {
+            passedPolyline.setPath(passedPath);
           }
+          if (routePolyline) {
+            routePolyline.setPath(futurePath);
+          }
+          if (isFollowing) {
+            map.setCenter(currentPos);
+            map.setZoom(18);
+            map.setTilt(45);
+            map.setHeading(heading || 0);
+          }
+          provideVoiceNavigation({ ...position.coords, heading });
         }
         if (map) {
           if (liveLocationMarker) liveLocationMarker.setMap(null);
@@ -1144,14 +1203,22 @@ window.initMap = function() {
           });
           console.log('Circle marker set at:', currentPos.toString());
         }
-        if (isNavigating && routePath.length > 0 && position.coords.heading !== undefined) {
+        if (isNavigating && routePath.length > 0 && (position.coords.heading !== undefined || previousPosition)) {
           provideVoiceNavigation(position.coords);
         }
+        previousPosition = { lat: position.coords.latitude, lng: position.coords.longitude };
         checkHazardsOnRoute();
       },
       (err) => {
         console.warn('WatchPosition error:', err);
-        showToastMessage('Failed to update location.', 7000, true);
+        geolocationRetryCount++;
+        if (geolocationRetryCount <= MAX_GEOLOCATION_RETRIES) {
+          console.log(`Retrying geolocation watch (attempt ${geolocationRetryCount})...`);
+          setTimeout(startGeolocationWatch, 5000);
+        } else {
+          showToastMessage('Geolocation failed after retries. Using last known location.', 7000, true);
+          // Fallback to last known position
+        }
       },
       { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
     );
@@ -1169,9 +1236,11 @@ window.initMap = function() {
       },
       { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
     );
+  } else {
+    showToastMessage('Geolocation not supported.', 7000, true);
   }
-  console.timeEnd('Map initialization');
-};
+}
+
 window.addEventListener('DOMContentLoaded', () => {
   console.time('DOM initialization');
   console.log('DOM fully loaded at:', new Date().toLocaleTimeString());
@@ -1407,6 +1476,8 @@ window.addEventListener('DOMContentLoaded', () => {
     console.time('Start navigation');
     await mapReady;
     isNavigating = true;
+    isFollowing = true; // Start following on nav start
+    isManualInteraction = false;
     console.log('Navigation started, setting isNavigating to true');
     if (hud) hud.classList.add('navigating');
     if (controlHud) controlHud.classList.add('navigating');
@@ -1481,9 +1552,11 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     console.timeEnd('Start navigation');
   }
+
   function stopNavigation() {
     console.log('Stopping navigation, attempting to clear route');
     isNavigating = false;
+    isFollowing = false;
     routePath = [];
     currentDestination = null;
     ignoredHazards = [];
@@ -1492,6 +1565,10 @@ window.addEventListener('DOMContentLoaded', () => {
     if (routePolyline) {
       routePolyline.setMap(null);
       routePolyline = null;
+    }
+    if (passedPolyline) {
+      passedPolyline.setMap(null);
+      passedPolyline = null;
     }
     if (directionsRenderer) {
       directionsRenderer.setMap(null);
@@ -1524,6 +1601,8 @@ window.addEventListener('DOMContentLoaded', () => {
           map.setCenter(currentPos);
           map.setZoom(18);
           map.setTilt(45);
+          isManualInteraction = false;
+          isFollowing = true;
           console.log('Map recentered at:', currentPos.toString());
           showToastMessage('Map recentered.', 5000);
         },
@@ -1853,7 +1932,7 @@ window.addEventListener('DOMContentLoaded', () => {
           google.maps.event.removeListener(touchListener);
           showToastMessage('Location selected for alert.', 5000);
         }).catch(err => {
-console.error('Reverse geocode error:', err);
+          console.error('Reverse geocode error:', err);
           if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
           if (detailedAlertBox) {
             detailedAlertBox.classList.add('active');
