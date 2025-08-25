@@ -1,4 +1,4 @@
-const VERSION = '1.0.55'; // Updated for triangle marker and HUD fixes
+const VERSION = '1.0.56'; // Updated for navigation and HUD fixes
 // Global variables
 let map;
 let routePolyline;
@@ -291,82 +291,95 @@ function ignoreHazards(hazards) {
 }
 async function updateRoute(start, end, avoidHazards = false) {
   await mapReady;
-  try {
-    console.time('Route calculation');
-    console.log(`Fetching route from [${start}] to [${end}] with avoidHazards: ${avoidHazards}`);
-    const request = {
-      origin: new google.maps.LatLng(start[0], start[1]),
-      destination: new google.maps.LatLng(end[0], end[1]),
-      travelMode: google.maps.TravelMode.DRIVING,
-      provideRouteAlternatives: avoidHazards,
-      avoidTolls: true,
-      avoidHighways: false,
-      avoidFerries: true
-    };
-    const response = await new Promise((resolve, reject) => {
-      directionsService.route(request, (result, status) => {
-        if (status === google.maps.DirectionsStatus.OK) {
-          resolve(result);
-        } else {
-          reject(new Error(`Directions request failed: ${status}`));
-        }
-      });
-    });
-    console.log('Google Directions response:', response);
-    let selectedRouteIndex = 0;
-    if (avoidHazards && response.routes.length > 1) {
-      let maxMinDistance = 0;
-      response.routes.forEach((route, index) => {
-        const path = route.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
-        let minDistanceToHazards = Infinity;
-        currentHazards.forEach(hazard => {
-          const hazardPos = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
-          path.forEach(point => {
-            const dist = google.maps.geometry.spherical.computeDistanceBetween(point, hazardPos);
-            if (dist < minDistanceToHazards) minDistanceToHazards = dist;
-          });
+  let retries = 0;
+  const maxRetries = 3;
+  async function tryUpdateRoute() {
+    try {
+      console.time('Route calculation');
+      console.log(`Fetching route from [${start}] to [${end}] with avoidHazards: ${avoidHazards}, attempt ${retries + 1}`);
+      const request = {
+        origin: new google.maps.LatLng(start[0], start[1]),
+        destination: new google.maps.LatLng(end[0], end[1]),
+        travelMode: google.maps.TravelMode.DRIVING,
+        provideRouteAlternatives: avoidHazards,
+        avoidTolls: true,
+        avoidHighways: false,
+        avoidFerries: true
+      };
+      const response = await new Promise((resolve, reject) => {
+        directionsService.route(request, (result, status) => {
+          if (status === google.maps.DirectionsStatus.OK) {
+            resolve(result);
+          } else {
+            reject(new Error(`Directions request failed: ${status}`));
+          }
         });
-        if (minDistanceToHazards > maxMinDistance) {
-          maxMinDistance = minDistanceToHazards;
-          selectedRouteIndex = index;
-        }
       });
-      console.log(`Selected alternative route index: ${selectedRouteIndex} with min hazard distance: ${maxMinDistance}m`);
+      console.log('Google Directions response:', response);
+      let selectedRouteIndex = 0;
+      if (avoidHazards && response.routes.length > 1) {
+        let maxMinDistance = 0;
+        response.routes.forEach((route, index) => {
+          const path = route.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
+          let minDistanceToHazards = Infinity;
+          currentHazards.forEach(hazard => {
+            const hazardPos = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+            path.forEach(point => {
+              const dist = google.maps.geometry.spherical.computeDistanceBetween(point, hazardPos);
+              if (dist < minDistanceToHazards) minDistanceToHazards = dist;
+            });
+          });
+          if (minDistanceToHazards > maxMinDistance) {
+            maxMinDistance = minDistanceToHazards;
+            selectedRouteIndex = index;
+          }
+        });
+        console.log(`Selected alternative route index: ${selectedRouteIndex} with min hazard distance: ${maxMinDistance}m`);
+      }
+      const selectedRoute = response.routes[selectedRouteIndex];
+      directionsResponse = response; // Store the full response for navigation instructions
+      directionsRenderer.setDirections(response);
+      directionsRenderer.setRouteIndex(selectedRouteIndex);
+      const path = selectedRoute.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
+      routePath = path;
+      if (routePolyline) routePolyline.setMap(null);
+      routePolyline = new google.maps.Polyline({
+        path: path,
+        strokeColor: '#ff4444',
+        strokeOpacity: 1.0,
+        strokeWeight: 4,
+        map: map
+      });
+      if (passedPolyline) passedPolyline.setMap(null);
+      passedPolyline = new google.maps.Polyline({
+        path: [],
+        strokeColor: '#ff4444',
+        strokeOpacity: 0.4,
+        strokeWeight: 4,
+        map: map
+      });
+      const timeMs = selectedRoute.legs.reduce((acc, leg) => acc + leg.duration.value * 1000, 0);
+      const distanceM = selectedRoute.legs.reduce((acc, leg) => acc + leg.distance.value, 0);
+      if (eta) eta.textContent = `${Math.round(timeMs / 60000)} min`;
+      if (dta) dta.textContent = `${Math.round(distanceM / 1609.34)} mi`;
+      const navEta = document.getElementById('nav-eta');
+      if (navEta) navEta.textContent = `${Math.round(timeMs / 60000)} min`;
+      console.timeEnd('Route calculation');
+      showToastMessage(avoidHazards ? 'Route updated to avoid hazards.' : 'Route updated.', 5000);
+    } catch (err) {
+      console.error('Route calculation failed:', err);
+      retries++;
+      if (retries < maxRetries) {
+        console.log(`Retrying route calculation (attempt ${retries + 1})...`);
+        setTimeout(tryUpdateRoute, 2000 * retries);
+      } else {
+        console.error('Max retries reached for route calculation');
+        showToastMessage('Failed to calculate route after retries.', 7000, true);
+        stopNavigation();
+      }
     }
-    const selectedRoute = response.routes[selectedRouteIndex];
-    directionsResponse = response; // Store the full response for navigation instructions
-    directionsRenderer.setDirections(response);
-    directionsRenderer.setRouteIndex(selectedRouteIndex);
-    const path = selectedRoute.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
-    routePath = path;
-    if (routePolyline) routePolyline.setMap(null);
-    routePolyline = new google.maps.Polyline({
-      path: path,
-      strokeColor: '#ff4444',
-      strokeOpacity: 1.0,
-      strokeWeight: 4,
-      map: map
-    });
-    if (passedPolyline) passedPolyline.setMap(null);
-    passedPolyline = new google.maps.Polyline({
-      path: [],
-      strokeColor: '#ff4444',
-      strokeOpacity: 0.4,
-      strokeWeight: 4,
-      map: map
-    });
-    const timeMs = selectedRoute.legs.reduce((acc, leg) => acc + leg.duration.value * 1000, 0);
-    const distanceM = selectedRoute.legs.reduce((acc, leg) => acc + leg.distance.value, 0);
-    if (eta) eta.textContent = `${Math.round(timeMs / 60000)} min`;
-    if (dta) dta.textContent = `${Math.round(distanceM / 1609.34)} mi`;
-    const navEta = document.getElementById('nav-eta');
-    if (navEta) navEta.textContent = `${Math.round(timeMs / 60000)} min`;
-    console.timeEnd('Route calculation');
-    showToastMessage(avoidHazards ? 'Route updated to avoid hazards.' : 'Route updated.', 5000);
-  } catch (err) {
-    console.error('Route calculation failed:', err);
-    showToastMessage('Failed to calculate route. Please try again.', 7000, true);
   }
+  tryUpdateRoute();
 }
 function addMarker(type, notes = '', position) {
   const timerName = `Add ${type} marker ${Date.now()}`;
@@ -1280,6 +1293,16 @@ function startGeolocationWatch() {
         if (map) {
           if (liveLocationMarker) {
             liveLocationMarker.setPosition(currentPos); // Update existing marker position
+            liveLocationMarker.setIcon({
+              path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+              fillColor: '#00bcd4',
+              fillOpacity: 1,
+              strokeColor: '#000000',
+              strokeWeight: 2,
+              scale: 1.5,
+              anchor: new google.maps.Point(0, 0),
+              rotation: heading || 0
+            });
           } else {
             liveLocationMarker = new google.maps.Marker({
               position: currentPos,
@@ -1292,10 +1315,10 @@ function startGeolocationWatch() {
                 strokeWeight: 2,
                 scale: 1.5,
                 anchor: new google.maps.Point(0, 0),
-                rotation: heading || 0 // Rotate based on heading
+                rotation: heading || 0
               },
               title: 'Your Location',
-              zIndex: 1001 // Ensure marker is above route
+              zIndex: 1001
             });
           }
           console.log('Triangle marker updated at:', currentPos.toString(), 'Heading:', heading || 0);
@@ -1351,7 +1374,6 @@ function startGeolocationWatch() {
           setTimeout(startGeolocationWatch, 5000);
         } else {
           showToastMessage('Geolocation failed after retries. Using last known location.', 7000, true);
-          // Display fallback marker
           if (map && !liveLocationMarker) {
             liveLocationMarker = new google.maps.Marker({
               position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
@@ -1746,12 +1768,20 @@ window.addEventListener('DOMContentLoaded', () => {
     ignoredHazards = [];
     directionsResponse = null; // Reset directions response
     const destination = await geocodeWithGoogle(address);
-    if (destination) {
-      if (!recentDestinations.includes(address)) {
-        recentDestinations.unshift(address);
-        if (recentDestinations.length > 5) recentDestinations.pop();
-      }
-      currentDestination = destination;
+    if (!destination) {
+      console.error('Geocoding failed for address:', address);
+      showToastMessage('Could not geocode address. Please check your input.', 7000, true);
+      stopNavigation();
+      return;
+    }
+    if (!recentDestinations.includes(address)) {
+      recentDestinations.unshift(address);
+      if (recentDestinations.length > 5) recentDestinations.pop();
+    }
+    currentDestination = destination;
+    let retries = 0;
+    const maxRetries = 3;
+    async function tryStartNavigation() {
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
@@ -1777,24 +1807,57 @@ window.addEventListener('DOMContentLoaded', () => {
               showToastMessage('Navigation started.', 5000);
             }).catch(err => {
               console.error('Route update failed:', err);
-              showToastMessage('Failed to start navigation.', 7000, true);
-              stopNavigation();
+              retries++;
+              if (retries < maxRetries) {
+                console.log(`Retrying navigation start (attempt ${retries + 1})...`);
+                setTimeout(tryStartNavigation, 2000 * retries);
+              } else {
+                console.error('Max retries reached for navigation start');
+                showToastMessage('Failed to start navigation after retries.', 7000, true);
+                stopNavigation();
+              }
             });
           },
           (err) => {
             console.error('Geolocation error for navigation start:', err);
-            showToastMessage('Failed to get current location, using fallback.', 7000, true);
-            updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
-              map.setCenter(userLocation);
-              map.setZoom(18);
-              map.setTilt(45);
-              checkHazardsOnRoute();
-              showToastMessage('Navigation started with fallback location.', 5000);
-            }).catch(err => {
-              console.error('Route update with fallback failed:', err);
-              showToastMessage('Failed to start navigation.', 7000, true);
+            let errorMessage = 'Failed to get current location. ';
+            if (err.code === 1) {
+              errorMessage += 'Location permission denied. Please enable location services.';
+            } else if (err.code === 2) {
+              errorMessage += 'Location unavailable. Using last known location.';
+            } else if (err.code === 3) {
+              errorMessage += 'Location request timed out. Using last known location.';
+            } else {
+              errorMessage += 'An unknown error occurred. Using last known location.';
+            }
+            showToastMessage(errorMessage, 7000, true);
+            retries++;
+            if (retries < maxRetries) {
+              console.log(`Retrying navigation start with fallback location (attempt ${retries + 1})...`);
+              setTimeout(() => {
+                updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
+                  map.setCenter(userLocation);
+                  map.setZoom(18);
+                  map.setTilt(45);
+                  checkHazardsOnRoute();
+                  showToastMessage('Navigation started with fallback location.', 5000);
+                }).catch(err => {
+                  console.error('Route update with fallback failed:', err);
+                  if (retries < maxRetries) {
+                    console.log(`Retrying navigation start (attempt ${retries + 1})...`);
+                    setTimeout(tryStartNavigation, 2000 * retries);
+                  } else {
+                    console.error('Max retries reached for navigation start with fallback');
+                    showToastMessage('Failed to start navigation after retries.', 7000, true);
+                    stopNavigation();
+                  }
+                });
+              }, 2000 * retries);
+            } else {
+              console.error('Max retries reached for navigation start');
+              showToastMessage('Failed to start navigation after retries.', 7000, true);
               stopNavigation();
-            });
+            }
           },
           { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
         );
@@ -1808,14 +1871,19 @@ window.addEventListener('DOMContentLoaded', () => {
           showToastMessage('Navigation started with fallback location.', 5000);
         }).catch(err => {
           console.error('Route update with fallback failed:', err);
-          showToastMessage('Failed to start navigation.', 7000, true);
-          stopNavigation();
+          retries++;
+          if (retries < maxRetries) {
+            console.log(`Retrying navigation start with fallback (attempt ${retries + 1})...`);
+            setTimeout(tryStartNavigation, 2000 * retries);
+          } else {
+            console.error('Max retries reached for navigation start with fallback');
+            showToastMessage('Failed to start navigation after retries.', 7000, true);
+            stopNavigation();
+          }
         });
       }
-    } else {
-      showToastMessage('Could not geocode address. Please check your input.', 7000, true);
-      stopNavigation();
     }
+    tryStartNavigation();
     console.timeEnd('Start navigation');
   }
   function stopNavigation() {
