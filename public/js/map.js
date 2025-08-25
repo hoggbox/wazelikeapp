@@ -1,4 +1,4 @@
-const VERSION = '1.0.59'; // Updated for HUD DOM fix and navigation stability
+const VERSION = '1.0.60'; // Updated for Google Maps-like navigation, route line, and HUD fixes
 // Global variables
 let map;
 let routePolyline;
@@ -6,7 +6,7 @@ let passedPolyline;
 let currentDestination = null;
 let liveLocationMarker = null;
 let isNavigating = false;
-let isFollowing = false;
+let isFollowing = true; // Start with aggressive following
 let isManualInteraction = false;
 let previousPosition = null;
 let routePath = [];
@@ -21,6 +21,7 @@ let recognition = null;
 let isMuted = false;
 let hazardMarkers = [];
 let lastLocationUpdate = 0;
+let lastRerouteTime = 0;
 let isSelectingLocation = false;
 let alertMarkers = new Map();
 let alertQueue = [];
@@ -46,7 +47,9 @@ let lastHeading = 0;
 let geolocationWatchId = null;
 let geolocationRetryCount = 0;
 const MAX_GEOLOCATION_RETRIES = 3;
-// Determine API and Socket.IO base URL based on environment
+const REROUTE_COOLDOWN = 5000; // 5s cooldown for off-route rerouting
+const UPDATE_THROTTLE = 60; // 60ms throttle for map updates
+// Determine API and Socket.IO base URL
 const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
 const BASE_URL = isLocal ? 'http://127.0.0.1:3000' : 'https://wazelikeapp.onrender.com';
 console.log(`Environment: ${isLocal ? 'Local' : 'Render'}, Base URL: ${BASE_URL}`);
@@ -113,9 +116,8 @@ function provideVoiceNavigation(coords) {
     const currentPos = new google.maps.LatLng(coords.latitude, coords.longitude);
     const closest = findClosestPointOnRoute(currentPos, routePath);
     const nextIndex = Math.min(closest.index + 1, routePath.length - 1);
-    let distance = closest.distance;
-    let stepDistance = distance; // Initialize to prevent undefined
-    console.log('Navigation check:', { distance, nextIndex, heading: coords.heading });
+    let stepDistance = closest.distance; // Default to closest point distance
+    console.log('Navigation check:', { distance: closest.distance, nextIndex, heading: coords.heading });
     // Check if user is near the destination (within 50 meters)
     if (currentDestination) {
       const destPos = new google.maps.LatLng(currentDestination[0], currentDestination[1]);
@@ -134,76 +136,70 @@ function provideVoiceNavigation(coords) {
         return;
       }
     }
-    if (distance < 50 && nextIndex < routePath.length - 1 && closest.index > lastNavIndex) {
-      // Find the corresponding step in directionsResponse
-      let currentStep = null;
-      let stepIndex = 0;
-      for (const leg of directionsResponse.routes[0].legs) {
-        for (let i = 0; i < leg.steps.length; i++) {
-          const step = leg.steps[i];
-          const stepPath = google.maps.geometry.encoding.decodePath(step.polyline.points);
-          const stepStart = stepPath[0];
-          const stepEnd = stepPath[stepPath.length - 1];
-          const distToStart = google.maps.geometry.spherical.computeDistanceBetween(currentPos, stepStart);
-          const distToEnd = google.maps.geometry.spherical.computeDistanceBetween(currentPos, stepEnd);
-          if (distToStart < 50 || distToEnd < 50 || stepPath.some(point => google.maps.geometry.spherical.computeDistanceBetween(currentPos, point) < 50)) {
-            currentStep = step;
-            stepIndex = i;
-            stepDistance = distToStart < 50 ? step.distance.value : distToEnd;
-            break;
-          }
-        }
-        if (currentStep) break;
-      }
-      let instruction = 'Continue straight';
-      let turnDirection = null;
-      if (currentStep && currentStep.maneuver && currentStep.maneuver.includes('turn')) {
-        const nextStep = directionsResponse.routes[0].legs[0].steps[stepIndex + 1];
-        const streetName = currentStep.end_address || currentStep.instructions.replace(/<[^>]+>/g, '').split(' onto ')[1]?.split(' toward ')[0] || 'unknown street';
-        const towardStreet = nextStep ? nextStep.end_address || nextStep.instructions.replace(/<[^>]+>/g, '').split(' onto ')[1]?.split(' toward ')[0] || 'your destination' : 'your destination';
-        turnDirection = currentStep.maneuver.includes('left') ? 'left' : 'right';
-        instruction = `Turn ${turnDirection} onto ${streetName} toward ${towardStreet}`;
-      } else if (currentStep) {
-        instruction = `Continue on ${currentStep.end_address || currentStep.instructions.replace(/<[^>]+>/g, '').split(' onto ')[1]?.split(' toward ')[0] || 'current road'}`;
-      }
-      if (instruction !== lastInstruction) {
-        if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
-          const utterance = new SpeechSynthesisUtterance(instruction);
-          utterance.voice = femaleVoice;
-          utterance.lang = 'en-US';
-          utterance.volume = 1.0;
-          utterance.rate = 1.0;
-          window.speechSynthesis.speak(utterance);
-          console.log('Voice navigation:', instruction, 'with:', femaleVoice.name);
-          showToastMessage(`Navigation: ${instruction}`, 5000);
-        } else if (!femaleVoice) {
-          console.warn('No female voice available, skipping navigation instruction');
-        }
-        lastInstruction = instruction;
-        navInstruction.textContent = instruction;
-        navDistance.textContent = `${Math.round(stepDistance)} m`;
-        // Update turn arrows only if instructionContainer exists
-        if (instructionContainer) {
-          const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-          const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-          if (leftArrow && rightArrow) {
-            leftArrow.classList.remove('active');
-            rightArrow.classList.remove('active');
-            if (turnDirection === 'left') {
-              leftArrow.classList.add('active');
-            } else if (turnDirection === 'right') {
-              rightArrow.classList.add('active');
-            }
-          } else {
-            console.warn('Turn arrows not found in instructionContainer');
-          }
+    // Find the corresponding step in directionsResponse
+    let currentStep = null;
+    let stepIndex = 0;
+    for (const leg of directionsResponse.routes[0].legs) {
+      for (let i = 0; i < leg.steps.length; i++) {
+        const step = leg.steps[i];
+        const stepPath = google.maps.geometry.encoding.decodePath(step.polyline.points);
+        const stepStart = stepPath[0];
+        const stepEnd = stepPath[stepPath.length - 1];
+        const distToStart = google.maps.geometry.spherical.computeDistanceBetween(currentPos, stepStart);
+        const distToEnd = google.maps.geometry.spherical.computeDistanceBetween(currentPos, stepEnd);
+        if (distToStart < 50 || distToEnd < 50 || stepPath.some(point => google.maps.geometry.spherical.computeDistanceBetween(currentPos, point) < 50)) {
+          currentStep = step;
+          stepIndex = i;
+          stepDistance = step.distance.value; // Use step distance if available
+          break;
         }
       }
-      lastNavIndex = closest.index;
-    } else if (lastInstruction) {
-      navInstruction.textContent = lastInstruction;
-      navDistance.textContent = `${Math.round(lastDistanceToNext)} m`;
+      if (currentStep) break;
     }
+    let instruction = 'Continue straight';
+    let turnDirection = null;
+    if (currentStep && currentStep.maneuver && currentStep.maneuver.includes('turn')) {
+      const nextStep = directionsResponse.routes[0].legs[0].steps[stepIndex + 1];
+      const streetName = currentStep.end_address || currentStep.instructions.replace(/<[^>]+>/g, '').split(' onto ')[1]?.split(' toward ')[0] || 'unknown street';
+      const towardStreet = nextStep ? nextStep.end_address || nextStep.instructions.replace(/<[^>]+>/g, '').split(' onto ')[1]?.split(' toward ')[0] || 'your destination' : 'your destination';
+      turnDirection = currentStep.maneuver.includes('left') ? 'left' : 'right';
+      instruction = `Turn ${turnDirection} onto ${streetName} toward ${towardStreet}`;
+    } else if (currentStep) {
+      instruction = `Continue on ${currentStep.end_address || currentStep.instructions.replace(/<[^>]+>/g, '').split(' onto ')[1]?.split(' toward ')[0] || 'current road'}`;
+    }
+    if (instruction !== lastInstruction || closest.index > lastNavIndex) {
+      if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
+        const utterance = new SpeechSynthesisUtterance(instruction);
+        utterance.voice = femaleVoice;
+        utterance.lang = 'en-US';
+        utterance.volume = 1.0;
+        utterance.rate = 1.0;
+        window.speechSynthesis.speak(utterance);
+        console.log('Voice navigation:', instruction, 'with:', femaleVoice.name);
+        showToastMessage(`Navigation: ${instruction}`, 5000);
+      } else if (!femaleVoice) {
+        console.warn('No female voice available, skipping navigation instruction');
+      }
+      lastInstruction = instruction;
+      navInstruction.textContent = instruction;
+      navDistance.textContent = `${Math.round(stepDistance)} m`;
+      if (instructionContainer) {
+        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+        if (leftArrow && rightArrow) {
+          leftArrow.classList.remove('active');
+          rightArrow.classList.remove('active');
+          if (turnDirection === 'left') {
+            leftArrow.classList.add('active');
+          } else if (turnDirection === 'right') {
+            rightArrow.classList.add('active');
+          }
+        } else {
+          console.warn('Turn arrows not found in instructionContainer');
+        }
+      }
+    }
+    lastNavIndex = closest.index;
     lastDistanceToNext = stepDistance;
   } else if (isNavigating && routePath.length > 0) {
     console.warn('Missing coords or route data for voice navigation:', { coords, routePathLength: routePath.length });
@@ -1277,22 +1273,23 @@ function startGeolocationWatch() {
     if (geolocationWatchId) {
       navigator.geolocation.clearWatch(geolocationWatchId);
     }
+    let lastUpdateTime = 0;
     geolocationWatchId = navigator.geolocation.watchPosition(
       (position) => {
-        geolocationRetryCount = 0;
         const now = Date.now();
-        if (now - lastLocationUpdate < 2000) return;
+        if (now - lastUpdateTime < UPDATE_THROTTLE) return;
+        lastUpdateTime = now;
+        geolocationRetryCount = 0;
         lastLocationUpdate = now;
         let currentPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
         userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
         console.log('WatchPosition updated user location:', userLocation, 'Time:', now);
         let heading = position.coords.heading;
         if (heading === null || heading === undefined) {
-          if (previousPosition) {
-            heading = google.maps.geometry.spherical.computeHeading(
-              new google.maps.LatLng(previousPosition.lat, previousPosition.lng),
-              currentPos
-            );
+          if (previousPosition && routePath.length > 0) {
+            const closest = findClosestPointOnRoute(currentPos, routePath);
+            const nextIndex = Math.min(closest.index + 1, routePath.length - 1);
+            heading = google.maps.geometry.spherical.computeHeading(currentPos, routePath[nextIndex]);
           } else {
             heading = lastHeading;
           }
@@ -1313,7 +1310,7 @@ function startGeolocationWatch() {
             });
           } else {
             liveLocationMarker = new google.maps.Marker({
-              position: previousPosition ? new google.maps.LatLng(previousPosition.lat, previousPosition.lng) : currentPos,
+              position: currentPos,
               map: map,
               icon: {
                 path: 'M -10,10 L 0,-10 L 10,10 Z',
@@ -1333,21 +1330,23 @@ function startGeolocationWatch() {
         }
         if (isNavigating && routePath.length > 0) {
           const closest = findClosestPointOnRoute(currentPos, routePath);
-          if (closest.distance < 50) {
-            currentPos = routePath[closest.index];
-            console.log('Snapped position to route at index:', closest.index);
-          } else {
-            console.log('User off-route, rerouting...');
-            showToastMessage('Rerouting...', 5000);
+          if (closest.distance > 30 && (now - lastRerouteTime > REROUTE_COOLDOWN)) {
+            console.log('User off-route, rerouting...', { distance: closest.distance });
+            showToastMessage('Off-route detected, rerouting...', 5000);
+            lastRerouteTime = now;
             updateRoute([position.coords.latitude, position.coords.longitude], currentDestination);
             return;
+          }
+          if (closest.distance < 30) {
+            currentPos = routePath[closest.index];
+            console.log('Snapped position to route at index:', closest.index);
           }
           const passedPath = routePath.slice(0, closest.index + 1);
           const futurePath = routePath.slice(closest.index);
           if (passedPolyline) {
             passedPolyline.setPath(passedPath);
           }
-          if (routePolyline) {
+          if (routeWazeLikeApp) {
             routePolyline.setPath(futurePath);
           }
           if (isFollowing) {
@@ -1499,513 +1498,64 @@ function startGeolocationWatch() {
     }
   }
 }
-window.addEventListener('DOMContentLoaded', () => {
-  console.time('DOM initialization');
-  console.log('DOM fully loaded at:', new Date().toLocaleTimeString());
-  const hud = document.getElementById('hud');
-  const controlHud = document.getElementById('control-hud');
-  const speedLimit = document.getElementById('speedLimit');
-  const eta = document.getElementById('eta');
-  const dta = document.getElementById('dta');
-  const time = document.getElementById('time');
-  const navAddress = document.getElementById('navAddress');
-  const navInput = document.getElementById('nav-input');
-  const navHud = document.getElementById('nav-hud');
-  const addAlertBtn = document.getElementById('addAlert');
-  const navOverlay = document.getElementById('navOverlay');
-  const recentLocations = document.getElementById('recentLocations');
-  const suggestions = document.getElementById('suggestions');
-  const closeOverlay = document.getElementById('closeOverlay');
-  const cancelBtn = document.querySelector('#control-hud .cancel-btn');
-  const recenterBtn = document.querySelector('#control-hud .recenter-btn');
-  const muteBtn = document.querySelector('#control-hud .mute-btn');
-  const hazardBtn = document.querySelector('#control-hud .hazard-btn');
-  const toolsHud = document.getElementById('tools-hud');
-  const micButton = document.querySelector('.mic-button');
-  const voiceOverlay = document.getElementById('voiceOverlay');
-  const pulsator = document.querySelector('.pulsator');
-  const closeVoiceOverlay = document.getElementById('closeVoiceOverlay');
-  const voiceInstruction = document.getElementById('voiceInstruction');
-  const detailedAlertBtn = document.getElementById('detailedAlert-btn');
-  const detailedAlertBox = document.getElementById('detailedAlertBox');
-  const closeDetailedAlertBtn = document.querySelector('#detailedAlertBox .close-btn');
-  const alertType = document.getElementById('alertType');
-  const alertNotes = document.getElementById('alertNotes');
-  const clickLocationBtn = document.getElementById('click-location-alert');
-  const alertCurrentBtn = document.getElementById('alert-current-location');
-  const locationDisplay = document.getElementById('location-display');
-  const selectedLocation = document.getElementById('selected-location');
-  const postAlertBtn = document.getElementById('post-alert');
-  const cancelAlertBtn = document.getElementById('cancel-alert');
-  const toastMessage = document.getElementById('toast-message');
-  const profileBtn = document.getElementById('profile-btn');
-  const profileHud = document.getElementById('profile-hud');
-  const closeBtn = document.querySelector('#profile-hud .close-btn');
-  accountInfo = document.querySelector('.account-info');
-  editProfile = document.querySelector('.edit-profile');
-  alertsTab = document.querySelector('.alerts');
-  tabButtons = document.querySelectorAll('.tab-button');
-  const saveProfileBtn = document.getElementById('save-profile-btn');
-  const settingsBtn = document.getElementById('settings-btn');
-  const settingsHud = document.getElementById('settings-hud');
-  const closeSettings = document.getElementById('closeSettings');
-  const loginBtn = document.getElementById('login-btn');
-const loginUsername = document.getElementById('login-username');
-const loginPassword = document.getElementById('login-password');
-const reroutePrompt = document.getElementById('reroutePrompt');
-const rerouteYes = document.getElementById('rerouteYes');
-const rerouteNo = document.getElementById('rerouteNo');
-console.log('addAlert button in JS:', addAlertBtn ? 'found' : 'not found');
-if (!addAlertBtn) console.log('addAlert button not found in DOM');
-else console.log('addAlert button ready');
-if (navOverlay) {
-  navOverlay.style.display = 'none';
-  console.log('navOverlay set to hidden on load');
-}
-if (voiceOverlay) {
-  voiceOverlay.style.display = 'none';
-  console.log('voiceOverlay set to hidden on load');
-}
-if (detailedAlertBox) {
-  detailedAlertBox.style.display = 'none';
-  detailedAlertBox.style.left = '50%';
-  detailedAlertBox.style.top = '50%';
-  console.log('detailedAlertBox set to hidden on load, element:', detailedAlertBox);
-}
-if (profileHud) {
-  profileHud.style.display = 'none';
-  console.log('profileHud set to hidden on load');
-}
-if (settingsHud) {
-  settingsHud.style.display = 'none';
-  console.log('settingsHud set to hidden on load');
-}
-if (reroutePrompt) {
-  reroutePrompt.style.display = 'none';
-  console.log('reroutePrompt set to hidden on load');
-}
-if (navInput) {
-  navInput.classList.remove('hidden');
-  navInput.style.opacity = '1';
-  navInput.style.transform = 'translateX(-50%)';
-  console.log('navInput set to visible on load');
-}
-if (navHud) {
-  navHud.classList.remove('active');
-  navHud.style.display = 'none';
-  console.log('navHud set to hidden on load');
-}
-if (settingsHud) {
-  const existingSettingsLogout = settingsHud.querySelector('.logout-btn');
-  if (!existingSettingsLogout) {
-    const settingsLogoutButton = document.createElement('button');
-    settingsLogoutButton.textContent = 'Logout';
-    settingsLogoutButton.className = 'logout-btn';
-    settingsLogoutButton.style.cssText = `
-      padding: 8px 15px;
-      background: #ff4444;
-      border: none;
-      border-radius: 5px;
-      color: #ffffff;
-      cursor: pointer;
-      font-family: 'Roboto', sans-serif;
-      margin-top: 10px;
-      touch-action: manipulation;
-      -webkit-tap-highlight-color: transparent;
-    `;
-    settingsLogoutButton.addEventListener('click', () => {
-      logout();
-    });
-    settingsLogoutButton.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      logout();
-    }, { passive: false });
-    settingsHud.appendChild(settingsLogoutButton);
-  }
-}
-function loadSocketIOScript() {
-  return new Promise((resolve, reject) => {
-    if (window.io) {
-      resolve();
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = `${BASE_URL}/socket.io/socket.io.js`;
-    script.async = true;
-    let socketRetries = 0;
-    const maxSocketRetries = 3;
-    script.onload = () => {
-      console.log('Socket.IO script loaded successfully');
-      resolve();
-    };
-    script.onerror = () => {
-      console.error('Failed to load Socket.IO script, attempt:', socketRetries + 1);
-      socketRetries++;
-      if (socketRetries < maxSocketRetries) {
-        console.log(`Retrying Socket.IO load (attempt ${socketRetries + 1})...`);
-        setTimeout(() => {
-          document.head.appendChild(script.cloneNode());
-        }, 2000 * socketRetries);
-      } else {
-        console.error('Max retries reached for Socket.IO load');
-        showToastMessage('Failed to load Socket.IO.', 7000, true);
-        reject(new Error('Socket.IO script failed to load'));
-      }
-    };
-    document.head.appendChild(script);
-  });
-}
-function connectSocket() {
-  loadSocketIOScript()
-    .then(() => {
-      socket = window.io(BASE_URL, { reconnectionAttempts: 5, reconnectionDelay: 1000 });
-      console.log('Socket.IO connected to:', BASE_URL);
-      socket.on('connect', () => {
-        console.log('Socket.IO connection established');
-        showToastMessage('Connected to server.', 5000);
-        socket.on('hazard', (data) => {
-          if (map && !alertMarkers.has(data._id)) {
-            addMarkerFromDB(data);
-            fetchAlerts();
-          }
-        });
-        socket.on('detailedAlert', (data) => {
-          if (map && !alertMarkers.has(data._id)) {
-            addMarkerFromDB(data);
-            fetchAlerts();
-          }
-        });
-        socket.on('alert', (data) => {
-          if (map) {
-            new google.maps.Marker({
-              position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
-              map: map,
-              title: data.type
-            });
-          }
-        });
-        socket.on('alertRemoved', (data) => {
-          if (alertMarkers.has(data._id)) {
-            alertMarkers.get(data._id).setMap(null);
-            alertMarkers.delete(data._id);
-            hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
-            allAlerts = allAlerts.filter(a => a._id !== data._id);
-            updateAlertTable();
-            showToastMessage('Alert removed from map.', 5000);
-          }
-          console.log('Alert removed via socket:', data._id);
-        });
-        socket.on('locationUpdate', (data) => {
-          if (map) {
-            new google.maps.Marker({
-              position: { lat: data.latitude, lng: data.longitude },
-              map: map,
-              title: 'User Location'
-            });
-          }
-        });
-      });
-      socket.on('connect_error', (err) => {
-        console.warn('Socket.IO connection error:', err.message);
-        showToastMessage('Failed to connect to server.', 5000, true);
-      });
-    })
-    .catch(err => {
-      console.warn('Socket.IO failed to load, retrying in 5 seconds:', err);
-      setTimeout(connectSocket, 5000);
-    });
-}
-connectSocket();
-function getCurrentTime() {
-  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-}
-function getEstimatedArrivalTime(etaMinutes) {
-  const now = new Date();
-  now.setMinutes(now.getMinutes() + etaMinutes);
-  return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-}
-function showOverlay() {
-  console.time('Show overlay');
-  console.log('Showing overlay');
-  if (navOverlay) {
-    navOverlay.style.display = 'block';
-    recentLocations.innerHTML = '';
-    recentDestinations.forEach(dest => {
-      const item = document.createElement('div');
-      item.className = 'recent-item';
-      item.textContent = dest;
-      const handleSelect = () => {
-        if (navAddress) navAddress.value = dest;
-        startNavigation(dest);
-        if (navOverlay) navOverlay.style.display = 'none';
-        showToastMessage(`Selected recent destination: ${dest}`, 5000);
-      };
-      item.addEventListener('click', handleSelect);
-      item.addEventListener('touchend', handleSelect, { passive: false });
-      recentLocations.appendChild(item);
-    });
-    showToastMessage('Navigation overlay opened.', 5000);
-  } else {
-    console.error('navOverlay not found');
-    showToastMessage('Failed to open navigation overlay.', 5000, true);
-  }
-  console.timeEnd('Show overlay');
-}
-async function startNavigation(address) {
-  console.time('Start navigation');
-  await mapReady;
-  isNavigating = true;
-  isFollowing = true;
-  isManualInteraction = false;
-  console.log('Navigation started, setting isNavigating to true');
-  if (hud) hud.classList.add('navigating');
-  if (controlHud) controlHud.classList.add('navigating');
-  if (navInput) {
-    navInput.classList.add('hidden');
-    navInput.style.opacity = '0';
-    navInput.style.transform = 'translateX(-50%) translateY(-20px)';
-  }
-  if (navHud) {
-    navHud.classList.add('active');
-    navHud.style.display = 'flex';
-    navHud.style.opacity = '1';
-    navHud.style.transform = 'translateX(-50%)';
-    const navInstruction = document.getElementById('nav-instruction');
-    const navDistance = document.getElementById('nav-distance');
-    const navEta = document.getElementById('nav-eta');
-    const instructionContainer = document.getElementById('instruction-container');
-    if (navInstruction) navInstruction.textContent = 'Starting navigation...';
-    if (navDistance) navDistance.textContent = 'Calculating...';
-    if (navEta) navEta.textContent = 'Calculating...';
-    if (instructionContainer) {
-      const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-      const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-      if (leftArrow && rightArrow) {
-        leftArrow.classList.remove('active');
-        rightArrow.classList.remove('active');
-      }
-    }
-  }
-  console.log('HUD classes updated:', { hudClass: hud?.className, controlHudClass: controlHud?.className, navInputHidden: navInput?.className, navHudActive: navHud?.className });
-  routePath = [];
-  ignoredHazards = [];
-  directionsResponse = null;
-  const destination = await geocodeWithGoogle(address);
-  if (!destination) {
-    console.error('Geocoding failed for address:', address);
-    showToastMessage('Could not geocode address. Please check your input.', 7000, true);
-    stopNavigation();
-    return;
-  }
-  if (!recentDestinations.includes(address)) {
-    recentDestinations.unshift(address);
-    if (recentDestinations.length > 5) recentDestinations.pop();
-  }
-  currentDestination = destination;
-  let retries = 0;
-  const maxRetries = 3;
-  async function tryStartNavigation() {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          userLocation = { lat: latitude, lng: longitude };
-          lastLocationUpdate = Date.now();
-          console.log('Current location for navigation start:', userLocation);
-          map.setCenter(userLocation);
-          map.setZoom(18);
-          map.setTilt(45);
-          updateRoute([latitude, longitude], destination).then(() => {
-            if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
-              const utterance = new SpeechSynthesisUtterance('Navigation started. Follow the route.');
-              utterance.voice = femaleVoice;
-              utterance.lang = 'en-US';
-              utterance.volume = 1.0;
-              window.speechSynthesis.speak(utterance);
-              console.log('Navigation voice test triggered with:', femaleVoice.name);
-            } else if (!femaleVoice) {
-              console.warn('No female voice available, skipping speech');
-            }
-            checkHazardsOnRoute();
-            showToastMessage('Navigation started.', 5000);
-            provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
-          }).catch(err => {
-            console.error('Route update failed:', err);
-            retries++;
-            if (retries < maxRetries) {
-              console.log(`Retrying navigation start (attempt ${retries + 1})...`);
-              setTimeout(tryStartNavigation, 2000 * retries);
-            } else {
-              console.error('Max retries reached for navigation start');
-              showToastMessage('Failed to start navigation after retries.', 7000, true);
-              stopNavigation();
-            }
-          });
-        },
-        (err) => {
-          console.error('Geolocation error for navigation start:', err);
-          let errorMessage = 'Failed to get current location. ';
-          if (err.code === 1) {
-            errorMessage += 'Location permission denied. Please enable location services.';
-          } else if (err.code === 2) {
-            errorMessage += 'Location unavailable. Using last known location.';
-          } else if (err.code === 3) {
-            errorMessage += 'Location request timed out. Using last known location.';
-          } else {
-            errorMessage += 'An unknown error occurred. Using last known location.';
-          }
-          showToastMessage(errorMessage, 7000, true);
-          retries++;
-          if (retries < maxRetries) {
-            console.log(`Retrying navigation start with fallback location (attempt ${retries + 1})...`);
-            setTimeout(() => {
-              updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
-                map.setCenter(userLocation);
-                map.setZoom(18);
-                map.setTilt(45);
-                checkHazardsOnRoute();
-                showToastMessage('Navigation started with fallback location.', 5000);
-                provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
-              }).catch(err => {
-                console.error('Route update with fallback failed:', err);
-                if (retries < maxRetries) {
-                  console.log(`Retrying navigation start (attempt ${retries + 1})...`);
-                  setTimeout(tryStartNavigation, 2000 * retries);
-                } else {
-                  console.error('Max retries reached for navigation start with fallback');
-                  showToastMessage('Failed to start navigation after retries.', 7000, true);
-                  stopNavigation();
-                }
-              });
-            }, 2000 * retries);
-          } else {
-            console.error('Max retries reached for navigation start');
-            showToastMessage('Failed to start navigation after retries.', 7000, true);
-            stopNavigation();
-          }
-        },
-        { maximumAge: 0, timeout: 30000, enableHighAccuracy: true }
-      );
-    } else {
-      console.error('Geolocation unavailable, using fallback:', userLocation);
-      updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
-        map.setCenter(userLocation);
-        map.setZoom(18);
-        map.setTilt(45);
-        checkHazardsOnRoute();
-        showToastMessage('Navigation started with fallback location.', 5000);
-        provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
-      }).catch(err => {
-        console.error('Route update with fallback failed:', err);
-        retries++;
-        if (retries < maxRetries) {
-          console.log(`Retrying navigation start with fallback (attempt ${retries + 1})...`);
-          setTimeout(tryStartNavigation, 2000 * retries);
-        } else {
-          console.error('Max retries reached for navigation start with fallback');
-          showToastMessage('Failed to start navigation after retries.', 7000, true);
-          stopNavigation();
-        }
-      });
-    }
-  }
-  tryStartNavigation();
-  console.timeEnd('Start navigation');
-}
-function stopNavigation() {
-  console.log('Stopping navigation, attempting to clear route');
-  isNavigating = false;
-  isFollowing = false;
-  routePath = [];
-  currentDestination = null;
-  ignoredHazards = [];
-  lastInstruction = '';
-  lastNavIndex = -1;
-  lastDistanceToNext = Infinity;
-  directionsResponse = null;
-  if (hud) hud.classList.remove('navigating');
-  if (controlHud) controlHud.classList.remove('navigating');
-  if (navInput) {
-    navInput.classList.remove('hidden');
-    navInput.style.opacity = '0';
-    navInput.style.transform = 'translateX(-50%)';
-    setTimeout(() => {
-      navInput.style.opacity = '1';
-    }, 50);
-  }
-  if (navHud) {
-    navHud.style.opacity = '0';
-    setTimeout(() => {
-      navHud.classList.remove('active');
-      navHud.style.display = 'none';
-      const instructionContainer = document.getElementById('instruction-container');
-      if (instructionContainer) {
-        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-        if (leftArrow && rightArrow) {
-          leftArrow.classList.remove('active');
-          rightArrow.classList.remove('active');
-        }
-      }
-    }, 300);
-  }
-  if (routePolyline) {
-    routePolyline.setMap(null);
-    routePolyline = null;
-  }
-  if (passedPolyline) {
-    passedPolyline.setMap(null);
-    passedPolyline = null;
-  }
-  if (directionsRenderer) {
-    directionsRenderer.setMap(null);
-  }
-  if (eta) eta.textContent = 'N/A';
-  if (dta) dta.textContent = 'N/A';
-  if (time) time.textContent = '0:00';
-  const navInstruction = document.getElementById('nav-instruction');
-  const navDistance = document.getElementById('nav-distance');
-  const navEta = document.getElementById('nav-eta');
-  if (navInstruction) navInstruction.textContent = 'No navigation active';
-  if (navDistance) navDistance.textContent = 'N/A';
-  if (navEta) navEta.textContent = 'N/A';
-  map.setZoom(13);
-  map.setTilt(0);
-  map.setHeading(0);
-  showToastMessage('Navigation stopped.', 5000);
-}
 function recenterMap() {
   if (navigator.geolocation && map && isNavigating) {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
         let currentPos = new google.maps.LatLng(latitude, longitude);
+        let heading = position.coords.heading || lastHeading;
         if (routePath.length > 0) {
           const closest = findClosestPointOnRoute(currentPos, routePath);
-          if (closest.distance < 50) {
+          if (closest.distance < 30) {
             currentPos = routePath[closest.index];
           }
           const nextPointIndex = Math.min(closest.index + 1, routePath.length - 1);
           if (nextPointIndex < routePath.length) {
             const nextPoint = routePath[nextPointIndex];
-            map.setHeading(google.maps.geometry.spherical.computeHeading(currentPos, nextPoint));
+            heading = google.maps.geometry.spherical.computeHeading(currentPos, nextPoint);
           }
         }
         map.setCenter(currentPos);
         map.setZoom(18);
         map.setTilt(45);
+        map.setHeading(heading);
         isManualInteraction = false;
         isFollowing = true;
-        console.log('Map recentered at:', currentPos.toString());
-        showToastMessage('Map recentered.', 5000);
-        provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
+        console.log('Map recentered at:', currentPos.toString(), 'Heading:', heading);
+        showToastMessage('Map recentered and locked to user.', 5000);
+        provideVoiceNavigation({ latitude, longitude, heading });
       },
       (err) => {
-        console.log('Recenter geolocation error:', err);
-        showToastMessage('Failed to recenter map.', 7000, true);
+        console.warn('Recenter geolocation error:', err);
+        showToastMessage('Failed to recenter map. Using last known location.', 7000, true);
+        let currentPos = new google.maps.LatLng(userLocation.lat, userLocation.lng);
+        let heading = lastHeading;
+        if (routePath.length > 0) {
+          const closest = findClosestPointOnRoute(currentPos, routePath);
+          if (closest.distance < 30) {
+            currentPos = routePath[closest.index];
+          }
+          const nextPointIndex = Math.min(closest.index + 1, routePath.length - 1);
+          if (nextPointIndex < routePath.length) {
+            const nextPoint = routePath[nextPointIndex];
+            heading = google.maps.geometry.spherical.computeHeading(currentPos, nextPoint);
+          }
+        }
+        map.setCenter(currentPos);
+        map.setZoom(18);
+        map.setTilt(45);
+        map.setHeading(heading);
+        isManualInteraction = false;
+        isFollowing = true;
+        console.log('Map recentered with fallback at:', currentPos.toString(), 'Heading:', heading);
+        showToastMessage('Map recentered with fallback location.', 5000);
+        provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading });
       },
       { maximumAge: 0, timeout: 30000, enableHighAccuracy: true }
     );
+  } else {
+    showToastMessage('Geolocation not supported for recentering.', 7000, true);
   }
 }
 function startVoiceRecognition() {
@@ -2103,7 +1653,7 @@ function confirmVoiceInput(transcript) {
     recognition.onerror = (event) => {
       console.error('Confirmation error:', event.error);
       if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
-      showToastMessage(`Voice confirmation error: ${event.error}`, 7007, true);
+      showToastMessage(`Voice confirmation error: ${event.error}`, 7000, true);
       stopVoiceRecognition();
       setTimeout(() => confirmVoiceInput(transcript), 1000);
     };
@@ -2465,262 +2015,740 @@ function makeDraggable(element) {
   document.addEventListener('mouseup', stopDrag);
   document.addEventListener('touchend', stopDrag, { passive: false });
 }
-if (navAddress) {
-  navAddress.addEventListener('input', () => {
-    const query = navAddress.value.trim();
-    if (query.length > 2) {
-      autocompleteService.getPlacePredictions({ input: query }, (predictions, status) => {
-        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
-          suggestions.innerHTML = '';
-          predictions.forEach(prediction => {
-            const item = document.createElement('div');
-            item.className = 'suggestion-item';
-            item.textContent = prediction.description;
-            const handleSelect = () => {
-              navAddress.value = prediction.description;
-              startNavigation(prediction.description);
-              navOverlay.style.display = 'none';
-              showToastMessage(`Selected destination: ${prediction.description}`, 5000);
-            };
-            item.addEventListener('click', handleSelect);
-            item.addEventListener('touchend', handleSelect, { passive: false });
-            suggestions.appendChild(item);
-          });
-          showOverlay();
-        }
-      });
-    }
-  });
-}
-if (closeOverlay) {
-  const handleCloseOverlay = () => {
+window.addEventListener('DOMContentLoaded', () => {
+  console.time('DOM initialization');
+  console.log('DOM fully loaded at:', new Date().toLocaleTimeString());
+  const hud = document.getElementById('hud');
+  const controlHud = document.getElementById('control-hud');
+  const speedLimit = document.getElementById('speedLimit');
+  const eta = document.getElementById('eta');
+  const dta = document.getElementById('dta');
+  const time = document.getElementById('time');
+  const navAddress = document.getElementById('navAddress');
+  const navInput = document.getElementById('nav-input');
+  const navHud = document.getElementById('nav-hud');
+  const addAlertBtn = document.getElementById('addAlert');
+  const navOverlay = document.getElementById('navOverlay');
+  const recentLocations = document.getElementById('recentLocations');
+  const suggestions = document.getElementById('suggestions');
+  const closeOverlay = document.getElementById('closeOverlay');
+  const cancelBtn = document.querySelector('#control-hud .cancel-btn');
+  const recenterBtn = document.querySelector('#control-hud .recenter-btn');
+  const muteBtn = document.querySelector('#control-hud .mute-btn');
+  const hazardBtn = document.querySelector('#control-hud .hazard-btn');
+  const toolsHud = document.getElementById('tools-hud');
+  const micButton = document.querySelector('.mic-button');
+  const voiceOverlay = document.getElementById('voiceOverlay');
+  const pulsator = document.querySelector('.pulsator');
+  const closeVoiceOverlay = document.getElementById('closeVoiceOverlay');
+  const voiceInstruction = document.getElementById('voiceInstruction');
+  const detailedAlertBtn = document.getElementById('detailedAlert-btn');
+  const detailedAlertBox = document.getElementById('detailedAlertBox');
+  const closeDetailedAlertBtn = document.querySelector('#detailedAlertBox .close-btn');
+  const alertType = document.getElementById('alertType');
+  const alertNotes = document.getElementById('alertNotes');
+  const clickLocationBtn = document.getElementById('click-location-alert');
+  const alertCurrentBtn = document.getElementById('alert-current-location');
+  const locationDisplay = document.getElementById('location-display');
+  const selectedLocation = document.getElementById('selected-location');
+  const postAlertBtn = document.getElementById('post-alert');
+  const cancelAlertBtn = document.getElementById('cancel-alert');
+  const toastMessage = document.getElementById('toast-message');
+  const profileBtn = document.getElementById('profile-btn');
+  const profileHud = document.getElementById('profile-hud');
+  const closeBtn = document.querySelector('#profile-hud .close-btn');
+  accountInfo = document.querySelector('.account-info');
+  editProfile = document.querySelector('.edit-profile');
+  alertsTab = document.querySelector('.alerts');
+  tabButtons = document.querySelectorAll('.tab-button');
+  const saveProfileBtn = document.getElementById('save-profile-btn');
+  const settingsBtn = document.getElementById('settings-btn');
+  const settingsHud = document.getElementById('settings-hud');
+  const closeSettings = document.getElementById('closeSettings');
+  const loginBtn = document.getElementById('login-btn');
+  const loginUsername = document.getElementById('login-username');
+  const loginPassword = document.getElementById('login-password');
+  const reroutePrompt = document.getElementById('reroutePrompt');
+  const rerouteYes = document.getElementById('rerouteYes');
+  const rerouteNo = document.getElementById('rerouteNo');
+  console.log('addAlert button in JS:', addAlertBtn ? 'found' : 'not found');
+  if (!addAlertBtn) console.log('addAlert button not found in DOM');
+  else console.log('addAlert button ready');
+  if (navOverlay) {
     navOverlay.style.display = 'none';
-    showToastMessage('Navigation overlay closed.', 5000);
-  };
-  closeOverlay.addEventListener('click', handleCloseOverlay);
-  closeOverlay.addEventListener('touchend', handleCloseOverlay, { passive: false });
-}
-if (cancelBtn) {
-  const handleCancel = () => stopNavigation();
-  cancelBtn.addEventListener('click', handleCancel);
-  cancelBtn.addEventListener('touchend', handleCancel, { passive: false });
-}
-if (recenterBtn) {
-  const handleRecenter = () => recenterMap();
-  recenterBtn.addEventListener('click', handleRecenter);
-  recenterBtn.addEventListener('touchend', handleRecenter, { passive: false });
-}
-if (muteBtn) {
-  const handleMute = () => {
-    isMuted = !isMuted;
-    muteBtn.classList.toggle('muted', isMuted);
-    showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
-  };
-  muteBtn.addEventListener('click', handleMute);
-  muteBtn.addEventListener('touchend', handleMute, { passive: false });
-}
-if (hazardBtn) {
-  const handleHazard = () => addHazardMarker();
-  hazardBtn.addEventListener('click', handleHazard);
-  hazardBtn.addEventListener('touchend', handleHazard, { passive: false });
-}
-if (micButton) {
-  const handleMic = () => startVoiceRecognition();
-  micButton.addEventListener('click', handleMic);
-  micButton.addEventListener('touchend', handleMic, { passive: false });
-}
-if (closeVoiceOverlay) {
-  const handleCloseVoice = () => {
-    stopVoiceRecognition();
+    console.log('navOverlay set to hidden on load');
+  }
+  if (voiceOverlay) {
     voiceOverlay.style.display = 'none';
-    showToastMessage('Voice overlay closed.', 5000);
-  };
-  closeVoiceOverlay.addEventListener('click', handleCloseVoice);
-  closeVoiceOverlay.addEventListener('touchend', handleCloseVoice, { passive: false });
-}
-if (detailedAlertBtn) {
-  const handleDetailedAlert = () => showDetailedAlertBox();
-  detailedAlertBtn.addEventListener('click', handleDetailedAlert);
-  detailedAlertBtn.addEventListener('touchend', handleDetailedAlert, { passive: false });
-}
-if (closeDetailedAlertBtn) {
-  const handleCloseDetailed = () => {
-    detailedAlertBox.classList.remove('active');
+    console.log('voiceOverlay set to hidden on load');
+  }
+  if (detailedAlertBox) {
     detailedAlertBox.style.display = 'none';
-    showToastMessage('Detailed alert box closed.', 5000);
-  };
-  closeDetailedAlertBtn.addEventListener('click', handleCloseDetailed);
-  closeDetailedAlertBtn.addEventListener('touchend', handleCloseDetailed, { passive: false });
-}
-if (clickLocationBtn) {
-  const handleClickLocation = () => enableMapClick();
-  clickLocationBtn.addEventListener('click', handleClickLocation);
-  clickLocationBtn.addEventListener('touchend', handleClickLocation, { passive: false });
-}
-if (alertCurrentBtn) {
-  const handleAlertCurrent = () => alertAtCurrentLocation();
-  alertCurrentBtn.addEventListener('click', handleAlertCurrent);
-  alertCurrentBtn.addEventListener('touchend', handleAlertCurrent, { passive: false });
-}
-if (postAlertBtn) {
-  const handlePostAlert = () => postSelectedAlert();
-  postAlertBtn.addEventListener('click', handlePostAlert);
-  postAlertBtn.addEventListener('touchend', handlePostAlert, { passive: false });
-}
-if (cancelAlertBtn) {
-  const handleCancelAlert = () => {
-    detailedAlertBox.classList.remove('active');
-    detailedAlertBox.style.display = 'none';
-    showToastMessage('Alert creation cancelled.', 5000);
-  };
-  cancelAlertBtn.addEventListener('click', handleCancelAlert);
-  cancelAlertBtn.addEventListener('touchend', handleCancelAlert, { passive: false });
-}
-if (profileBtn) {
-  const handleProfile = () => {
-    profileHud.style.display = 'flex';
-    profileHud.classList.add('active');
-    showToastMessage('Profile opened.', 5000);
-  };
-  profileBtn.addEventListener('click', handleProfile);
-  profileBtn.addEventListener('touchend', handleProfile, { passive: false });
-}
-if (closeBtn) {
-  const handleCloseProfile = () => {
-    profileHud.classList.remove('active');
+    detailedAlertBox.style.left = '50%';
+    detailedAlertBox.style.top = '50%';
+    console.log('detailedAlertBox set to hidden on load, element:', detailedAlertBox);
+  }
+  if (profileHud) {
     profileHud.style.display = 'none';
-    showToastMessage('Profile closed.', 5000);
-  };
-  closeBtn.addEventListener('click', handleCloseProfile);
-  closeBtn.addEventListener('touchend', handleCloseProfile, { passive: false });
-}
-if (tabButtons) {
-  tabButtons.forEach(button => {
-    const handleTabClick = () => {
-      tabButtons.forEach(btn => btn.classList.remove('active'));
-      button.classList.add('active');
-      currentTab = button.dataset.tab;
-      accountInfo.classList.remove('active');
-      editProfile.classList.remove('active');
-      alertsTab.classList.remove('active');
-      if (currentTab === 'account') accountInfo.classList.add('active');
-      else if (currentTab === 'edit') editProfile.classList.add('active');
-      else if (currentTab === 'alerts') {
-        alertsTab.classList.add('active');
-        updateAlertTable();
+    console.log('profileHud set to hidden on load');
+  }
+  if (settingsHud) {
+    settingsHud.style.display = 'none';
+    console.log('settingsHud set to hidden on load');
+  }
+  if (reroutePrompt) {
+    reroutePrompt.style.display = 'none';
+    console.log('reroutePrompt set to hidden on load');
+  }
+  if (navInput) {
+    navInput.classList.remove('hidden');
+    navInput.style.opacity = '1';
+    navInput.style.transform = 'translateX(-50%)';
+    console.log('navInput set to visible on load');
+  }
+  if (navHud) {
+    navHud.classList.remove('active');
+    navHud.style.display = 'none';
+    console.log('navHud set to hidden on load');
+  }
+  if (settingsHud) {
+    const existingSettingsLogout = settingsHud.querySelector('.logout-btn');
+    if (!existingSettingsLogout) {
+      const settingsLogoutButton = document.createElement('button');
+      settingsLogoutButton.textContent = 'Logout';
+      settingsLogoutButton.className = 'logout-btn';
+      settingsLogoutButton.style.cssText = `
+        padding: 8px 15px;
+        background: #ff4444;
+        border: none;
+        border-radius: 5px;
+        color: #ffffff;
+        cursor: pointer;
+        font-family: 'Roboto', sans-serif;
+        margin-top: 10px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      `;
+      settingsLogoutButton.addEventListener('click', () => {
+        logout();
+      });
+      settingsLogoutButton.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        logout();
+      }, { passive: false });
+      settingsHud.appendChild(settingsLogoutButton);
+    }
+  }
+  function loadSocketIOScript() {
+    return new Promise((resolve, reject) => {
+      if (window.io) {
+        resolve();
+        return;
       }
-      showToastMessage(`Switched to ${currentTab} tab.`, 5000);
-    };
-    button.addEventListener('click', handleTabClick);
-    button.addEventListener('touchend', handleTabClick, { passive: false });
-  });
-}
-if (saveProfileBtn) {
-  const handleSaveProfile = () => {
-    const updates = {
-      name: document.getElementById('edit-name')?.value.trim() || '',
-      username: document.getElementById('edit-username')?.value.trim() || '',
-      email: document.getElementById('edit-email')?.value.trim() || '',
-      age: document.getElementById('edit-age')?.value.trim() || '',
-      dob: document.getElementById('edit-dob')?.value.trim() || '',
-      location: document.getElementById('edit-location')?.value.trim() || ''
-    };
-    if (!updates.username || !updates.email) {
-      console.error('Username or email missing in profile update');
-      showToastMessage('Username and email are required.', 7000, true);
-      return;
-    }
-    const token = localStorage.getItem('token');
-    if (!token) {
-      console.error('No token available for profile update');
-      showToastMessage('Please log in to update profile.', 5000, true);
-      return;
-    }
-    fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify(updates)
-    })
-      .then(response => {
-        if (!response.ok) throw new Error(`Profile update failed: ${response.status}`);
-        return response.json();
-      })
-      .then(data => {
-        userProfile = { ...userProfile, ...data };
-        currentUser = { ...currentUser, username: data.username, id: data._id };
-        updateProfileDisplay();
-        updateEditProfileForm();
-        console.log('Profile updated:', userProfile);
-        showToastMessage('Profile updated successfully.', 5000);
-        profileHud.classList.remove('active');
-        profileHud.style.display = 'none';
-        accountInfo.classList.add('active');
+      const script = document.createElement('script');
+      script.src = `${BASE_URL}/socket.io/socket.io.js`;
+      script.async = true;
+      let socketRetries = 0;
+      const maxSocketRetries = 3;
+      script.onload = () => {
+        console.log('Socket.IO script loaded successfully');
+        resolve();
+      };
+      script.onerror = () => {
+        console.error('Failed to load Socket.IO script, attempt:', socketRetries + 1);
+        socketRetries++;
+        if (socketRetries < maxSocketRetries) {
+          console.log(`Retrying Socket.IO load (attempt ${socketRetries + 1})...`);
+          setTimeout(() => {
+            document.head.appendChild(script.cloneNode());
+          }, 2000 * socketRetries);
+        } else {
+          console.error('Max retries reached for Socket.IO load');
+          showToastMessage('Failed to load Socket.IO.', 7000, true);
+          reject(new Error('Socket.IO script failed to load'));
+        }
+      };
+      document.head.appendChild(script);
+    });
+  }
+  function connectSocket() {
+    loadSocketIOScript()
+      .then(() => {
+        socket = window.io(BASE_URL, { reconnectionAttempts: 5, reconnectionDelay: 1000 });
+        console.log('Socket.IO connected to:', BASE_URL);
+        socket.on('connect', () => {
+          console.log('Socket.IO connection established');
+          showToastMessage('Connected to server.', 5000);
+          socket.on('hazard', (data) => {
+            if (map && !alertMarkers.has(data._id)) {
+              addMarkerFromDB(data);
+              fetchAlerts();
+            }
+          });
+          socket.on('detailedAlert', (data) => {
+            if (map && !alertMarkers.has(data._id)) {
+              addMarkerFromDB(data);
+              fetchAlerts();
+            }
+          });
+          socket.on('alert', (data) => {
+            if (map) {
+              new google.maps.Marker({
+                position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
+                map: map,
+                title: data.type
+              });
+            }
+          });
+          socket.on('alertRemoved', (data) => {
+            if (alertMarkers.has(data._id)) {
+              alertMarkers.get(data._id).setMap(null);
+              alertMarkers.delete(data._id);
+              hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
+              allAlerts = allAlerts.filter(a => a._id !== data._id);
+              updateAlertTable();
+              showToastMessage('Alert removed from map.', 5000);
+            }
+            console.log('Alert removed via socket:', data._id);
+          });
+          socket.on('locationUpdate', (data) => {
+            if (map) {
+              new google.maps.Marker({
+                position: { lat: data.latitude, lng: data.longitude },
+                map: map,
+                title: 'User Location'
+              });
+            }
+          });
+        });
+        socket.on('connect_error', (err) => {
+          console.warn('Socket.IO connection error:', err.message);
+          showToastMessage('Failed to connect to server.', 5000, true);
+        });
       })
       .catch(err => {
-        console.error('Profile update error:', err.message);
-        showToastMessage(`Failed to update profile: ${err.message}`, 7000, true);
+        console.warn('Socket.IO failed to load, retrying in 5 seconds:', err);
+        setTimeout(connectSocket, 5000);
       });
-  };
-  saveProfileBtn.addEventListener('click', handleSaveProfile);
-  saveProfileBtn.addEventListener('touchend', handleSaveProfile, { passive: false });
-}
-if (settingsBtn) {
-  const handleSettings = () => {
-    settingsHud.style.display = 'flex';
-    settingsHud.classList.add('active');
-    showToastMessage('Settings opened.', 5000);
-  };
-  settingsBtn.addEventListener('click', handleSettings);
-  settingsBtn.addEventListener('touchend', handleSettings, { passive: false });
-}
-if (closeSettings) {
-  const handleCloseSettings = () => {
-    settingsHud.classList.remove('active');
-    settingsHud.style.display = 'none';
-    showToastMessage('Settings closed.', 5000);
-  };
-  closeSettings.addEventListener('click', handleCloseSettings);
-  closeSettings.addEventListener('touchend', handleCloseSettings, { passive: false });
-}
-if (loginBtn && loginUsername && loginPassword) {
-  const handleLogin = () => {
-    login(loginUsername.value, loginPassword.value, loginBtn, loginUsername, loginPassword);
-  };
-  loginBtn.addEventListener('click', handleLogin);
-  loginBtn.addEventListener('touchend', handleLogin, { passive: false });
-}
-if (rerouteYes) {
-  const handleRerouteYes = () => rerouteAroundHazards(currentHazards);
-  rerouteYes.addEventListener('click', handleRerouteYes);
-  rerouteYes.addEventListener('touchend', handleRerouteYes, { passive: false });
-}
-if (rerouteNo) {
-  const handleRerouteNo = () => ignoreHazards(currentHazards);
-  rerouteNo.addEventListener('click', handleRerouteNo);
-  rerouteNo.addEventListener('touchend', handleRerouteNo, { passive: false });
-}
-if (detailedAlertBox) {
-  makeDraggable(detailedAlertBox);
-}
-if (addAlertBtn) {
-  const handleAddAlert = () => showDetailedAlertBox();
-  addAlertBtn.addEventListener('click', handleAddAlert);
-  addAlertBtn.addEventListener('touchend', handleAddAlert, { passive: false });
-}
-document.addEventListener('touchstart', (e) => {
-  if (e.touches.length > 1) {
-    e.preventDefault();
   }
-}, { passive: false });
-document.addEventListener('touchmove', (e) => {
-  if (e.touches.length > 1) {
-    e.preventDefault();
+  connectSocket();
+  function getCurrentTime() {
+    return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   }
-}, { passive: false });
-document.addEventListener('contextmenu', (e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  return false;
-});
-console.timeEnd('DOM initialization');
+  function getEstimatedArrivalTime(etaMinutes) {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + etaMinutes);
+    return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  }
+  function showOverlay() {
+    console.time('Show overlay');
+    console.log('Showing overlay');
+    if (navOverlay) {
+      navOverlay.style.display = 'block';
+      recentLocations.innerHTML = '';
+      recentDestinations.forEach(dest => {
+        const item = document.createElement('div');
+        item.className = 'recent-item';
+        item.textContent = dest;
+        const handleSelect = () => {
+          if (navAddress) navAddress.value = dest;
+          startNavigation(dest);
+          if (navOverlay) navOverlay.style.display = 'none';
+          showToastMessage(`Selected recent destination: ${dest}`, 5000);
+        };
+        item.addEventListener('click', handleSelect);
+        item.addEventListener('touchend', handleSelect, { passive: false });
+        recentLocations.appendChild(item);
+      });
+      showToastMessage('Navigation overlay opened.', 5000);
+    } else {
+      console.error('navOverlay not found');
+      showToastMessage('Failed to open navigation overlay.', 5000, true);
+    }
+    console.timeEnd('Show overlay');
+  }
+  async function startNavigation(address) {
+    console.time('Start navigation');
+    await mapReady;
+    isNavigating = true;
+    isFollowing = true;
+    isManualInteraction = false;
+    console.log('Navigation started, setting isNavigating to true');
+    if (hud) hud.classList.add('navigating');
+    if (controlHud) controlHud.classList.add('navigating');
+    if (navInput) {
+      navInput.classList.add('hidden');
+      navInput.style.opacity = '0';
+      navInput.style.transform = 'translateX(-50%) translateY(-20px)';
+    }
+    if (navHud) {
+      navHud.classList.add('active');
+      navHud.style.display = 'flex';
+      navHud.style.opacity = '1';
+      navHud.style.transform = 'translateX(-50%)';
+      const navInstruction = document.getElementById('nav-instruction');
+      const navDistance = document.getElementById('nav-distance');
+      const navEta = document.getElementById('nav-eta');
+      const instructionContainer = document.getElementById('instruction-container');
+      if (navInstruction) navInstruction.textContent = 'Starting navigation...';
+      if (navDistance) navDistance.textContent = 'Calculating...';
+      if (navEta) navEta.textContent = 'Calculating...';
+      if (instructionContainer) {
+        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+        if (leftArrow && rightArrow) {
+          leftArrow.classList.remove('active');
+          rightArrow.classList.remove('active');
+        }
+      }
+    }
+    console.log('HUD classes updated:', { hudClass: hud?.className, controlHudClass: controlHud?.className, navInputHidden: navInput?.className, navHudActive: navHud?.className });
+    routePath = [];
+    ignoredHazards = [];
+    directionsResponse = null;
+    const destination = await geocodeWithGoogle(address);
+    if (!destination) {
+      console.error('Geocoding failed for address:', address);
+      showToastMessage('Could not geocode address. Please check your input.', 7000, true);
+      stopNavigation();
+      return;
+    }
+    if (!recentDestinations.includes(address)) {
+      recentDestinations.unshift(address);
+      if (recentDestinations.length > 5) recentDestinations.pop();
+    }
+    currentDestination = destination;
+    let retries = 0;
+    const maxRetries = 3;
+    async function tryStartNavigation() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const { latitude, longitude } = position.coords;
+            userLocation = { lat: latitude, lng: longitude };
+            lastLocationUpdate = Date.now();
+            console.log('Current location for navigation start:', userLocation);
+            map.setCenter(userLocation);
+            map.setZoom(18);
+            map.setTilt(45);
+            map.setHeading(position.coords.heading || lastHeading);
+            updateRoute([latitude, longitude], destination).then(() => {
+              if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
+                const utterance = new SpeechSynthesisUtterance('Navigation started. Follow the route.');
+                utterance.voice = femaleVoice;
+                utterance.lang = 'en-US';
+                utterance.volume = 1.0;
+                window.speechSynthesis.speak(utterance);
+                console.log('Navigation voice test triggered with:', femaleVoice.name);
+              } else if (!femaleVoice) {
+                console.warn('No female voice available, skipping speech');
+              }
+              checkHazardsOnRoute();
+              showToastMessage('Navigation started.', 5000);
+              provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
+            }).catch(err => {
+              console.error('Route update failed:', err);
+              retries++;
+              if (retries < maxRetries) {
+                console.log(`Retrying navigation start (attempt ${retries + 1})...`);
+                setTimeout(tryStartNavigation, 2000 * retries);
+              } else {
+                console.error('Max retries reached for navigation start');
+                showToastMessage('Failed to start navigation after retries.', 7000, true);
+                stopNavigation();
+              }
+            });
+          },
+          (err) => {
+            console.error('Geolocation error for navigation start:', err);
+            let errorMessage = 'Failed to get current location. ';
+            if (err.code === 1) {
+              errorMessage += 'Location permission denied. Please enable location services.';
+            } else if (err.code === 2) {
+              errorMessage += 'Location unavailable. Using last known location.';
+            } else if (err.code === 3) {
+              errorMessage += 'Location request timed out. Using last known location.';
+            } else {
+              errorMessage += 'An unknown error occurred. Using last known location.';
+            }
+            showToastMessage(errorMessage, 7000, true);
+            retries++;
+            if (retries < maxRetries) {
+              console.log(`Retrying navigation start with fallback location (attempt ${retries + 1})...`);
+              setTimeout(() => {
+                updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
+                  map.setCenter(userLocation);
+                  map.setZoom(18);
+                  map.setTilt(45);
+                  map.setHeading(lastHeading);
+                  checkHazardsOnRoute();
+                  showToastMessage('Navigation started with fallback location.', 5000);
+                  provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
+                }).catch(err => {
+                  console.error('Route update with fallback failed:', err);
+                  if (retries < maxRetries) {
+                    console.log(`Retrying navigation start (attempt ${retries + 1})...`);
+                    setTimeout(tryStartNavigation, 2000 * retries);
+                  } else {
+                    console.error('Max retries reached for navigation start with fallback');
+                    showToastMessage('Failed to start navigation after retries.', 7000, true);
+                    stopNavigation();
+                  }
+                });
+              }, 2000 * retries);
+            } else {
+              console.error('Max retries reached for navigation start');
+              showToastMessage('Failed to start navigation after retries.', 7000, true);
+              stopNavigation();
+            }
+          },
+          { maximumAge: 0, timeout: 30000, enableHighAccuracy: true }
+        );
+      } else {
+        console.error('Geolocation unavailable, using fallback:', userLocation);
+        updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
+          map.setCenter(userLocation);
+          map.setZoom(18);
+          map.setTilt(45);
+          map.setHeading(lastHeading);
+          checkHazardsOnRoute();
+          showToastMessage('Navigation started with fallback location.', 5000);
+          provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
+        }).catch(err => {
+          console.error('Route update with fallback failed:', err);
+          retries++;
+          if (retries < maxRetries) {
+            console.log(`Retrying navigation start with fallback (attempt ${retries + 1})...`);
+            setTimeout(tryStartNavigation, 2000 * retries);
+          } else {
+            console.error('Max retries reached for navigation start with fallback');
+            showToastMessage('Failed to start navigation after retries.', 7000, true);
+            stopNavigation();
+          }
+        });
+      }
+    }
+    tryStartNavigation();
+    console.timeEnd('Start navigation');
+  }
+  function stopNavigation() {
+    console.log('Stopping navigation, attempting to clear route');
+    isNavigating = false;
+    isFollowing = false;
+    routePath = [];
+    currentDestination = null;
+    ignoredHazards = [];
+    lastInstruction = '';
+    lastNavIndex = -1;
+    lastDistanceToNext = Infinity;
+    directionsResponse = null;
+    if (hud) hud.classList.remove('navigating');
+    if (controlHud) controlHud.classList.remove('navigating');
+    if (navInput) {
+      navInput.classList.remove('hidden');
+      navInput.style.opacity = '0';
+      navInput.style.transform = 'translateX(-50%)';
+      setTimeout(() => {
+        navInput.style.opacity = '1';
+      }, 50);
+    }
+    if (navHud) {
+      navHud.style.opacity = '0';
+      setTimeout(() => {
+        navHud.classList.remove('active');
+        navHud.style.display = 'none';
+        const instructionContainer = document.getElementById('instruction-container');
+        if (instructionContainer) {
+          const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+          const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+          if (leftArrow && rightArrow) {
+            leftArrow.classList.remove('active');
+            rightArrow.classList.remove('active');
+          }
+        }
+      }, 300);
+    }
+    if (routePolyline) {
+      routePolyline.setMap(null);
+      routePolyline = null;
+    }
+    if (passedPolyline) {
+      passedPolyline.setMap(null);
+      passedPolyline = null;
+    }
+    if (directionsRenderer) {
+      directionsRenderer.setMap(null);
+    }
+    if (eta) eta.textContent = 'N/A';
+    if (dta) dta.textContent = 'N/A';
+    if (time) time.textContent = '0:00';
+    const navInstruction = document.getElementById('nav-instruction');
+    const navDistance = document.getElementById('nav-distance');
+    const navEta = document.getElementById('nav-eta');
+    if (navInstruction) navInstruction.textContent = 'No navigation active';
+    if (navDistance) navDistance.textContent = 'N/A';
+    if (navEta) navEta.textContent = 'N/A';
+    map.setZoom(13);
+    map.setTilt(0);
+    map.setHeading(0);
+    showToastMessage('Navigation stopped.', 5000);
+  }
+  if (navAddress) {
+    navAddress.addEventListener('input', () => {
+      const query = navAddress.value.trim();
+      if (query.length > 2) {
+        autocompleteService.getPlacePredictions({ input: query }, (predictions, status) => {
+          if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+            suggestions.innerHTML = '';
+            predictions.forEach(prediction => {
+              const item = document.createElement('div');
+              item.className = 'suggestion-item';
+              item.textContent = prediction.description;
+              const handleSelect = () => {
+                navAddress.value = prediction.description;
+                startNavigation(prediction.description);
+                navOverlay.style.display = 'none';
+                showToastMessage(`Selected destination: ${prediction.description}`, 5000);
+              };
+              item.addEventListener('click', handleSelect);
+              item.addEventListener('touchend', handleSelect, { passive: false });
+              suggestions.appendChild(item);
+            });
+            showOverlay();
+          }
+        });
+      }
+    });
+  }
+  if (closeOverlay) {
+    const handleCloseOverlay = () => {
+      navOverlay.style.display = 'none';
+      showToastMessage('Navigation overlay closed.', 5000);
+    };
+    closeOverlay.addEventListener('click', handleCloseOverlay);
+    closeOverlay.addEventListener('touchend', handleCloseOverlay, { passive: false });
+  }
+  if (cancelBtn) {
+    const handleCancel = () => stopNavigation();
+    cancelBtn.addEventListener('click', handleCancel);
+    cancelBtn.addEventListener('touchend', handleCancel, { passive: false });
+  }
+  if (recenterBtn) {
+    const handleRecenter = () => recenterMap();
+    recenterBtn.addEventListener('click', handleRecenter);
+    recenterBtn.addEventListener('touchend', handleRecenter, { passive: false });
+  }
+  if (muteBtn) {
+    const handleMute = () => {
+      isMuted = !isMuted;
+      muteBtn.classList.toggle('muted', isMuted);
+      showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
+    };
+    muteBtn.addEventListener('click', handleMute);
+    muteBtn.addEventListener('touchend', handleMute, { passive: false });
+  }
+  if (hazardBtn) {
+    const handleHazard = () => addHazardMarker();
+    hazardBtn.addEventListener('click', handleHazard);
+    hazardBtn.addEventListener('touchend', handleHazard, { passive: false });
+  }
+  if (micButton) {
+    const handleMic = () => startVoiceRecognition();
+    micButton.addEventListener('click', handleMic);
+    micButton.addEventListener('touchend', handleMic, { passive: false });
+  }
+  if (closeVoiceOverlay) {
+    const handleCloseVoice = () => {
+      stopVoiceRecognition();
+      voiceOverlay.style.display = 'none';
+      showToastMessage('Voice overlay closed.', 5000);
+    };
+    closeVoiceOverlay.addEventListener('click', handleCloseVoice);
+    closeVoiceOverlay.addEventListener('touchend', handleCloseVoice, { passive: false });
+  }
+  if (detailedAlertBtn) {
+    const handleDetailedAlert = () => showDetailedAlertBox();
+    detailedAlertBtn.addEventListener('click', handleDetailedAlert);
+    detailedAlertBtn.addEventListener('touchend', handleDetailedAlert, { passive: false });
+  }
+  if (closeDetailedAlertBtn) {
+    const handleCloseDetailed = () => {
+      detailedAlertBox.classList.remove('active');
+      detailedAlertBox.style.display = 'none';
+      showToastMessage('Detailed alert box closed.', 5000);
+    };
+    closeDetailedAlertBtn.addEventListener('click', handleCloseDetailed);
+    closeDetailedAlertBtn.addEventListener('touchend', handleCloseDetailed, { passive: false });
+  }
+  if (clickLocationBtn) {
+    const handleClickLocation = () => enableMapClick();
+    clickLocationBtn.addEventListener('click', handleClickLocation);
+    clickLocationBtn.addEventListener('touchend', handleClickLocation, { passive: false });
+  }
+  if (alertCurrentBtn) {
+    const handleAlertCurrent = () => alertAtCurrentLocation();
+    alertCurrentBtn.addEventListener('click', handleAlertCurrent);
+    alertCurrentBtn.addEventListener('touchend', handleAlertCurrent, { passive: false });
+  }
+  if (postAlertBtn) {
+    const handlePostAlert = () => postSelectedAlert();
+    postAlertBtn.addEventListener('click', handlePostAlert);
+    postAlertBtn.addEventListener('touchend', handlePostAlert, { passive: false });
+  }
+  if (cancelAlertBtn) {
+    const handleCancelAlert = () => {
+      detailedAlertBox.classList.remove('active');
+      detailedAlertBox.style.display = 'none';
+      showToastMessage('Alert creation cancelled.', 5000);
+    };
+    cancelAlertBtn.addEventListener('click', handleCancelAlert);
+    cancelAlertBtn.addEventListener('touchend', handleCancelAlert, { passive: false });
+  }
+  if (profileBtn) {
+    const handleProfile = () => {
+      profileHud.style.display = 'flex';
+      profileHud.classList.add('active');
+      showToastMessage('Profile opened.', 5000);
+    };
+    profileBtn.addEventListener('click', handleProfile);
+    profileBtn.addEventListener('touchend', handleProfile, { passive: false });
+  }
+  if (closeBtn) {
+    const handleCloseProfile = () => {
+      profileHud.classList.remove('active');
+      profileHud.style.display = 'none';
+      showToastMessage('Profile closed.', 5000);
+    };
+    closeBtn.addEventListener('click', handleCloseProfile);
+    closeBtn.addEventListener('touchend', handleCloseProfile, { passive: false });
+  }
+  if (tabButtons) {
+    tabButtons.forEach(button => {
+      const handleTabClick = () => {
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        button.classList.add('active');
+        currentTab = button.dataset.tab;
+        accountInfo.classList.remove('active');
+        editProfile.classList.remove('active');
+        alertsTab.classList.remove('active');
+        if (currentTab === 'account') accountInfo.classList.add('active');
+        else if (currentTab === 'edit') editProfile.classList.add('active');
+        else if (currentTab === 'alerts') {
+          alertsTab.classList.add('active');
+          updateAlertTable();
+        }
+        showToastMessage(`Switched to ${currentTab} tab.`, 5000);
+      };
+      button.addEventListener('click', handleTabClick);
+      button.addEventListener('touchend', handleTabClick, { passive: false });
+    });
+  }
+  if (saveProfileBtn) {
+    const handleSaveProfile = () => {
+      const updates = {
+        name: document.getElementById('edit-name')?.value.trim() || '',
+        username: document.getElementById('edit-username')?.value.trim() || '',
+        email: document.getElementById('edit-email')?.value.trim() || '',
+        age: document.getElementById('edit-age')?.value.trim() || '',
+        dob: document.getElementById('edit-dob')?.value.trim() || '',
+        location: document.getElementById('edit-location')?.value.trim() || ''
+      };
+      if (!updates.username || !updates.email) {
+        console.error('Username or email missing in profile update');
+        showToastMessage('Username and email are required.', 7000, true);
+        return;
+      }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No token available for profile update');
+        showToastMessage('Please log in to update profile.', 5000, true);
+        return;
+      }
+      fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(updates)
+      })
+        .then(response => {
+          if (!response.ok) throw new Error(`Profile update failed: ${response.status}`);
+          return response.json();
+        })
+        .then(data => {
+          userProfile = { ...userProfile, ...data };
+          currentUser = { ...currentUser, username: data.username, id: data._id };
+          updateProfileDisplay();
+          updateEditProfileForm();
+          console.log('Profile updated:', userProfile);
+          showToastMessage('Profile updated successfully.', 5000);
+          profileHud.classList.remove('active');
+          profileHud.style.display = 'none';
+          accountInfo.classList.add('active');
+        })
+        .catch(err => {
+          console.error('Profile update error:', err.message);
+          showToastMessage(`Failed to update profile: ${err.message}`, 7000, true);
+        });
+    };
+    saveProfileBtn.addEventListener('click', handleSaveProfile);
+    saveProfileBtn.addEventListener('touchend', handleSaveProfile, { passive: false });
+  }
+  if (settingsBtn) {
+    const handleSettings = () => {
+      settingsHud.style.display = 'flex';
+      settingsHud.classList.add('active');
+      showToastMessage('Settings opened.', 5000);
+    };
+    settingsBtn.addEventListener('click', handleSettings);
+    settingsBtn.addEventListener('touchend', handleSettings, { passive: false });
+  }
+  if (closeSettings) {
+    const handleCloseSettings = () => {
+      settingsHud.classList.remove('active');
+      settingsHud.style.display = 'none';
+      showToastMessage('Settings closed.', 5000);
+    };
+    closeSettings.addEventListener('click', handleCloseSettings);
+    closeSettings.addEventListener('touchend', handleCloseSettings, { passive: false });
+  }
+  if (loginBtn && loginUsername && loginPassword) {
+    const handleLogin = () => {
+      login(loginUsername.value, loginPassword.value, loginBtn, loginUsername, loginPassword);
+    };
+    loginBtn.addEventListener('click', handleLogin);
+    loginBtn.addEventListener('touchend', handleLogin, { passive: false });
+  }
+  if (rerouteYes) {
+    const handleRerouteYes = () => rerouteAroundHazards(currentHazards);
+    rerouteYes.addEventListener('click', handleRerouteYes);
+    rerouteYes.addEventListener('touchend', handleRerouteYes, { passive: false });
+  }
+  if (rerouteNo) {
+    const handleRerouteNo = () => ignoreHazards(currentHazards);
+    rerouteNo.addEventListener('click', handleRerouteNo);
+    rerouteNo.addEventListener('touchend', handleRerouteNo, { passive: false });
+  }
+  if (detailedAlertBox) {
+    makeDraggable(detailedAlertBox);
+  }
+  if (addAlertBtn) {
+    const handleAddAlert = () => showDetailedAlertBox();
+    addAlertBtn.addEventListener('click', handleAddAlert);
+    addAlertBtn.addEventListener('touchend', handleAddAlert, { passive: false });
+  }
+  document.addEventListener('touchstart', (e) => {
+    if (e.touches.length > 1) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+  document.addEventListener('touchmove', (e) => {
+    if (e.touches.length > 1) {
+      e.preventDefault();
+    }
+  }, { passive: false });
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    return false;
+  });
+  console.timeEnd('DOM initialization');
 });
