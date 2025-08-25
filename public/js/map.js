@@ -1,13 +1,13 @@
-const VERSION = '1.0.56'; // Updated for navigation and HUD fixes
+const VERSION = '1.0.57'; // Updated for HUD and navigation fixes
 // Global variables
 let map;
 let routePolyline;
-let passedPolyline; // For the faded passed portion
+let passedPolyline;
 let currentDestination = null;
 let liveLocationMarker = null;
 let isNavigating = false;
-let isFollowing = false; // Whether to auto-follow user
-let isManualInteraction = false; // Flag for user manual map interaction
+let isFollowing = false;
+let isManualInteraction = false;
 let previousPosition = null;
 let routePath = [];
 let recentDestinations = ['1827 Holly Hill Rd, Milledgeville, GA 31061', 'Walmart Milledgeville GA'];
@@ -30,7 +30,7 @@ let userProfile = { name: '', username: '', email: '', age: '', dob: null, locat
 let allAlerts = [];
 let ignoredHazards = [];
 let currentHazards = [];
-let directionsResponse = null; // Store the full directions response
+let directionsResponse = null;
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
 const ALERTS_PER_PAGE = 5;
 let currentPage = 1;
@@ -42,10 +42,11 @@ const mapReady = new Promise((resolve) => mapReadyResolve = resolve);
 let lastInstruction = '';
 let lastNavIndex = -1;
 let lastDistanceToNext = Infinity;
-let lastHeading = 0; // For fallback when no device heading
-let geolocationWatchId = null; // To manage watchPosition
+let lastHeading = 0;
+let geolocationWatchId = null;
 let geolocationRetryCount = 0;
 const MAX_GEOLOCATION_RETRIES = 3;
+const MAX_NAVIGATION_RETRIES = 3;
 // Determine API and Socket.IO base URL based on environment
 const isLocal = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost';
 const BASE_URL = isLocal ? 'http://127.0.0.1:3000' : 'https://wazelikeapp.onrender.com';
@@ -104,7 +105,7 @@ function provideVoiceNavigation(coords) {
   const navInstruction = document.getElementById('nav-instruction');
   const navDistance = document.getElementById('nav-distance');
   const instructionContainer = document.getElementById('instruction-container');
-  if (routePath.length > 1 && coords.heading !== undefined && directionsResponse) {
+  if (routePath.length > 1 && coords && directionsResponse) {
     const currentPos = new google.maps.LatLng(coords.latitude, coords.longitude);
     const closest = findClosestPointOnRoute(currentPos, routePath);
     const nextIndex = Math.min(closest.index + 1, routePath.length - 1);
@@ -177,7 +178,6 @@ function provideVoiceNavigation(coords) {
         lastInstruction = instruction;
         if (navInstruction) {
           navInstruction.textContent = instruction;
-          // Update turn arrow
           const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
           const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
           if (leftArrow && rightArrow) {
@@ -199,7 +199,7 @@ function provideVoiceNavigation(coords) {
     }
     lastDistanceToNext = stepDistance || distance;
   } else if (isNavigating && routePath.length > 0) {
-    console.warn('Missing heading or route data for voice navigation:', { heading: coords.heading, routePathLength: routePath.length });
+    console.warn('Missing coords or route data for voice navigation:', { coords, routePathLength: routePath.length });
     if (navInstruction) {
       navInstruction.textContent = 'Waiting for navigation data...';
       const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
@@ -337,7 +337,7 @@ async function updateRoute(start, end, avoidHazards = false) {
         console.log(`Selected alternative route index: ${selectedRouteIndex} with min hazard distance: ${maxMinDistance}m`);
       }
       const selectedRoute = response.routes[selectedRouteIndex];
-      directionsResponse = response; // Store the full response for navigation instructions
+      directionsResponse = response;
       directionsRenderer.setDirections(response);
       directionsRenderer.setRouteIndex(selectedRouteIndex);
       const path = selectedRoute.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
@@ -366,6 +366,8 @@ async function updateRoute(start, end, avoidHazards = false) {
       if (navEta) navEta.textContent = `${Math.round(timeMs / 60000)} min`;
       console.timeEnd('Route calculation');
       showToastMessage(avoidHazards ? 'Route updated to avoid hazards.' : 'Route updated.', 5000);
+      // Trigger initial navigation instruction
+      provideVoiceNavigation({ latitude: start[0], longitude: start[1], heading: lastHeading });
     } catch (err) {
       console.error('Route calculation failed:', err);
       retries++;
@@ -1009,6 +1011,10 @@ function logout() {
       navHud.classList.remove('active');
       navHud.style.display = 'none';
     }
+    if (liveLocationMarker) {
+      liveLocationMarker.setMap(null);
+      liveLocationMarker = null;
+    }
     console.log('Logged out, resetting to login screen');
     showToastMessage('Logged out successfully.', 5000);
     window.location.href = '/';
@@ -1270,9 +1276,9 @@ function startGeolocationWatch() {
     }
     geolocationWatchId = navigator.geolocation.watchPosition(
       (position) => {
-        geolocationRetryCount = 0; // Reset retry on success
+        geolocationRetryCount = 0;
         const now = Date.now();
-        if (now - lastLocationUpdate < 2000) return; // Throttle to 2s
+        if (now - lastLocationUpdate < 2000) return;
         lastLocationUpdate = now;
         let currentPos = new google.maps.LatLng(position.coords.latitude, position.coords.longitude);
         userLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
@@ -1289,12 +1295,11 @@ function startGeolocationWatch() {
           }
         }
         lastHeading = heading || lastHeading;
-        // Update user location marker as a triangle
         if (map) {
           if (liveLocationMarker) {
-            liveLocationMarker.setPosition(currentPos); // Update existing marker position
+            liveLocationMarker.setPosition(currentPos);
             liveLocationMarker.setIcon({
-              path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+              path: 'M -10,10 L 0,-10 L 10,10 Z',
               fillColor: '#00bcd4',
               fillOpacity: 1,
               strokeColor: '#000000',
@@ -1308,7 +1313,7 @@ function startGeolocationWatch() {
               position: currentPos,
               map: map,
               icon: {
-                path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+                path: 'M -10,10 L 0,-10 L 10,10 Z',
                 fillColor: '#00bcd4',
                 fillOpacity: 1,
                 strokeColor: '#000000',
@@ -1379,7 +1384,7 @@ function startGeolocationWatch() {
               position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
               map: map,
               icon: {
-                path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+                path: 'M -10,10 L 0,-10 L 10,10 Z',
                 fillColor: '#00bcd4',
                 fillOpacity: 1,
                 strokeColor: '#000000',
@@ -1409,7 +1414,7 @@ function startGeolocationWatch() {
               position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
               map: map,
               icon: {
-                path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+                path: 'M -10,10 L 0,-10 L 10,10 Z',
                 fillColor: '#00bcd4',
                 fillOpacity: 1,
                 strokeColor: '#000000',
@@ -1434,7 +1439,7 @@ function startGeolocationWatch() {
             position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
             map: map,
             icon: {
-              path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+              path: 'M -10,10 L 0,-10 L 10,10 Z',
               fillColor: '#00bcd4',
               fillOpacity: 1,
               strokeColor: '#000000',
@@ -1471,7 +1476,7 @@ function startGeolocationWatch() {
         position: new google.maps.LatLng(userLocation.lat, userLocation.lng),
         map: map,
         icon: {
-          path: 'M -10,10 L 0,-10 L 10,10 Z', // SVG path for triangle
+          path: 'M -10,10 L 0,-10 L 10,10 Z',
           fillColor: '#00bcd4',
           fillOpacity: 1,
           strokeColor: '#000000',
@@ -1620,14 +1625,25 @@ window.addEventListener('DOMContentLoaded', () => {
       const script = document.createElement('script');
       script.src = `${BASE_URL}/socket.io/socket.io.js`;
       script.async = true;
+      let socketRetries = 0;
+      const maxSocketRetries = 3;
       script.onload = () => {
         console.log('Socket.IO script loaded successfully');
         resolve();
       };
       script.onerror = () => {
-        console.error('Failed to load Socket.IO script');
-        showToastMessage('Failed to load Socket.IO.', 7000, true);
-        reject(new Error('Socket.IO script failed to load'));
+        console.error('Failed to load Socket.IO script, attempt:', socketRetries + 1);
+        socketRetries++;
+        if (socketRetries < maxSocketRetries) {
+          console.log(`Retrying Socket.IO load (attempt ${socketRetries + 1})...`);
+          setTimeout(() => {
+            document.head.appendChild(script.cloneNode());
+          }, 2000 * socketRetries);
+        } else {
+          console.error('Max retries reached for Socket.IO load');
+          showToastMessage('Failed to load Socket.IO.', 7000, true);
+          reject(new Error('Socket.IO script failed to load'));
+        }
       };
       document.head.appendChild(script);
     });
@@ -1805,6 +1821,8 @@ window.addEventListener('DOMContentLoaded', () => {
               }
               checkHazardsOnRoute();
               showToastMessage('Navigation started.', 5000);
+              // Explicitly trigger initial navigation instruction
+              provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
             }).catch(err => {
               console.error('Route update failed:', err);
               retries++;
@@ -1841,6 +1859,8 @@ window.addEventListener('DOMContentLoaded', () => {
                   map.setTilt(45);
                   checkHazardsOnRoute();
                   showToastMessage('Navigation started with fallback location.', 5000);
+                  // Trigger initial navigation instruction
+                  provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
                 }).catch(err => {
                   console.error('Route update with fallback failed:', err);
                   if (retries < maxRetries) {
@@ -1869,6 +1889,8 @@ window.addEventListener('DOMContentLoaded', () => {
           map.setTilt(45);
           checkHazardsOnRoute();
           showToastMessage('Navigation started with fallback location.', 5000);
+          // Trigger initial navigation instruction
+          provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
         }).catch(err => {
           console.error('Route update with fallback failed:', err);
           retries++;
@@ -1896,7 +1918,7 @@ window.addEventListener('DOMContentLoaded', () => {
     lastInstruction = '';
     lastNavIndex = -1;
     lastDistanceToNext = Infinity;
-    directionsResponse = null; // Clear directions response
+    directionsResponse = null;
     if (hud) hud.classList.remove('navigating');
     if (controlHud) controlHud.classList.remove('navigating');
     const navInput = document.getElementById('nav-input');
@@ -1974,6 +1996,7 @@ window.addEventListener('DOMContentLoaded', () => {
           isFollowing = true;
           console.log('Map recentered at:', currentPos.toString());
           showToastMessage('Map recentered.', 5000);
+          provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
         },
         (err) => {
           console.log('Recenter geolocation error:', err);
@@ -2216,7 +2239,7 @@ window.addEventListener('DOMContentLoaded', () => {
         showToastMessage('Hazard alert posted with default location.', 5000);
       }).catch(err => {
         console.error('Failed to post hazard alert with default:', err);
-        showToastMessage(err.message || 'Failed to post hazard alert with default.', 7000, true);
+        showToastMessage(err.message || 'Failed to post hazard alert with default.', 7007, true);
       });
     }
   }
