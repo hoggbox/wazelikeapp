@@ -29,7 +29,7 @@
       display: none;
       touch-action: auto;
     }
-    #hud, #control-hud, #control-panel, #login-screen {
+    #hud, #control-hud, #control-panel, #login-screen, #nav-hud {
       display: none;
     }
     #tools-hud {
@@ -1328,6 +1328,11 @@
       </div>
       <button id="closeOverlay">Close</button>
     </div>
+  </div>
+  <div id="nav-hud">
+    <div class="nav-hud-item"><i class="fas fa-directions"></i><span id="nav-instruction">Starting navigation...</span></div>
+    <div class="nav-hud-item"><i class="fas fa-ruler"></i><span id="nav-distance">Calculating...</span></div>
+    <div class="nav-hud-item"><i class="fas fa-clock"></i><span id="nav-eta">Calculating...</span></div>
   </div>
   <div id="voiceOverlay">
     <div class="pulsator"></div>

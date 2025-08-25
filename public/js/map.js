@@ -1,4 +1,4 @@
-const VERSION = '1.0.52'; // Updated for nav start focus and settings logout button
+const VERSION = '1.0.53'; // Updated for nav HUD and input toggle
 // Global variables
 let map;
 let routePolyline;
@@ -100,6 +100,8 @@ function geocodeWithGoogle(address) {
     });
 }
 function provideVoiceNavigation(coords) {
+  const navInstruction = document.getElementById('nav-instruction');
+  const navDistance = document.getElementById('nav-distance');
   if (routePath.length > 1 && coords.heading !== undefined) {
     const currentPos = new google.maps.LatLng(coords.latitude, coords.longitude);
     const closest = findClosestPointOnRoute(currentPos, routePath);
@@ -107,6 +109,24 @@ function provideVoiceNavigation(coords) {
     const distance = closest.distance;
     const nextPoint = routePath[nextIndex];
     console.log('Navigation check:', { distance, nextIndex, heading: coords.heading });
+    // Check if user is near the destination (within 50 meters)
+    if (currentDestination) {
+      const destPos = new google.maps.LatLng(currentDestination[0], currentDestination[1]);
+      const distanceToDest = google.maps.geometry.spherical.computeDistanceBetween(currentPos, destPos);
+      if (distanceToDest < 50) {
+        console.log('Destination reached, stopping navigation');
+        stopNavigation();
+        if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
+          const utterance = new SpeechSynthesisUtterance('You have reached your destination.');
+          utterance.voice = femaleVoice;
+          utterance.lang = 'en-US';
+          utterance.volume = 1.0;
+          window.speechSynthesis.speak(utterance);
+        }
+        showToastMessage('Destination reached!', 5000);
+        return;
+      }
+    }
     if (distance < 50 && nextIndex < routePath.length - 1 && closest.index > lastNavIndex) {
       const nextNextPoint = routePath[nextIndex + 1];
       const heading = google.maps.geometry.spherical.computeHeading(currentPos, nextNextPoint);
@@ -133,12 +153,22 @@ function provideVoiceNavigation(coords) {
           console.warn('No female voice available, skipping navigation instruction');
         }
         lastInstruction = instruction;
+        if (navInstruction) navInstruction.textContent = instruction;
+        if (navDistance) navDistance.textContent = `${Math.round(distance)} m`;
       }
       lastNavIndex = closest.index;
+    } else if (navInstruction && lastInstruction) {
+      navInstruction.textContent = lastInstruction;
+      if (navDistance) navDistance.textContent = `${Math.round(distance)} m`;
     }
     lastDistanceToNext = distance;
   } else if (isNavigating && routePath.length > 0) {
     console.warn('Missing heading or route data for voice navigation:', { heading: coords.heading, routePathLength: routePath.length });
+    if (navInstruction) navInstruction.textContent = 'Waiting for navigation data...';
+    if (navDistance) navDistance.textContent = 'N/A';
+  } else {
+    if (navInstruction) navInstruction.textContent = 'No navigation active';
+    if (navDistance) navDistance.textContent = 'N/A';
   }
   checkHazardsOnRoute();
 }
@@ -276,6 +306,8 @@ async function updateRoute(start, end, avoidHazards = false) {
     const distanceM = selectedRoute.legs.reduce((acc, leg) => acc + leg.distance.value, 0);
     if (eta) eta.textContent = `${Math.round(timeMs / 60000)} min`;
     if (dta) dta.textContent = `${Math.round(distanceM / 1609.34)} mi`;
+    const navEta = document.getElementById('nav-eta');
+    if (navEta) navEta.textContent = `${Math.round(timeMs / 60000)} min`;
     console.timeEnd('Route calculation');
     showToastMessage(avoidHazards ? 'Route updated to avoid hazards.' : 'Route updated.', 5000);
   } catch (err) {
@@ -283,7 +315,6 @@ async function updateRoute(start, end, avoidHazards = false) {
     showToastMessage('Failed to calculate route. Please try again.', 7000, true);
   }
 }
-
 function addMarker(type, notes = '', position) {
   const timerName = `Add ${type} marker ${Date.now()}`;
   console.time(timerName);
@@ -559,7 +590,6 @@ function updateProfileDisplay() {
   if (ageEl) ageEl.textContent = `Age: ${userProfile.age || 'Not Provided'}`;
   if (dobEl) dobEl.textContent = `DOB: ${userProfile.dob ? new Date(userProfile.dob).toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }) : 'Not Provided'}`;
   if (locationEl) locationEl.textContent = `Location: ${userProfile.location || 'Not Provided'}`;
-  // Remove existing logout button to prevent duplicates
   const existingLogoutButton = accountInfo.querySelector('.logout-btn');
   if (existingLogoutButton) {
     existingLogoutButton.remove();
@@ -897,11 +927,22 @@ function logout() {
     const map = document.getElementById('map');
     const profileHud = document.getElementById('profile-hud');
     const settingsHud = document.getElementById('settings-hud');
+    const navInput = document.getElementById('nav-input');
+    const navHud = document.getElementById('nav-hud');
     if (loginScreen) loginScreen.style.display = 'flex';
     if (map) map.style.display = 'none';
     if (profileHud && profileHud.classList) profileHud.classList.remove('active');
     if (settingsHud && settingsHud.classList) settingsHud.classList.remove('active');
     if (profileHud) profileHud.style.display = 'none';
+    if (navInput) {
+      navInput.classList.remove('hidden');
+      navInput.style.opacity = '1';
+      navInput.style.transform = 'translateX(-50%)';
+    }
+    if (navHud) {
+      navHud.classList.remove('active');
+      navHud.style.display = 'none';
+    }
     console.log('Logged out, resetting to login screen');
     showToastMessage('Logged out successfully.', 5000);
     window.location.href = '/';
@@ -998,7 +1039,13 @@ function alertAtCurrentLocation() {
 }
 function initializeMapAfterLogin() {
   const mapElement = document.getElementById('map');
+  const navInput = document.getElementById('nav-input');
   if (mapElement) mapElement.style.display = 'block';
+  if (navInput) {
+    navInput.classList.remove('hidden');
+    navInput.style.opacity = '1';
+    navInput.style.transform = 'translateX(-50%)';
+  }
   if (window.google && google.maps) {
     window.initMap();
   } else {
@@ -1052,9 +1099,20 @@ window.initMap = function() {
   const token = localStorage.getItem('token');
   const loginScreen = document.getElementById('login-screen');
   const mapElement = document.getElementById('map');
+  const navInput = document.getElementById('nav-input');
+  const navHud = document.getElementById('nav-hud');
   if (!token) {
     if (loginScreen) loginScreen.style.display = 'flex';
     if (mapElement) mapElement.style.display = 'none';
+    if (navInput) {
+      navInput.classList.remove('hidden');
+      navInput.style.opacity = '1';
+      navInput.style.transform = 'translateX(-50%)';
+    }
+    if (navHud) {
+      navHud.classList.remove('active');
+      navHud.style.display = 'none';
+    }
     showToastMessage('Please log in to access the map.', 5000, true);
     return;
   }
@@ -1072,6 +1130,15 @@ window.initMap = function() {
     }
     if (loginScreen) loginScreen.style.display = 'none';
     if (mapElement) mapElement.style.display = 'block';
+    if (navInput) {
+      navInput.classList.remove('hidden');
+      navInput.style.opacity = '1';
+      navInput.style.transform = 'translateX(-50%)';
+    }
+    if (navHud) {
+      navHud.classList.remove('active');
+      navHud.style.display = 'none';
+    }
     fetchUserProfile();
     fetchAlerts();
   } catch (err) {
@@ -1111,7 +1178,6 @@ window.initMap = function() {
   directionsRenderer = new google.maps.DirectionsRenderer({ map: map, suppressMarkers: true });
   console.log('Map, Directions, and Places initialized');
   mapReadyResolve();
-  // Detect manual interactions to stop auto-following
   map.addListener('dragstart', () => {
     if (isNavigating) {
       isManualInteraction = true;
@@ -1147,14 +1213,13 @@ function startGeolocationWatch() {
         console.log('WatchPosition updated user location:', userLocation, 'Time:', now);
         let heading = position.coords.heading;
         if (heading === null || heading === undefined) {
-          // Fallback to computed heading from movement
           if (previousPosition) {
             heading = google.maps.geometry.spherical.computeHeading(
               new google.maps.LatLng(previousPosition.lat, previousPosition.lng),
               currentPos
             );
           } else {
-            heading = lastHeading; // Use last known
+            heading = lastHeading;
           }
         }
         lastHeading = heading || lastHeading;
@@ -1169,7 +1234,6 @@ function startGeolocationWatch() {
             updateRoute([position.coords.latitude, position.coords.longitude], currentDestination);
             return;
           }
-          // Update route lines: passed (faded) and future
           const passedPath = routePath.slice(0, closest.index + 1);
           const futurePath = routePath.slice(closest.index);
           if (passedPolyline) {
@@ -1212,12 +1276,15 @@ function startGeolocationWatch() {
       (err) => {
         console.warn('WatchPosition error:', err);
         geolocationRetryCount++;
+        const navInstruction = document.getElementById('nav-instruction');
+        const navDistance = document.getElementById('nav-distance');
+        if (navInstruction) navInstruction.textContent = 'Waiting for location...';
+        if (navDistance) navDistance.textContent = 'N/A';
         if (geolocationRetryCount <= MAX_GEOLOCATION_RETRIES) {
           console.log(`Retrying geolocation watch (attempt ${geolocationRetryCount})...`);
           setTimeout(startGeolocationWatch, 5000);
         } else {
           showToastMessage('Geolocation failed after retries. Using last known location.', 7000, true);
-          // Fallback to last known position
         }
       },
       { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
@@ -1238,9 +1305,12 @@ function startGeolocationWatch() {
     );
   } else {
     showToastMessage('Geolocation not supported.', 7000, true);
+    const navInstruction = document.getElementById('nav-instruction');
+    const navDistance = document.getElementById('nav-distance');
+    if (navInstruction) navInstruction.textContent = 'Geolocation not supported';
+    if (navDistance) navDistance.textContent = 'N/A';
   }
 }
-
 window.addEventListener('DOMContentLoaded', () => {
   console.time('DOM initialization');
   console.log('DOM fully loaded at:', new Date().toLocaleTimeString());
@@ -1251,6 +1321,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const dta = document.getElementById('dta');
   const time = document.getElementById('time');
   const navAddress = document.getElementById('navAddress');
+  const navInput = document.getElementById('nav-input');
+  const navHud = document.getElementById('nav-hud');
   const addAlertBtn = document.getElementById('addAlert');
   const navOverlay = document.getElementById('navOverlay');
   const recentLocations = document.getElementById('recentLocations');
@@ -1298,7 +1370,6 @@ window.addEventListener('DOMContentLoaded', () => {
   console.log('addAlert button in JS:', addAlertBtn ? 'found' : 'not found');
   if (!addAlertBtn) console.log('addAlert button not found in DOM');
   else console.log('addAlert button ready');
-  // Ensure overlays are hidden on load
   if (navOverlay) {
     navOverlay.style.display = 'none';
     console.log('navOverlay set to hidden on load');
@@ -1325,7 +1396,17 @@ window.addEventListener('DOMContentLoaded', () => {
     reroutePrompt.style.display = 'none';
     console.log('reroutePrompt set to hidden on load');
   }
-  // Add logout button to settings HUD
+  if (navInput) {
+    navInput.classList.remove('hidden');
+    navInput.style.opacity = '1';
+    navInput.style.transform = 'translateX(-50%)';
+    console.log('navInput set to visible on load');
+  }
+  if (navHud) {
+    navHud.classList.remove('active');
+    navHud.style.display = 'none';
+    console.log('navHud set to hidden on load');
+  }
   if (settingsHud) {
     const existingSettingsLogout = settingsHud.querySelector('.logout-btn');
     if (!existingSettingsLogout) {
@@ -1354,7 +1435,6 @@ window.addEventListener('DOMContentLoaded', () => {
       settingsHud.appendChild(settingsLogoutButton);
     }
   }
-  // Initialize Socket.IO with retry logic
   function loadSocketIOScript() {
     return new Promise((resolve, reject) => {
       if (window.io) {
@@ -1476,16 +1556,37 @@ window.addEventListener('DOMContentLoaded', () => {
     console.time('Start navigation');
     await mapReady;
     isNavigating = true;
-    isFollowing = true; // Start following on nav start
+    isFollowing = true;
     isManualInteraction = false;
     console.log('Navigation started, setting isNavigating to true');
     if (hud) hud.classList.add('navigating');
     if (controlHud) controlHud.classList.add('navigating');
-    console.log('HUD classes updated:', { hudClass: hud?.className, controlHudClass: controlHud?.className });
+    if (navInput) {
+      navInput.classList.add('hidden');
+      navInput.style.opacity = '0';
+      navInput.style.transform = 'translateX(-50%) translateY(-20px)';
+    }
+    if (navHud) {
+      navHud.classList.add('active');
+      navHud.style.display = 'flex';
+      navHud.style.opacity = '1';
+      navHud.style.transform = 'translateX(-50%)';
+      const navInstruction = document.getElementById('nav-instruction');
+      const navDistance = document.getElementById('nav-distance');
+      const navEta = document.getElementById('nav-eta');
+      if (navInstruction) navInstruction.textContent = 'Starting navigation...';
+      if (navDistance) navDistance.textContent = 'Calculating...';
+      if (navEta) navEta.textContent = 'Calculating...';
+    }
+    console.log('HUD classes updated:', { hudClass: hud?.className, controlHudClass: controlHud?.className, navInputHidden: navInput?.className, navHudActive: navHud?.className });
     routePath = [];
     ignoredHazards = [];
     const destination = await geocodeWithGoogle(address);
     if (destination) {
+      if (!recentDestinations.includes(address)) {
+        recentDestinations.unshift(address);
+        if (recentDestinations.length > 5) recentDestinations.pop();
+      }
       currentDestination = destination;
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -1509,10 +1610,11 @@ window.addEventListener('DOMContentLoaded', () => {
                 console.warn('No female voice available, skipping speech');
               }
               checkHazardsOnRoute();
-              showToastMessage('Navigation focused on your location.', 5000);
+              showToastMessage('Navigation started.', 5000);
             }).catch(err => {
               console.error('Route update failed:', err);
               showToastMessage('Failed to start navigation.', 7000, true);
+              stopNavigation();
             });
           },
           (err) => {
@@ -1527,6 +1629,7 @@ window.addEventListener('DOMContentLoaded', () => {
             }).catch(err => {
               console.error('Route update with fallback failed:', err);
               showToastMessage('Failed to start navigation.', 7000, true);
+              stopNavigation();
             });
           },
           { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
@@ -1542,13 +1645,12 @@ window.addEventListener('DOMContentLoaded', () => {
         }).catch(err => {
           console.error('Route update with fallback failed:', err);
           showToastMessage('Failed to start navigation.', 7000, true);
+          stopNavigation();
         });
       }
     } else {
       showToastMessage('Could not geocode address. Please check your input.', 7000, true);
-      isNavigating = false;
-      if (hud) hud.classList.remove('navigating');
-      if (controlHud) controlHud.classList.remove('navigating');
+      stopNavigation();
     }
     console.timeEnd('Start navigation');
   }
@@ -1560,8 +1662,28 @@ window.addEventListener('DOMContentLoaded', () => {
     routePath = [];
     currentDestination = null;
     ignoredHazards = [];
+    lastInstruction = '';
+    lastNavIndex = -1;
+    lastDistanceToNext = Infinity;
     if (hud) hud.classList.remove('navigating');
     if (controlHud) controlHud.classList.remove('navigating');
+    const navInput = document.getElementById('nav-input');
+    const navHud = document.getElementById('nav-hud');
+    if (navInput) {
+      navInput.classList.remove('hidden');
+      navInput.style.opacity = '0';
+      navInput.style.transform = 'translateX(-50%)';
+      setTimeout(() => {
+        navInput.style.opacity = '1';
+      }, 50);
+    }
+    if (navHud) {
+      navHud.style.opacity = '0';
+      setTimeout(() => {
+        navHud.classList.remove('active');
+        navHud.style.display = 'none';
+      }, 300);
+    }
     if (routePolyline) {
       routePolyline.setMap(null);
       routePolyline = null;
@@ -1576,11 +1698,18 @@ window.addEventListener('DOMContentLoaded', () => {
     if (eta) eta.textContent = 'N/A';
     if (dta) dta.textContent = 'N/A';
     if (time) time.textContent = '0:00';
+    const navInstruction = document.getElementById('nav-instruction');
+    const navDistance = document.getElementById('nav-distance');
+    const navEta = document.getElementById('nav-eta');
+    if (navInstruction) navInstruction.textContent = 'No navigation active';
+    if (navDistance) navDistance.textContent = 'N/A';
+    if (navEta) navEta.textContent = 'N/A';
     map.setZoom(13);
     map.setTilt(0);
     map.setHeading(0);
     showToastMessage('Navigation stopped.', 5000);
   }
+
   function recenterMap() {
     if (navigator.geolocation && map && isNavigating) {
       navigator.geolocation.getCurrentPosition(
@@ -1614,6 +1743,7 @@ window.addEventListener('DOMContentLoaded', () => {
       );
     }
   }
+
   function startVoiceRecognition() {
     if (!('webkitSpeechRecognition' in window)) {
       showToastMessage('Voice recognition not supported in this browser.', 7000, true);
@@ -1657,6 +1787,7 @@ window.addEventListener('DOMContentLoaded', () => {
     recognition.start();
     console.log('Recognition started, requesting microphone access');
   }
+
   function stopVoiceRecognition() {
     if (recognition) {
       recognition.stop();
@@ -1666,6 +1797,7 @@ window.addEventListener('DOMContentLoaded', () => {
       showToastMessage('Voice recognition stopped.', 5000);
     }
   }
+
   function confirmVoiceInput(transcript) {
     if ('speechSynthesis' in window && femaleVoice) {
       const utterance = new SpeechSynthesisUtterance(`You said ${transcript}. Is this correct?`);
@@ -1709,7 +1841,7 @@ window.addEventListener('DOMContentLoaded', () => {
       recognition.onerror = (event) => {
         console.error('Confirmation error:', event.error);
         if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
-        showToastMessage(`Voice confirmation error: ${event.error}`, 7000, true);
+        showToastMessage(`Voice confirmation error: ${event.error}`, 7007, true);
         stopVoiceRecognition();
         setTimeout(() => confirmVoiceInput(transcript), 1000);
       };
@@ -1724,6 +1856,7 @@ window.addEventListener('DOMContentLoaded', () => {
       startNavigation(transcript);
     }
   }
+
   function showDetailedAlertBox() {
     console.time('Show detailed alert box');
     console.log('Showing detailed alert box, element:', detailedAlertBox);
@@ -1754,6 +1887,7 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     console.timeEnd('Show detailed alert box');
   }
+
   function addAlert(type, notes = '', position) {
     return new Promise((resolve, reject) => {
       console.time(`Add ${type} alert`);
@@ -1779,6 +1913,7 @@ window.addEventListener('DOMContentLoaded', () => {
       });
     });
   }
+
   function addHazardMarker() {
     const now = Date.now();
     if (now - lastHazardTime < 1000) {
@@ -1851,8 +1986,9 @@ window.addEventListener('DOMContentLoaded', () => {
       });
     }
   }
+
   function enableMapClick() {
-    if (isSelectingLocation) return; // Debounce
+    if (isSelectingLocation) return;
     isSelectingLocation = true;
     const detailedAlertBox = document.getElementById('detailedAlertBox');
     if (detailedAlertBox) {
@@ -1906,7 +2042,6 @@ window.addEventListener('DOMContentLoaded', () => {
         showToastMessage('Failed to geocode selected location.', 7000, true);
       });
     });
-    // Add touchend listener for map click to ensure single-tap response
     const touchListener = map.addListener('click', (event) => {
       if (event.domEvent.type === 'touchend') {
         const lat = event.latLng.lat();
@@ -1983,7 +2118,7 @@ window.addEventListener('DOMContentLoaded', () => {
         }).catch(err => {
           showToastMessage(err.message || 'Failed to post alert.', 7000, true);
         });
-      }, 200); // Match CSS transition duration
+      }, 200);
     }
   }
 
@@ -2076,7 +2211,6 @@ window.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('touchend', stopDrag, { passive: false });
   }
 
-  // Initialize event listeners
   if (navAddress) {
     navAddress.addEventListener('input', () => {
       const query = navAddress.value.trim();
@@ -2344,7 +2478,6 @@ window.addEventListener('DOMContentLoaded', () => {
     addAlertBtn.addEventListener('touchend', handleAddAlert, { passive: false });
   }
 
-  // Prevent default touch behaviors globally
   document.addEventListener('touchstart', (e) => {
     if (e.touches.length > 1) {
       e.preventDefault();
@@ -2355,7 +2488,6 @@ window.addEventListener('DOMContentLoaded', () => {
       e.preventDefault();
     }
   }, { passive: false });
-  // Disable context menu on long press
   document.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     e.stopPropagation();
