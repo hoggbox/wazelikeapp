@@ -1,13 +1,13 @@
-const VERSION = '1.0.58'; // Updated for robust navigation, HUD fixes, and geolocation handling
+const VERSION = '1.0.59'; // Updated for HUD DOM fix and navigation stability
 // Global variables
 let map;
 let routePolyline;
-let passedPolyline; // For the faded passed portion
+let passedPolyline;
 let currentDestination = null;
 let liveLocationMarker = null;
 let isNavigating = false;
-let isFollowing = false; // Whether to auto-follow user
-let isManualInteraction = false; // Flag for user manual map interaction
+let isFollowing = false;
+let isManualInteraction = false;
 let previousPosition = null;
 let routePath = [];
 let recentDestinations = ['1827 Holly Hill Rd, Milledgeville, GA 31061', 'Walmart Milledgeville GA'];
@@ -30,7 +30,7 @@ let userProfile = { name: '', username: '', email: '', age: '', dob: null, locat
 let allAlerts = [];
 let ignoredHazards = [];
 let currentHazards = [];
-let directionsResponse = null; // Store the full directions response
+let directionsResponse = null;
 const GOOGLE_MAPS_API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
 const ALERTS_PER_PAGE = 5;
 let currentPage = 1;
@@ -42,8 +42,8 @@ const mapReady = new Promise((resolve) => mapReadyResolve = resolve);
 let lastInstruction = '';
 let lastNavIndex = -1;
 let lastDistanceToNext = Infinity;
-let lastHeading = 0; // For fallback when no device heading
-let geolocationWatchId = null; // To manage watchPosition
+let lastHeading = 0;
+let geolocationWatchId = null;
 let geolocationRetryCount = 0;
 const MAX_GEOLOCATION_RETRIES = 3;
 // Determine API and Socket.IO base URL based on environment
@@ -104,16 +104,17 @@ function provideVoiceNavigation(coords) {
   const navInstruction = document.getElementById('nav-instruction');
   const navDistance = document.getElementById('nav-distance');
   const instructionContainer = document.getElementById('instruction-container');
-  if (!navInstruction || !navDistance || !instructionContainer) {
+  if (!navInstruction || !navDistance) {
     console.error('HUD elements not found:', { navInstruction, navDistance, instructionContainer });
     showToastMessage('HUD elements missing. Please reload the page.', 7000, true);
     return;
   }
-  if (routePath.length > 1 && coords.heading !== undefined && directionsResponse) {
+  if (routePath.length > 1 && coords && directionsResponse) {
     const currentPos = new google.maps.LatLng(coords.latitude, coords.longitude);
     const closest = findClosestPointOnRoute(currentPos, routePath);
     const nextIndex = Math.min(closest.index + 1, routePath.length - 1);
     let distance = closest.distance;
+    let stepDistance = distance; // Initialize to prevent undefined
     console.log('Navigation check:', { distance, nextIndex, heading: coords.heading });
     // Check if user is near the destination (within 50 meters)
     if (currentDestination) {
@@ -136,7 +137,6 @@ function provideVoiceNavigation(coords) {
     if (distance < 50 && nextIndex < routePath.length - 1 && closest.index > lastNavIndex) {
       // Find the corresponding step in directionsResponse
       let currentStep = null;
-      let stepDistance = distance;
       let stepIndex = 0;
       for (const leg of directionsResponse.routes[0].legs) {
         for (let i = 0; i < leg.steps.length; i++) {
@@ -181,21 +181,23 @@ function provideVoiceNavigation(coords) {
         }
         lastInstruction = instruction;
         navInstruction.textContent = instruction;
-        // Update turn arrow
-        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-        if (leftArrow && rightArrow) {
-          leftArrow.classList.remove('active');
-          rightArrow.classList.remove('active');
-          if (turnDirection === 'left') {
-            leftArrow.classList.add('active');
-          } else if (turnDirection === 'right') {
-            rightArrow.classList.add('active');
-          }
-        } else {
-          console.error('Turn arrows not found in instructionContainer');
-        }
         navDistance.textContent = `${Math.round(stepDistance)} m`;
+        // Update turn arrows only if instructionContainer exists
+        if (instructionContainer) {
+          const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+          const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+          if (leftArrow && rightArrow) {
+            leftArrow.classList.remove('active');
+            rightArrow.classList.remove('active');
+            if (turnDirection === 'left') {
+              leftArrow.classList.add('active');
+            } else if (turnDirection === 'right') {
+              rightArrow.classList.add('active');
+            }
+          } else {
+            console.warn('Turn arrows not found in instructionContainer');
+          }
+        }
       }
       lastNavIndex = closest.index;
     } else if (lastInstruction) {
@@ -204,24 +206,28 @@ function provideVoiceNavigation(coords) {
     }
     lastDistanceToNext = stepDistance;
   } else if (isNavigating && routePath.length > 0) {
-    console.warn('Missing heading or route data for voice navigation:', { heading: coords.heading, routePathLength: routePath.length });
+    console.warn('Missing coords or route data for voice navigation:', { coords, routePathLength: routePath.length });
     navInstruction.textContent = 'Waiting for navigation data...';
-    const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-    const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-    if (leftArrow && rightArrow) {
-      leftArrow.classList.remove('active');
-      rightArrow.classList.remove('active');
-    }
     navDistance.textContent = 'N/A';
+    if (instructionContainer) {
+      const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+      const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+      if (leftArrow && rightArrow) {
+        leftArrow.classList.remove('active');
+        rightArrow.classList.remove('active');
+      }
+    }
   } else {
     navInstruction.textContent = 'No navigation active';
-    const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-    const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-    if (leftArrow && rightArrow) {
-      leftArrow.classList.remove('active');
-      rightArrow.classList.remove('active');
-    }
     navDistance.textContent = 'N/A';
+    if (instructionContainer) {
+      const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+      const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+      if (leftArrow && rightArrow) {
+        leftArrow.classList.remove('active');
+        rightArrow.classList.remove('active');
+      }
+    }
   }
   checkHazardsOnRoute();
 }
@@ -338,7 +344,7 @@ async function updateRoute(start, end, avoidHazards = false) {
         console.log(`Selected alternative route index: ${selectedRouteIndex} with min hazard distance: ${maxMinDistance}m`);
       }
       const selectedRoute = response.routes[selectedRouteIndex];
-      directionsResponse = response; // Store the full response for navigation instructions
+      directionsResponse = response;
       directionsRenderer.setDirections(response);
       directionsRenderer.setRouteIndex(selectedRouteIndex);
       const path = selectedRoute.legs.reduce((acc, leg) => acc.concat(leg.steps.reduce((stepAcc, step) => stepAcc.concat(google.maps.geometry.encoding.decodePath(step.polyline.points)), [])), []);
@@ -1307,7 +1313,7 @@ function startGeolocationWatch() {
             });
           } else {
             liveLocationMarker = new google.maps.Marker({
-              position: currentPos,
+              position: previousPosition ? new google.maps.LatLng(previousPosition.lat, previousPosition.lng) : currentPos,
               map: map,
               icon: {
                 path: 'M -10,10 L 0,-10 L 10,10 Z',
@@ -1363,11 +1369,13 @@ function startGeolocationWatch() {
         const instructionContainer = document.getElementById('instruction-container');
         if (navInstruction) {
           navInstruction.textContent = 'Waiting for location...';
-          const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-          const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-          if (leftArrow && rightArrow) {
-            leftArrow.classList.remove('active');
-            rightArrow.classList.remove('active');
+          if (instructionContainer) {
+            const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+            const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+            if (leftArrow && rightArrow) {
+              leftArrow.classList.remove('active');
+              rightArrow.classList.remove('active');
+            }
           }
         }
         if (navDistance) navDistance.textContent = 'N/A';
@@ -1397,7 +1405,7 @@ function startGeolocationWatch() {
           }
         }
       },
-      { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
+      { maximumAge: 0, timeout: 30000, enableHighAccuracy: true }
     );
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -1451,7 +1459,7 @@ function startGeolocationWatch() {
           console.log('Fallback triangle marker set at:', userLocation);
         }
       },
-      { maximumAge: 0, timeout: 10000, enableHighAccuracy: true }
+      { maximumAge: 0, timeout: 30000, enableHighAccuracy: true }
     );
   } else {
     showToastMessage('Geolocation not supported.', 7000, true);
@@ -1460,11 +1468,13 @@ function startGeolocationWatch() {
     const instructionContainer = document.getElementById('instruction-container');
     if (navInstruction) {
       navInstruction.textContent = 'Geolocation not supported';
-      const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-      const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-      if (leftArrow && rightArrow) {
-        leftArrow.classList.remove('active');
-        rightArrow.classList.remove('active');
+      if (instructionContainer) {
+        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+        if (leftArrow && rightArrow) {
+          leftArrow.classList.remove('active');
+          rightArrow.classList.remove('active');
+        }
       }
     }
     if (navDistance) navDistance.textContent = 'N/A';
@@ -1540,668 +1550,301 @@ window.addEventListener('DOMContentLoaded', () => {
   const settingsHud = document.getElementById('settings-hud');
   const closeSettings = document.getElementById('closeSettings');
   const loginBtn = document.getElementById('login-btn');
-  const loginUsername = document.getElementById('login-username');
-  const loginPassword = document.getElementById('login-password');
-  const reroutePrompt = document.getElementById('reroutePrompt');
-  const rerouteYes = document.getElementById('rerouteYes');
-  const rerouteNo = document.getElementById('rerouteNo');
-  console.log('addAlert button in JS:', addAlertBtn ? 'found' : 'not found');
-  if (!addAlertBtn) console.log('addAlert button not found in DOM');
-  else console.log('addAlert button ready');
-  if (navOverlay) {
-    navOverlay.style.display = 'none';
-    console.log('navOverlay set to hidden on load');
-  }
-  if (voiceOverlay) {
-    voiceOverlay.style.display = 'none';
-    console.log('voiceOverlay set to hidden on load');
-  }
-  if (detailedAlertBox) {
-    detailedAlertBox.style.display = 'none';
-    detailedAlertBox.style.left = '50%';
-    detailedAlertBox.style.top = '50%';
-    console.log('detailedAlertBox set to hidden on load, element:', detailedAlertBox);
-  }
-  if (profileHud) {
-    profileHud.style.display = 'none';
-    console.log('profileHud set to hidden on load');
-  }
-  if (settingsHud) {
-    settingsHud.style.display = 'none';
-    console.log('settingsHud set to hidden on load');
-  }
-  if (reroutePrompt) {
-    reroutePrompt.style.display = 'none';
-    console.log('reroutePrompt set to hidden on load');
-  }
-  if (navInput) {
-    navInput.classList.remove('hidden');
-    navInput.style.opacity = '1';
-    navInput.style.transform = 'translateX(-50%)';
-    console.log('navInput set to visible on load');
-  }
-  if (navHud) {
-    navHud.classList.remove('active');
-    navHud.style.display = 'none';
-    console.log('navHud set to hidden on load');
-  }
-  if (settingsHud) {
-    const existingSettingsLogout = settingsHud.querySelector('.logout-btn');
-    if (!existingSettingsLogout) {
-      const settingsLogoutButton = document.createElement('button');
-      settingsLogoutButton.textContent = 'Logout';
-      settingsLogoutButton.className = 'logout-btn';
-      settingsLogoutButton.style.cssText = `
-        padding: 8px 15px;
-        background: #ff4444;
-        border: none;
-        border-radius: 5px;
-        color: #ffffff;
-        cursor: pointer;
-        font-family: 'Roboto', sans-serif;
-        margin-top: 10px;
-        touch-action: manipulation;
-        -webkit-tap-highlight-color: transparent;
-      `;
-      settingsLogoutButton.addEventListener('click', () => {
-        logout();
-      });
-      settingsLogoutButton.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        logout();
-      }, { passive: false });
-      settingsHud.appendChild(settingsLogoutButton);
-    }
-  }
-  function loadSocketIOScript() {
-    return new Promise((resolve, reject) => {
-      if (window.io) {
-        resolve();
-        return;
-      }
-      const script = document.createElement('script');
-      script.src = `${BASE_URL}/socket.io/socket.io.js`;
-      script.async = true;
-      let socketRetries = 0;
-      const maxSocketRetries = 3;
-      script.onload = () => {
-        console.log('Socket.IO script loaded successfully');
-        resolve();
-      };
-      script.onerror = () => {
-        console.error('Failed to load Socket.IO script, attempt:', socketRetries + 1);
-        socketRetries++;
-        if (socketRetries < maxSocketRetries) {
-          console.log(`Retrying Socket.IO load (attempt ${socketRetries + 1})...`);
-          setTimeout(() => {
-            document.head.appendChild(script.cloneNode());
-          }, 2000 * socketRetries);
-        } else {
-          console.error('Max retries reached for Socket.IO load');
-          showToastMessage('Failed to load Socket.IO.', 7000, true);
-          reject(new Error('Socket.IO script failed to load'));
-        }
-      };
-      document.head.appendChild(script);
+const loginUsername = document.getElementById('login-username');
+const loginPassword = document.getElementById('login-password');
+const reroutePrompt = document.getElementById('reroutePrompt');
+const rerouteYes = document.getElementById('rerouteYes');
+const rerouteNo = document.getElementById('rerouteNo');
+console.log('addAlert button in JS:', addAlertBtn ? 'found' : 'not found');
+if (!addAlertBtn) console.log('addAlert button not found in DOM');
+else console.log('addAlert button ready');
+if (navOverlay) {
+  navOverlay.style.display = 'none';
+  console.log('navOverlay set to hidden on load');
+}
+if (voiceOverlay) {
+  voiceOverlay.style.display = 'none';
+  console.log('voiceOverlay set to hidden on load');
+}
+if (detailedAlertBox) {
+  detailedAlertBox.style.display = 'none';
+  detailedAlertBox.style.left = '50%';
+  detailedAlertBox.style.top = '50%';
+  console.log('detailedAlertBox set to hidden on load, element:', detailedAlertBox);
+}
+if (profileHud) {
+  profileHud.style.display = 'none';
+  console.log('profileHud set to hidden on load');
+}
+if (settingsHud) {
+  settingsHud.style.display = 'none';
+  console.log('settingsHud set to hidden on load');
+}
+if (reroutePrompt) {
+  reroutePrompt.style.display = 'none';
+  console.log('reroutePrompt set to hidden on load');
+}
+if (navInput) {
+  navInput.classList.remove('hidden');
+  navInput.style.opacity = '1';
+  navInput.style.transform = 'translateX(-50%)';
+  console.log('navInput set to visible on load');
+}
+if (navHud) {
+  navHud.classList.remove('active');
+  navHud.style.display = 'none';
+  console.log('navHud set to hidden on load');
+}
+if (settingsHud) {
+  const existingSettingsLogout = settingsHud.querySelector('.logout-btn');
+  if (!existingSettingsLogout) {
+    const settingsLogoutButton = document.createElement('button');
+    settingsLogoutButton.textContent = 'Logout';
+    settingsLogoutButton.className = 'logout-btn';
+    settingsLogoutButton.style.cssText = `
+      padding: 8px 15px;
+      background: #ff4444;
+      border: none;
+      border-radius: 5px;
+      color: #ffffff;
+      cursor: pointer;
+      font-family: 'Roboto', sans-serif;
+      margin-top: 10px;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    `;
+    settingsLogoutButton.addEventListener('click', () => {
+      logout();
     });
+    settingsLogoutButton.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      logout();
+    }, { passive: false });
+    settingsHud.appendChild(settingsLogoutButton);
   }
-  function connectSocket() {
-    loadSocketIOScript()
-      .then(() => {
-        socket = window.io(BASE_URL, { reconnectionAttempts: 5, reconnectionDelay: 1000 });
-        console.log('Socket.IO connected to:', BASE_URL);
-        socket.on('connect', () => {
-          console.log('Socket.IO connection established');
-          showToastMessage('Connected to server.', 5000);
-          socket.on('hazard', (data) => {
-            if (map && !alertMarkers.has(data._id)) {
-              addMarkerFromDB(data);
-              fetchAlerts();
-            }
-          });
-          socket.on('detailedAlert', (data) => {
-            if (map && !alertMarkers.has(data._id)) {
-              addMarkerFromDB(data);
-              fetchAlerts();
-            }
-          });
-          socket.on('alert', (data) => {
-            if (map) {
-              new google.maps.Marker({
-                position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
-                map: map,
-                title: data.type
-              });
-            }
-          });
-          socket.on('alertRemoved', (data) => {
-            if (alertMarkers.has(data._id)) {
-              alertMarkers.get(data._id).setMap(null);
-              alertMarkers.delete(data._id);
-              hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
-              allAlerts = allAlerts.filter(a => a._id !== data._id);
-              updateAlertTable();
-              showToastMessage('Alert removed from map.', 5000);
-            }
-            console.log('Alert removed via socket:', data._id);
-          });
-          socket.on('locationUpdate', (data) => {
-            if (map) {
-              new google.maps.Marker({
-                position: { lat: data.latitude, lng: data.longitude },
-                map: map,
-                title: 'User Location'
-              });
-            }
-          });
-        });
-        socket.on('connect_error', (err) => {
-          console.warn('Socket.IO connection error:', err.message);
-          showToastMessage('Failed to connect to server.', 5000, true);
-        });
-      })
-      .catch(err => {
-        console.warn('Socket.IO failed to load, retrying in 5 seconds:', err);
-        setTimeout(connectSocket, 5000);
-      });
-  }
-  connectSocket();
-  function getCurrentTime() {
-    return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  }
-  function getEstimatedArrivalTime(etaMinutes) {
-    const now = new Date();
-    now.setMinutes(now.getMinutes() + etaMinutes);
-    return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  }
-  function showOverlay() {
-    console.time('Show overlay');
-    console.log('Showing overlay');
-    if (navOverlay) {
-      navOverlay.style.display = 'block';
-      recentLocations.innerHTML = '';
-      recentDestinations.forEach(dest => {
-        const item = document.createElement('div');
-        item.className = 'recent-item';
-        item.textContent = dest;
-        const handleSelect = () => {
-          if (navAddress) navAddress.value = dest;
-          startNavigation(dest);
-          if (navOverlay) navOverlay.style.display = 'none';
-          showToastMessage(`Selected recent destination: ${dest}`, 5000);
-        };
-        item.addEventListener('click', handleSelect);
-        item.addEventListener('touchend', handleSelect, { passive: false });
-        recentLocations.appendChild(item);
-      });
-      showToastMessage('Navigation overlay opened.', 5000);
-    } else {
-      console.error('navOverlay not found');
-      showToastMessage('Failed to open navigation overlay.', 5000, true);
-    }
-    console.timeEnd('Show overlay');
-  }
-  async function startNavigation(address) {
-    console.time('Start navigation');
-    await mapReady;
-    isNavigating = true;
-    isFollowing = true;
-    isManualInteraction = false;
-    console.log('Navigation started, setting isNavigating to true');
-    if (hud) hud.classList.add('navigating');
-    if (controlHud) controlHud.classList.add('navigating');
-    if (navInput) {
-      navInput.classList.add('hidden');
-      navInput.style.opacity = '0';
-      navInput.style.transform = 'translateX(-50%) translateY(-20px)';
-    }
-    if (navHud) {
-      navHud.classList.add('active');
-      navHud.style.display = 'flex';
-      navHud.style.opacity = '1';
-      navHud.style.transform = 'translateX(-50%)';
-      const navInstruction = document.getElementById('nav-instruction');
-      const navDistance = document.getElementById('nav-distance');
-      const navEta = document.getElementById('nav-eta');
-      const instructionContainer = document.getElementById('instruction-container');
-      if (navInstruction) navInstruction.textContent = 'Starting navigation...';
-      if (navDistance) navDistance.textContent = 'Calculating...';
-      if (navEta) navEta.textContent = 'Calculating...';
-      if (instructionContainer) {
-        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-        if (leftArrow && rightArrow) {
-          leftArrow.classList.remove('active');
-          rightArrow.classList.remove('active');
-        }
-      }
-    }
-    console.log('HUD classes updated:', { hudClass: hud?.className, controlHudClass: controlHud?.className, navInputHidden: navInput?.className, navHudActive: navHud?.className });
-    routePath = [];
-    ignoredHazards = [];
-    directionsResponse = null; // Reset directions response
-    const destination = await geocodeWithGoogle(address);
-    if (!destination) {
-      console.error('Geocoding failed for address:', address);
-      showToastMessage('Could not geocode address. Please check your input.', 7000, true);
-      stopNavigation();
+}
+function loadSocketIOScript() {
+  return new Promise((resolve, reject) => {
+    if (window.io) {
+      resolve();
       return;
     }
-    if (!recentDestinations.includes(address)) {
-      recentDestinations.unshift(address);
-      if (recentDestinations.length > 5) recentDestinations.pop();
-    }
-    currentDestination = destination;
-    let retries = 0;
-    const maxRetries = 3;
-    async function tryStartNavigation() {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const { latitude, longitude } = position.coords;
-            userLocation = { lat: latitude, lng: longitude };
-            lastLocationUpdate = Date.now();
-            console.log('Current location for navigation start:', userLocation);
-            map.setCenter(userLocation);
-            map.setZoom(18);
-            map.setTilt(45);
-            updateRoute([latitude, longitude], destination).then(() => {
-              if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
-                const utterance = new SpeechSynthesisUtterance('Navigation started. Follow the route.');
-                utterance.voice = femaleVoice;
-                utterance.lang = 'en-US';
-                utterance.volume = 1.0;
-                window.speechSynthesis.speak(utterance);
-                console.log('Navigation voice test triggered with:', femaleVoice.name);
-              } else if (!femaleVoice) {
-                console.warn('No female voice available, skipping speech');
-              }
-              checkHazardsOnRoute();
-              showToastMessage('Navigation started.', 5000);
-              // Trigger initial navigation instruction
-              provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
-            }).catch(err => {
-              console.error('Route update failed:', err);
-              retries++;
-              if (retries < maxRetries) {
-                console.log(`Retrying navigation start (attempt ${retries + 1})...`);
-                setTimeout(tryStartNavigation, 2000 * retries);
-              } else {
-                console.error('Max retries reached for navigation start');
-                showToastMessage('Failed to start navigation after retries.', 7000, true);
-                stopNavigation();
-              }
+    const script = document.createElement('script');
+    script.src = `${BASE_URL}/socket.io/socket.io.js`;
+    script.async = true;
+    let socketRetries = 0;
+    const maxSocketRetries = 3;
+    script.onload = () => {
+      console.log('Socket.IO script loaded successfully');
+      resolve();
+    };
+    script.onerror = () => {
+      console.error('Failed to load Socket.IO script, attempt:', socketRetries + 1);
+      socketRetries++;
+      if (socketRetries < maxSocketRetries) {
+        console.log(`Retrying Socket.IO load (attempt ${socketRetries + 1})...`);
+        setTimeout(() => {
+          document.head.appendChild(script.cloneNode());
+        }, 2000 * socketRetries);
+      } else {
+        console.error('Max retries reached for Socket.IO load');
+        showToastMessage('Failed to load Socket.IO.', 7000, true);
+        reject(new Error('Socket.IO script failed to load'));
+      }
+    };
+    document.head.appendChild(script);
+  });
+}
+function connectSocket() {
+  loadSocketIOScript()
+    .then(() => {
+      socket = window.io(BASE_URL, { reconnectionAttempts: 5, reconnectionDelay: 1000 });
+      console.log('Socket.IO connected to:', BASE_URL);
+      socket.on('connect', () => {
+        console.log('Socket.IO connection established');
+        showToastMessage('Connected to server.', 5000);
+        socket.on('hazard', (data) => {
+          if (map && !alertMarkers.has(data._id)) {
+            addMarkerFromDB(data);
+            fetchAlerts();
+          }
+        });
+        socket.on('detailedAlert', (data) => {
+          if (map && !alertMarkers.has(data._id)) {
+            addMarkerFromDB(data);
+            fetchAlerts();
+          }
+        });
+        socket.on('alert', (data) => {
+          if (map) {
+            new google.maps.Marker({
+              position: { lat: data.location.coordinates[1], lng: data.location.coordinates[0] },
+              map: map,
+              title: data.type
             });
-          },
-          (err) => {
-            console.error('Geolocation error for navigation start:', err);
-            let errorMessage = 'Failed to get current location. ';
-            if (err.code === 1) {
-              errorMessage += 'Location permission denied. Please enable location services.';
-            } else if (err.code === 2) {
-              errorMessage += 'Location unavailable. Using last known location.';
-            } else if (err.code === 3) {
-              errorMessage += 'Location request timed out. Using last known location.';
-            } else {
-              errorMessage += 'An unknown error occurred. Using last known location.';
+          }
+        });
+        socket.on('alertRemoved', (data) => {
+          if (alertMarkers.has(data._id)) {
+            alertMarkers.get(data._id).setMap(null);
+            alertMarkers.delete(data._id);
+            hazardMarkers = hazardMarkers.filter(h => h._id !== data._id);
+            allAlerts = allAlerts.filter(a => a._id !== data._id);
+            updateAlertTable();
+            showToastMessage('Alert removed from map.', 5000);
+          }
+          console.log('Alert removed via socket:', data._id);
+        });
+        socket.on('locationUpdate', (data) => {
+          if (map) {
+            new google.maps.Marker({
+              position: { lat: data.latitude, lng: data.longitude },
+              map: map,
+              title: 'User Location'
+            });
+          }
+        });
+      });
+      socket.on('connect_error', (err) => {
+        console.warn('Socket.IO connection error:', err.message);
+        showToastMessage('Failed to connect to server.', 5000, true);
+      });
+    })
+    .catch(err => {
+      console.warn('Socket.IO failed to load, retrying in 5 seconds:', err);
+      setTimeout(connectSocket, 5000);
+    });
+}
+connectSocket();
+function getCurrentTime() {
+  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+function getEstimatedArrivalTime(etaMinutes) {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() + etaMinutes);
+  return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+function showOverlay() {
+  console.time('Show overlay');
+  console.log('Showing overlay');
+  if (navOverlay) {
+    navOverlay.style.display = 'block';
+    recentLocations.innerHTML = '';
+    recentDestinations.forEach(dest => {
+      const item = document.createElement('div');
+      item.className = 'recent-item';
+      item.textContent = dest;
+      const handleSelect = () => {
+        if (navAddress) navAddress.value = dest;
+        startNavigation(dest);
+        if (navOverlay) navOverlay.style.display = 'none';
+        showToastMessage(`Selected recent destination: ${dest}`, 5000);
+      };
+      item.addEventListener('click', handleSelect);
+      item.addEventListener('touchend', handleSelect, { passive: false });
+      recentLocations.appendChild(item);
+    });
+    showToastMessage('Navigation overlay opened.', 5000);
+  } else {
+    console.error('navOverlay not found');
+    showToastMessage('Failed to open navigation overlay.', 5000, true);
+  }
+  console.timeEnd('Show overlay');
+}
+async function startNavigation(address) {
+  console.time('Start navigation');
+  await mapReady;
+  isNavigating = true;
+  isFollowing = true;
+  isManualInteraction = false;
+  console.log('Navigation started, setting isNavigating to true');
+  if (hud) hud.classList.add('navigating');
+  if (controlHud) controlHud.classList.add('navigating');
+  if (navInput) {
+    navInput.classList.add('hidden');
+    navInput.style.opacity = '0';
+    navInput.style.transform = 'translateX(-50%) translateY(-20px)';
+  }
+  if (navHud) {
+    navHud.classList.add('active');
+    navHud.style.display = 'flex';
+    navHud.style.opacity = '1';
+    navHud.style.transform = 'translateX(-50%)';
+    const navInstruction = document.getElementById('nav-instruction');
+    const navDistance = document.getElementById('nav-distance');
+    const navEta = document.getElementById('nav-eta');
+    const instructionContainer = document.getElementById('instruction-container');
+    if (navInstruction) navInstruction.textContent = 'Starting navigation...';
+    if (navDistance) navDistance.textContent = 'Calculating...';
+    if (navEta) navEta.textContent = 'Calculating...';
+    if (instructionContainer) {
+      const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+      const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+      if (leftArrow && rightArrow) {
+        leftArrow.classList.remove('active');
+        rightArrow.classList.remove('active');
+      }
+    }
+  }
+  console.log('HUD classes updated:', { hudClass: hud?.className, controlHudClass: controlHud?.className, navInputHidden: navInput?.className, navHudActive: navHud?.className });
+  routePath = [];
+  ignoredHazards = [];
+  directionsResponse = null;
+  const destination = await geocodeWithGoogle(address);
+  if (!destination) {
+    console.error('Geocoding failed for address:', address);
+    showToastMessage('Could not geocode address. Please check your input.', 7000, true);
+    stopNavigation();
+    return;
+  }
+  if (!recentDestinations.includes(address)) {
+    recentDestinations.unshift(address);
+    if (recentDestinations.length > 5) recentDestinations.pop();
+  }
+  currentDestination = destination;
+  let retries = 0;
+  const maxRetries = 3;
+  async function tryStartNavigation() {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          userLocation = { lat: latitude, lng: longitude };
+          lastLocationUpdate = Date.now();
+          console.log('Current location for navigation start:', userLocation);
+          map.setCenter(userLocation);
+          map.setZoom(18);
+          map.setTilt(45);
+          updateRoute([latitude, longitude], destination).then(() => {
+            if (!isMuted && 'speechSynthesis' in window && femaleVoice) {
+              const utterance = new SpeechSynthesisUtterance('Navigation started. Follow the route.');
+              utterance.voice = femaleVoice;
+              utterance.lang = 'en-US';
+              utterance.volume = 1.0;
+              window.speechSynthesis.speak(utterance);
+              console.log('Navigation voice test triggered with:', femaleVoice.name);
+            } else if (!femaleVoice) {
+              console.warn('No female voice available, skipping speech');
             }
-            showToastMessage(errorMessage, 7000, true);
+            checkHazardsOnRoute();
+            showToastMessage('Navigation started.', 5000);
+            provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
+          }).catch(err => {
+            console.error('Route update failed:', err);
             retries++;
             if (retries < maxRetries) {
-              console.log(`Retrying navigation start with fallback location (attempt ${retries + 1})...`);
-              setTimeout(() => {
-                updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
-                  map.setCenter(userLocation);
-                  map.setZoom(18);
-                  map.setTilt(45);
-                  checkHazardsOnRoute();
-                  showToastMessage('Navigation started with fallback location.', 5000);
-                  // Trigger initial navigation instruction
-                  provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
-                }).catch(err => {
-                  console.error('Route update with fallback failed:', err);
-                  if (retries < maxRetries) {
-                    console.log(`Retrying navigation start (attempt ${retries + 1})...`);
-                    setTimeout(tryStartNavigation, 2000 * retries);
-                  } else {
-                    console.error('Max retries reached for navigation start with fallback');
-                    showToastMessage('Failed to start navigation after retries.', 7000, true);
-                    stopNavigation();
-                  }
-                });
-              }, 2000 * retries);
+              console.log(`Retrying navigation start (attempt ${retries + 1})...`);
+              setTimeout(tryStartNavigation, 2000 * retries);
             } else {
               console.error('Max retries reached for navigation start');
               showToastMessage('Failed to start navigation after retries.', 7000, true);
               stopNavigation();
             }
-          },
-          { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
-        );
-      } else {
-        console.error('Geolocation unavailable, using fallback:', userLocation);
-        updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
-          map.setCenter(userLocation);
-          map.setZoom(18);
-          map.setTilt(45);
-          checkHazardsOnRoute();
-          showToastMessage('Navigation started with fallback location.', 5000);
-          // Trigger initial navigation instruction
-          provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
-        }).catch(err => {
-          console.error('Route update with fallback failed:', err);
-          retries++;
-          if (retries < maxRetries) {
-            console.log(`Retrying navigation start with fallback (attempt ${retries + 1})...`);
-            setTimeout(tryStartNavigation, 2000 * retries);
-          } else {
-            console.error('Max retries reached for navigation start with fallback');
-            showToastMessage('Failed to start navigation after retries.', 7000, true);
-            stopNavigation();
-          }
-        });
-      }
-    }
-    tryStartNavigation();
-    console.timeEnd('Start navigation');
-  }
-  function stopNavigation() {
-    console.log('Stopping navigation, attempting to clear route');
-    isNavigating = false;
-    isFollowing = false;
-    routePath = [];
-    currentDestination = null;
-    ignoredHazards = [];
-    lastInstruction = '';
-    lastNavIndex = -1;
-    lastDistanceToNext = Infinity;
-    directionsResponse = null;
-    if (hud) hud.classList.remove('navigating');
-    if (controlHud) controlHud.classList.remove('navigating');
-    const navInput = document.getElementById('nav-input');
-    const navHud = document.getElementById('nav-hud');
-    if (navInput) {
-      navInput.classList.remove('hidden');
-      navInput.style.opacity = '0';
-      navInput.style.transform = 'translateX(-50%)';
-      setTimeout(() => {
-        navInput.style.opacity = '1';
-      }, 50);
-    }
-    if (navHud) {
-      navHud.style.opacity = '0';
-      setTimeout(() => {
-        navHud.classList.remove('active');
-        navHud.style.display = 'none';
-        const instructionContainer = document.getElementById('instruction-container');
-        if (instructionContainer) {
-          const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
-          const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
-          if (leftArrow && rightArrow) {
-            leftArrow.classList.remove('active');
-            rightArrow.classList.remove('active');
-          }
-        }
-      }, 300);
-    }
-    if (routePolyline) {
-      routePolyline.setMap(null);
-      routePolyline = null;
-    }
-    if (passedPolyline) {
-      passedPolyline.setMap(null);
-      passedPolyline = null;
-    }
-    if (directionsRenderer) {
-      directionsRenderer.setMap(null);
-    }
-    if (eta) eta.textContent = 'N/A';
-    if (dta) dta.textContent = 'N/A';
-    if (time) time.textContent = '0:00';
-    const navInstruction = document.getElementById('nav-instruction');
-    const navDistance = document.getElementById('nav-distance');
-    const navEta = document.getElementById('nav-eta');
-    if (navInstruction) navInstruction.textContent = 'No navigation active';
-    if (navDistance) navDistance.textContent = 'N/A';
-    if (navEta) navEta.textContent = 'N/A';
-    map.setZoom(13);
-    map.setTilt(0);
-    map.setHeading(0);
-    showToastMessage('Navigation stopped.', 5000);
-  }
-  function recenterMap() {
-    if (navigator.geolocation && map && isNavigating) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          let currentPos = new google.maps.LatLng(latitude, longitude);
-          if (routePath.length > 0) {
-            const closest = findClosestPointOnRoute(currentPos, routePath);
-            if (closest.distance < 50) {
-              currentPos = routePath[closest.index];
-            }
-            const nextPointIndex = Math.min(closest.index + 1, routePath.length - 1);
-            if (nextPointIndex < routePath.length) {
-              const nextPoint = routePath[nextPointIndex];
-              map.setHeading(google.maps.geometry.spherical.computeHeading(currentPos, nextPoint));
-            }
-          }
-          map.setCenter(currentPos);
-          map.setZoom(18);
-          map.setTilt(45);
-          isManualInteraction = false;
-          isFollowing = true;
-          console.log('Map recentered at:', currentPos.toString());
-          showToastMessage('Map recentered.', 5000);
-          provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
-        },
-        (err) => {
-          console.log('Recenter geolocation error:', err);
-          showToastMessage('Failed to recenter map.', 7000, true);
-        },
-        { maximumAge: 0, timeout: 5000, enableHighAccuracy: true }
-      );
-    }
-  }
-  function startVoiceRecognition() {
-    if (!('webkitSpeechRecognition' in window)) {
-      showToastMessage('Voice recognition not supported in this browser.', 7000, true);
-      return;
-    }
-    if (recognition) recognition.stop();
-    recognition = new webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-    recognition.onstart = () => {
-      console.log('Voice recognition started');
-      if (voiceOverlay) voiceOverlay.style.display = 'flex';
-      if (pulsator) pulsator.classList.add('active');
-      if (voiceInstruction) voiceInstruction.textContent = 'Speak the address or location...';
-      showToastMessage('Voice recognition started.', 5000);
-    };
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript.trim();
-      console.log('Voice input:', transcript);
-      if (transcript) {
-        if (navAddress) navAddress.value = transcript;
-        stopVoiceRecognition();
-        confirmVoiceInput(transcript);
-      } else {
-        if (voiceInstruction) voiceInstruction.textContent = 'No input detected, please try again...';
-        showToastMessage('No voice input detected.', 5000, true);
-      }
-    };
-    recognition.onerror = (event) => {
-      console.error('Voice recognition error:', event.error);
-      if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
-      showToastMessage(`Voice recognition error: ${event.error}`, 7000, true);
-      stopVoiceRecognition();
-    };
-    recognition.onend = () => {
-      if (voiceOverlay && voiceOverlay.style.display === 'flex' && !recognition) {
-        if (voiceInstruction) voiceInstruction.textContent = 'Speak the address or location...';
-      }
-    };
-    recognition.start();
-    console.log('Recognition started, requesting microphone access');
-  }
-  function stopVoiceRecognition() {
-    if (recognition) {
-      recognition.stop();
-      recognition = null;
-      if (pulsator) pulsator.classList.remove('active');
-      console.log('Voice recognition stopped');
-      showToastMessage('Voice recognition stopped.', 5000);
-    }
-  }
-  function confirmVoiceInput(transcript) {
-    if ('speechSynthesis' in window && femaleVoice) {
-      const utterance = new SpeechSynthesisUtterance(`You said ${transcript}. Is this correct?`);
-      utterance.voice = femaleVoice;
-      utterance.lang = 'en-US';
-      window.speechSynthesis.speak(utterance);
-      if (recognition) recognition.stop();
-      recognition = new webkitSpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-      recognition.onstart = () => {
-        if (voiceOverlay) voiceOverlay.style.display = 'flex';
-        if (pulsator) pulsator.classList.add('active');
-        if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
-        showToastMessage('Waiting for voice confirmation.', 5000);
-      };
-      recognition.onresult = (event) => {
-        const confirmation = event.results[0][0].transcript.toLowerCase().trim();
-        console.log('Confirmation input:', confirmation);
-        if (confirmation.includes('yes')) {
-          startNavigation(transcript);
-          showToastMessage(`Confirmed destination: ${transcript}`, 5000);
-        } else if (confirmation.includes('no')) {
-          if (voiceInstruction) voiceInstruction.textContent = 'Please try again...';
-          const retryUtterance = new SpeechSynthesisUtterance('Please try again.');
-          retryUtterance.voice = femaleVoice;
-          window.speechSynthesis.speak(retryUtterance);
-          showToastMessage('Voice input rejected, retrying.', 5000);
-          setTimeout(() => startVoiceRecognition(), 1000);
-        } else {
-          if (voiceInstruction) voiceInstruction.textContent = 'Please say "yes" or "no"...';
-          const promptUtterance = new SpeechSynthesisUtterance('Please say "yes" or "no".');
-          promptUtterance.voice = femaleVoice;
-          window.speechSynthesis.speak(promptUtterance);
-          showToastMessage('Please say "yes" or "no".', 5000);
-          setTimeout(() => confirmVoiceInput(transcript), 1000);
-        }
-        stopVoiceRecognition();
-      };
-      recognition.onerror = (event) => {
-        console.error('Confirmation error:', event.error);
-        if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
-        showToastMessage(`Voice confirmation error: ${event.error}`, 7007, true);
-        stopVoiceRecognition();
-        setTimeout(() => confirmVoiceInput(transcript), 1000);
-      };
-      recognition.onend = () => {
-        if (voiceOverlay && voiceOverlay.style.display === 'flex' && !recognition) {
-          if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
-        }
-      };
-      recognition.start();
-    } else {
-      showToastMessage('Text-to-speech not supported or no voice available.', 7000, true);
-      startNavigation(transcript);
-    }
-  }
-  function showDetailedAlertBox() {
-    console.time('Show detailed alert box');
-    console.log('Showing detailed alert box, element:', detailedAlertBox);
-    if (detailedAlertBox) {
-      detailedAlertBox.classList.add('active');
-      detailedAlertBox.style.display = 'flex';
-      detailedAlertBox.style.left = '50%';
-      detailedAlertBox.style.top = '50%';
-      detailedAlertBox.style.transform = 'translate(-50%, -50%)';
-      detailedAlertBox.style.opacity = '0';
-      setTimeout(() => {
-        detailedAlertBox.style.opacity = '1';
-      }, 0);
-      if (alertType) alertType.style.display = 'block';
-      const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
-      if (alertTypeLabel) alertTypeLabel.style.display = 'block';
-      if (clickLocationBtn) clickLocationBtn.style.display = 'block';
-      if (alertCurrentBtn) alertCurrentBtn.style.display = 'block';
-      if (locationDisplay) locationDisplay.style.display = 'none';
-      if (alertNotes) alertNotes.value = '';
-      if (postAlertBtn) postAlertBtn.style.display = 'none';
-      if (cancelAlertBtn) cancelAlertBtn.style.display = 'none';
-      if (toastMessage) toastMessage.style.display = 'none';
-      showToastMessage('Detailed alert box opened.', 5000);
-    } else {
-      console.error('detailedAlertBox element not found');
-      showToastMessage('Error: Detailed alert box not found.', 7000, true);
-    }
-    console.timeEnd('Show detailed alert box');
-  }
-  function addAlert(type, notes = '', position) {
-    return new Promise((resolve, reject) => {
-      console.time(`Add ${type} alert`);
-      if (!position) {
-        console.error('No position provided for alert, using default location');
-        position = new google.maps.LatLng(33.0891264, -83.2372736);
-      }
-      if (!currentUser) {
-        console.warn('No current user, cannot post alert');
-        showToastMessage('Please log in to post alerts.', 5000, true);
-        logout();
-        reject(new Error('No authenticated user'));
-        return;
-      }
-      addMarker(type, notes, position).then(() => {
-        console.timeEnd(`Add ${type} alert`);
-        resolve();
-      }).catch(err => {
-        console.error('Failed to post alert:', err);
-        showToastMessage(err.message || 'Failed to post alert.', 7000, true);
-        console.timeEnd(`Add ${type} alert`);
-        reject(err);
-      });
-    });
-  }
-  function addHazardMarker() {
-    const now = Date.now();
-    if (now - lastHazardTime < 1000) {
-      console.log('Hazard add debounced, too soon');
-      showToastMessage('Please wait before posting another hazard.', 5000, true);
-      return;
-    }
-    lastHazardTime = now;
-    console.log('Hazard button clicked, checking geolocation...');
-    if (!currentUser) {
-      console.warn('No current user, cannot post hazard');
-      showToastMessage('Please log in to post alerts.', 5000, true);
-      logout();
-      return;
-    }
-    if (navigator.geolocation) {
-      console.log('Requesting geolocation for hazard alert');
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          userLocation = { lat: latitude, lng: longitude };
-          lastLocationUpdate = now;
-          console.log('Current location retrieved for hazard:', userLocation);
-          addAlert('Hazard', '', new google.maps.LatLng(latitude, longitude)).then(() => {
-            console.log('Hazard alert posted at:', userLocation);
-            showToastMessage('Hazard alert posted successfully.', 5000);
-          }).catch(err => {
-            console.error('Failed to post hazard alert:', err);
-            showToastMessage(err.message || 'Failed to post hazard alert.', 7000, true);
           });
         },
         (err) => {
-          console.error('Geolocation error for hazard alert:', err);
-          let errorMessage = 'Failed to get current location for hazard. ';
+          console.error('Geolocation error for navigation start:', err);
+          let errorMessage = 'Failed to get current location. ';
           if (err.code === 1) {
             errorMessage += 'Location permission denied. Please enable location services.';
           } else if (err.code === 2) {
@@ -2212,44 +1855,453 @@ window.addEventListener('DOMContentLoaded', () => {
             errorMessage += 'An unknown error occurred. Using last known location.';
           }
           showToastMessage(errorMessage, 7000, true);
-          const fallbackLocation = userLocation.lat && userLocation.lng
-            ? new google.maps.LatLng(userLocation.lat, userLocation.lng)
-            : new google.maps.LatLng(33.0891264, -83.2372736);
-          console.log('Using fallback location for hazard:', fallbackLocation.toString());
-          addAlert('Hazard', '', fallbackLocation).then(() => {
-            console.log('Hazard alert posted with fallback location');
-            showToastMessage('Hazard alert posted with fallback location.', 5000);
-          }).catch(err => {
-            console.error('Failed to post hazard alert with fallback:', err);
-            showToastMessage(err.message || 'Failed to post hazard alert with fallback.', 7000, true);
-          });
+          retries++;
+          if (retries < maxRetries) {
+            console.log(`Retrying navigation start with fallback location (attempt ${retries + 1})...`);
+            setTimeout(() => {
+              updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
+                map.setCenter(userLocation);
+                map.setZoom(18);
+                map.setTilt(45);
+                checkHazardsOnRoute();
+                showToastMessage('Navigation started with fallback location.', 5000);
+                provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
+              }).catch(err => {
+                console.error('Route update with fallback failed:', err);
+                if (retries < maxRetries) {
+                  console.log(`Retrying navigation start (attempt ${retries + 1})...`);
+                  setTimeout(tryStartNavigation, 2000 * retries);
+                } else {
+                  console.error('Max retries reached for navigation start with fallback');
+                  showToastMessage('Failed to start navigation after retries.', 7000, true);
+                  stopNavigation();
+                }
+              });
+            }, 2000 * retries);
+          } else {
+            console.error('Max retries reached for navigation start');
+            showToastMessage('Failed to start navigation after retries.', 7000, true);
+            stopNavigation();
+          }
         },
-        { maximumAge: 10000, timeout: 30000, enableHighAccuracy: true }
+        { maximumAge: 0, timeout: 30000, enableHighAccuracy: true }
       );
     } else {
-      console.error('Geolocation unavailable');
-      showToastMessage('Geolocation not supported. Using default location for hazard.', 7000, true);
-      const defaultLocation = new google.maps.LatLng(33.0891264, -83.2372736);
-      console.log('Using default location for hazard:', defaultLocation.toString());
-      addAlert('Hazard', '', defaultLocation).then(() => {
-        console.log('Hazard alert posted with default location');
-        showToastMessage('Hazard alert posted with default location.', 5000);
+      console.error('Geolocation unavailable, using fallback:', userLocation);
+      updateRoute([userLocation.lat, userLocation.lng], destination).then(() => {
+        map.setCenter(userLocation);
+        map.setZoom(18);
+        map.setTilt(45);
+        checkHazardsOnRoute();
+        showToastMessage('Navigation started with fallback location.', 5000);
+        provideVoiceNavigation({ latitude: userLocation.lat, longitude: userLocation.lng, heading: lastHeading });
       }).catch(err => {
-        console.error('Failed to post hazard alert with default:', err);
-        showToastMessage(err.message || 'Failed to post hazard alert with default.', 7000, true);
+        console.error('Route update with fallback failed:', err);
+        retries++;
+        if (retries < maxRetries) {
+          console.log(`Retrying navigation start with fallback (attempt ${retries + 1})...`);
+          setTimeout(tryStartNavigation, 2000 * retries);
+        } else {
+          console.error('Max retries reached for navigation start with fallback');
+          showToastMessage('Failed to start navigation after retries.', 7000, true);
+          stopNavigation();
+        }
       });
     }
   }
-  function enableMapClick() {
-    if (isSelectingLocation) return;
-    isSelectingLocation = true;
-    const detailedAlertBox = document.getElementById('detailedAlertBox');
-    if (detailedAlertBox) {
-      detailedAlertBox.classList.remove('active');
-      detailedAlertBox.style.display = 'none';
+  tryStartNavigation();
+  console.timeEnd('Start navigation');
+}
+function stopNavigation() {
+  console.log('Stopping navigation, attempting to clear route');
+  isNavigating = false;
+  isFollowing = false;
+  routePath = [];
+  currentDestination = null;
+  ignoredHazards = [];
+  lastInstruction = '';
+  lastNavIndex = -1;
+  lastDistanceToNext = Infinity;
+  directionsResponse = null;
+  if (hud) hud.classList.remove('navigating');
+  if (controlHud) controlHud.classList.remove('navigating');
+  if (navInput) {
+    navInput.classList.remove('hidden');
+    navInput.style.opacity = '0';
+    navInput.style.transform = 'translateX(-50%)';
+    setTimeout(() => {
+      navInput.style.opacity = '1';
+    }, 50);
+  }
+  if (navHud) {
+    navHud.style.opacity = '0';
+    setTimeout(() => {
+      navHud.classList.remove('active');
+      navHud.style.display = 'none';
+      const instructionContainer = document.getElementById('instruction-container');
+      if (instructionContainer) {
+        const leftArrow = instructionContainer.querySelector('.fa-arrow-left');
+        const rightArrow = instructionContainer.querySelector('.fa-arrow-right');
+        if (leftArrow && rightArrow) {
+          leftArrow.classList.remove('active');
+          rightArrow.classList.remove('active');
+        }
+      }
+    }, 300);
+  }
+  if (routePolyline) {
+    routePolyline.setMap(null);
+    routePolyline = null;
+  }
+  if (passedPolyline) {
+    passedPolyline.setMap(null);
+    passedPolyline = null;
+  }
+  if (directionsRenderer) {
+    directionsRenderer.setMap(null);
+  }
+  if (eta) eta.textContent = 'N/A';
+  if (dta) dta.textContent = 'N/A';
+  if (time) time.textContent = '0:00';
+  const navInstruction = document.getElementById('nav-instruction');
+  const navDistance = document.getElementById('nav-distance');
+  const navEta = document.getElementById('nav-eta');
+  if (navInstruction) navInstruction.textContent = 'No navigation active';
+  if (navDistance) navDistance.textContent = 'N/A';
+  if (navEta) navEta.textContent = 'N/A';
+  map.setZoom(13);
+  map.setTilt(0);
+  map.setHeading(0);
+  showToastMessage('Navigation stopped.', 5000);
+}
+function recenterMap() {
+  if (navigator.geolocation && map && isNavigating) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        let currentPos = new google.maps.LatLng(latitude, longitude);
+        if (routePath.length > 0) {
+          const closest = findClosestPointOnRoute(currentPos, routePath);
+          if (closest.distance < 50) {
+            currentPos = routePath[closest.index];
+          }
+          const nextPointIndex = Math.min(closest.index + 1, routePath.length - 1);
+          if (nextPointIndex < routePath.length) {
+            const nextPoint = routePath[nextPointIndex];
+            map.setHeading(google.maps.geometry.spherical.computeHeading(currentPos, nextPoint));
+          }
+        }
+        map.setCenter(currentPos);
+        map.setZoom(18);
+        map.setTilt(45);
+        isManualInteraction = false;
+        isFollowing = true;
+        console.log('Map recentered at:', currentPos.toString());
+        showToastMessage('Map recentered.', 5000);
+        provideVoiceNavigation({ latitude, longitude, heading: position.coords.heading || lastHeading });
+      },
+      (err) => {
+        console.log('Recenter geolocation error:', err);
+        showToastMessage('Failed to recenter map.', 7000, true);
+      },
+      { maximumAge: 0, timeout: 30000, enableHighAccuracy: true }
+    );
+  }
+}
+function startVoiceRecognition() {
+  if (!('webkitSpeechRecognition' in window)) {
+    showToastMessage('Voice recognition not supported in this browser.', 7000, true);
+    return;
+  }
+  if (recognition) recognition.stop();
+  recognition = new webkitSpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+  recognition.onstart = () => {
+    console.log('Voice recognition started');
+    if (voiceOverlay) voiceOverlay.style.display = 'flex';
+    if (pulsator) pulsator.classList.add('active');
+    if (voiceInstruction) voiceInstruction.textContent = 'Speak the address or location...';
+    showToastMessage('Voice recognition started.', 5000);
+  };
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript.trim();
+    console.log('Voice input:', transcript);
+    if (transcript) {
+      if (navAddress) navAddress.value = transcript;
+      stopVoiceRecognition();
+      confirmVoiceInput(transcript);
+    } else {
+      if (voiceInstruction) voiceInstruction.textContent = 'No input detected, please try again...';
+      showToastMessage('No voice input detected.', 5000, true);
     }
-    showToastMessage('Waiting for click or press a location on the map.', 5000);
-    const clickListener = map.addListener('click', (event) => {
+  };
+  recognition.onerror = (event) => {
+    console.error('Voice recognition error:', event.error);
+    if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
+    showToastMessage(`Voice recognition error: ${event.error}`, 7000, true);
+    stopVoiceRecognition();
+  };
+  recognition.onend = () => {
+    if (voiceOverlay && voiceOverlay.style.display === 'flex' && !recognition) {
+      if (voiceInstruction) voiceInstruction.textContent = 'Speak the address or location...';
+    }
+  };
+  recognition.start();
+  console.log('Recognition started, requesting microphone access');
+}
+function stopVoiceRecognition() {
+  if (recognition) {
+    recognition.stop();
+    recognition = null;
+    if (pulsator) pulsator.classList.remove('active');
+    console.log('Voice recognition stopped');
+    showToastMessage('Voice recognition stopped.', 5000);
+  }
+}
+function confirmVoiceInput(transcript) {
+  if ('speechSynthesis' in window && femaleVoice) {
+    const utterance = new SpeechSynthesisUtterance(`You said ${transcript}. Is this correct?`);
+    utterance.voice = femaleVoice;
+    utterance.lang = 'en-US';
+    window.speechSynthesis.speak(utterance);
+    if (recognition) recognition.stop();
+    recognition = new webkitSpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+    recognition.onstart = () => {
+      if (voiceOverlay) voiceOverlay.style.display = 'flex';
+      if (pulsator) pulsator.classList.add('active');
+      if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
+      showToastMessage('Waiting for voice confirmation.', 5000);
+    };
+    recognition.onresult = (event) => {
+      const confirmation = event.results[0][0].transcript.toLowerCase().trim();
+      console.log('Confirmation input:', confirmation);
+      if (confirmation.includes('yes')) {
+        startNavigation(transcript);
+        showToastMessage(`Confirmed destination: ${transcript}`, 5000);
+      } else if (confirmation.includes('no')) {
+        if (voiceInstruction) voiceInstruction.textContent = 'Please try again...';
+        const retryUtterance = new SpeechSynthesisUtterance('Please try again.');
+        retryUtterance.voice = femaleVoice;
+        window.speechSynthesis.speak(retryUtterance);
+        showToastMessage('Voice input rejected, retrying.', 5000);
+        setTimeout(() => startVoiceRecognition(), 1000);
+      } else {
+        if (voiceInstruction) voiceInstruction.textContent = 'Please say "yes" or "no"...';
+        const promptUtterance = new SpeechSynthesisUtterance('Please say "yes" or "no".');
+        promptUtterance.voice = femaleVoice;
+        window.speechSynthesis.speak(promptUtterance);
+        showToastMessage('Please say "yes" or "no".', 5000);
+        setTimeout(() => confirmVoiceInput(transcript), 1000);
+      }
+      stopVoiceRecognition();
+    };
+    recognition.onerror = (event) => {
+      console.error('Confirmation error:', event.error);
+      if (voiceInstruction) voiceInstruction.textContent = `Error: ${event.error}. Please try again.`;
+      showToastMessage(`Voice confirmation error: ${event.error}`, 7007, true);
+      stopVoiceRecognition();
+      setTimeout(() => confirmVoiceInput(transcript), 1000);
+    };
+    recognition.onend = () => {
+      if (voiceOverlay && voiceOverlay.style.display === 'flex' && !recognition) {
+        if (voiceInstruction) voiceInstruction.textContent = 'Say "yes" or "no"...';
+      }
+    };
+    recognition.start();
+  } else {
+    showToastMessage('Text-to-speech not supported or no voice available.', 7000, true);
+    startNavigation(transcript);
+  }
+}
+function showDetailedAlertBox() {
+  console.time('Show detailed alert box');
+  console.log('Showing detailed alert box, element:', detailedAlertBox);
+  if (detailedAlertBox) {
+    detailedAlertBox.classList.add('active');
+    detailedAlertBox.style.display = 'flex';
+    detailedAlertBox.style.left = '50%';
+    detailedAlertBox.style.top = '50%';
+    detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+    detailedAlertBox.style.opacity = '0';
+    setTimeout(() => {
+      detailedAlertBox.style.opacity = '1';
+    }, 0);
+    if (alertType) alertType.style.display = 'block';
+    const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+    if (alertTypeLabel) alertTypeLabel.style.display = 'block';
+    if (clickLocationBtn) clickLocationBtn.style.display = 'block';
+    if (alertCurrentBtn) alertCurrentBtn.style.display = 'block';
+    if (locationDisplay) locationDisplay.style.display = 'none';
+    if (alertNotes) alertNotes.value = '';
+    if (postAlertBtn) postAlertBtn.style.display = 'none';
+    if (cancelAlertBtn) cancelAlertBtn.style.display = 'none';
+    if (toastMessage) toastMessage.style.display = 'none';
+    showToastMessage('Detailed alert box opened.', 5000);
+  } else {
+    console.error('detailedAlertBox element not found');
+    showToastMessage('Error: Detailed alert box not found.', 7000, true);
+  }
+  console.timeEnd('Show detailed alert box');
+}
+function addAlert(type, notes = '', position) {
+  return new Promise((resolve, reject) => {
+    console.time(`Add ${type} alert`);
+    if (!position) {
+      console.error('No position provided for alert, using default location');
+      position = new google.maps.LatLng(33.0891264, -83.2372736);
+    }
+    if (!currentUser) {
+      console.warn('No current user, cannot post alert');
+      showToastMessage('Please log in to post alerts.', 5000, true);
+      logout();
+      reject(new Error('No authenticated user'));
+      return;
+    }
+    addMarker(type, notes, position).then(() => {
+      console.timeEnd(`Add ${type} alert`);
+      resolve();
+    }).catch(err => {
+      console.error('Failed to post alert:', err);
+      showToastMessage(err.message || 'Failed to post alert.', 7000, true);
+      console.timeEnd(`Add ${type} alert`);
+      reject(err);
+    });
+  });
+}
+function addHazardMarker() {
+  const now = Date.now();
+  if (now - lastHazardTime < 1000) {
+    console.log('Hazard add debounced, too soon');
+    showToastMessage('Please wait before posting another hazard.', 5000, true);
+    return;
+  }
+  lastHazardTime = now;
+  console.log('Hazard button clicked, checking geolocation...');
+  if (!currentUser) {
+    console.warn('No current user, cannot post hazard');
+    showToastMessage('Please log in to post alerts.', 5000, true);
+    logout();
+    return;
+  }
+  if (navigator.geolocation) {
+    console.log('Requesting geolocation for hazard alert');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        userLocation = { lat: latitude, lng: longitude };
+        lastLocationUpdate = now;
+        console.log('Current location retrieved for hazard:', userLocation);
+        addAlert('Hazard', '', new google.maps.LatLng(latitude, longitude)).then(() => {
+          console.log('Hazard alert posted at:', userLocation);
+          showToastMessage('Hazard alert posted successfully.', 5000);
+        }).catch(err => {
+          console.error('Failed to post hazard alert:', err);
+          showToastMessage(err.message || 'Failed to post hazard alert.', 7000, true);
+        });
+      },
+      (err) => {
+        console.error('Geolocation error for hazard alert:', err);
+        let errorMessage = 'Failed to get current location for hazard. ';
+        if (err.code === 1) {
+          errorMessage += 'Location permission denied. Please enable location services.';
+        } else if (err.code === 2) {
+          errorMessage += 'Location unavailable. Using last known location.';
+        } else if (err.code === 3) {
+          errorMessage += 'Location request timed out. Using last known location.';
+        } else {
+          errorMessage += 'An unknown error occurred. Using last known location.';
+        }
+        showToastMessage(errorMessage, 7000, true);
+        const fallbackLocation = userLocation.lat && userLocation.lng
+          ? new google.maps.LatLng(userLocation.lat, userLocation.lng)
+          : new google.maps.LatLng(33.0891264, -83.2372736);
+        console.log('Using fallback location for hazard:', fallbackLocation.toString());
+        addAlert('Hazard', '', fallbackLocation).then(() => {
+          console.log('Hazard alert posted with fallback location');
+          showToastMessage('Hazard alert posted with fallback location.', 5000);
+        }).catch(err => {
+          console.error('Failed to post hazard alert with fallback:', err);
+          showToastMessage(err.message || 'Failed to post hazard alert with fallback.', 7000, true);
+        });
+      },
+      { maximumAge: 10000, timeout: 30000, enableHighAccuracy: true }
+    );
+  } else {
+    console.error('Geolocation unavailable');
+    showToastMessage('Geolocation not supported. Using default location for hazard.', 7000, true);
+    const defaultLocation = new google.maps.LatLng(33.0891264, -83.2372736);
+    console.log('Using default location for hazard:', defaultLocation.toString());
+    addAlert('Hazard', '', defaultLocation).then(() => {
+      console.log('Hazard alert posted with default location');
+      showToastMessage('Hazard alert posted with default location.', 5000);
+    }).catch(err => {
+      console.error('Failed to post hazard alert with default:', err);
+      showToastMessage(err.message || 'Failed to post hazard alert with default.', 7000, true);
+    });
+  }
+}
+function enableMapClick() {
+  if (isSelectingLocation) return;
+  isSelectingLocation = true;
+  const detailedAlertBox = document.getElementById('detailedAlertBox');
+  if (detailedAlertBox) {
+    detailedAlertBox.classList.remove('active');
+    detailedAlertBox.style.display = 'none';
+  }
+  showToastMessage('Waiting for click or press a location on the map.', 5000);
+  const clickListener = map.addListener('click', (event) => {
+    const lat = event.latLng.lat();
+    const lng = event.latLng.lng();
+    reverseGeocode(lat, lng).then(address => {
+      if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      if (detailedAlertBox) {
+        detailedAlertBox.classList.add('active');
+        detailedAlertBox.style.display = 'flex';
+        detailedAlertBox.style.left = '50%';
+        detailedAlertBox.style.top = '50%';
+        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+      }
+      if (locationDisplay) locationDisplay.style.display = 'block';
+      if (alertType) alertType.style.display = 'none';
+      const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+      if (alertTypeLabel) alertTypeLabel.style.display = 'none';
+      if (clickLocationBtn) clickLocationBtn.style.display = 'none';
+      if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
+      if (postAlertBtn) postAlertBtn.style.display = 'block';
+      if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
+      isSelectingLocation = false;
+      google.maps.event.removeListener(clickListener);
+      showToastMessage('Location selected for alert.', 5000);
+    }).catch(err => {
+      console.error('Reverse geocode error:', err);
+      if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      if (detailedAlertBox) {
+        detailedAlertBox.classList.add('active');
+        detailedAlertBox.style.display = 'flex';
+        detailedAlertBox.style.left = '50%';
+        detailedAlertBox.style.top = '50%';
+        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+      }
+      if (locationDisplay) locationDisplay.style.display = 'block';
+      if (alertType) alertType.style.display = 'none';
+      const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
+      if (alertTypeLabel) alertTypeLabel.style.display = 'none';
+      if (clickLocationBtn) clickLocationBtn.style.display = 'none';
+      if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
+      if (postAlertBtn) postAlertBtn.style.display = 'block';
+      if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
+      isSelectingLocation = false;
+      google.maps.event.removeListener(clickListener);
+      showToastMessage('Failed to geocode selected location.', 7000, true);
+    });
+  });
+  const touchListener = map.addListener('click', (event) => {
+    if (event.domEvent.type === 'touchend') {
       const lat = event.latLng.lat();
       const lng = event.latLng.lng();
       reverseGeocode(lat, lng).then(address => {
@@ -2270,7 +2322,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (postAlertBtn) postAlertBtn.style.display = 'block';
         if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
         isSelectingLocation = false;
-        google.maps.event.removeListener(clickListener);
+        google.maps.event.removeListener(touchListener);
         showToastMessage('Location selected for alert.', 5000);
       }).catch(err => {
         console.error('Reverse geocode error:', err);
@@ -2291,431 +2343,384 @@ window.addEventListener('DOMContentLoaded', () => {
         if (postAlertBtn) postAlertBtn.style.display = 'block';
         if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
         isSelectingLocation = false;
-        google.maps.event.removeListener(clickListener);
+        google.maps.event.removeListener(touchListener);
         showToastMessage('Failed to geocode selected location.', 7000, true);
       });
-    });
-    const touchListener = map.addListener('click', (event) => {
-      if (event.domEvent.type === 'touchend') {
-        const lat = event.latLng.lat();
-        const lng = event.latLng.lng();
-        reverseGeocode(lat, lng).then(address => {
-          if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-          if (detailedAlertBox) {
-            detailedAlertBox.classList.add('active');
-            detailedAlertBox.style.display = 'flex';
-            detailedAlertBox.style.left = '50%';
-            detailedAlertBox.style.top = '50%';
-            detailedAlertBox.style.transform = 'translate(-50%, -50%)';
-          }
-          if (locationDisplay) locationDisplay.style.display = 'block';
-          if (alertType) alertType.style.display = 'none';
-          const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
-          if (alertTypeLabel) alertTypeLabel.style.display = 'none';
-          if (clickLocationBtn) clickLocationBtn.style.display = 'none';
-          if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
-          if (postAlertBtn) postAlertBtn.style.display = 'block';
-          if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
-          isSelectingLocation = false;
-          google.maps.event.removeListener(touchListener);
-          showToastMessage('Location selected for alert.', 5000);
-        }).catch(err => {
-          console.error('Reverse geocode error:', err);
-          if (selectedLocation) selectedLocation.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
-          if (detailedAlertBox) {
-            detailedAlertBox.classList.add('active');
-            detailedAlertBox.style.display = 'flex';
-            detailedAlertBox.style.left = '50%';
-            detailedAlertBox.style.top = '50%';
-            detailedAlertBox.style.transform = 'translate(-50%, -50%)';
-          }
-          if (locationDisplay) locationDisplay.style.display = 'block';
-          if (alertType) alertType.style.display = 'none';
-          const alertTypeLabel = document.querySelector('#detailedAlertBox label[for="alertType"]');
-          if (alertTypeLabel) alertTypeLabel.style.display = 'none';
-          if (clickLocationBtn) clickLocationBtn.style.display = 'none';
-          if (alertCurrentBtn) alertCurrentBtn.style.display = 'none';
-          if (postAlertBtn) postAlertBtn.style.display = 'block';
-          if (cancelAlertBtn) cancelAlertBtn.style.display = 'block';
-          isSelectingLocation = false;
-          google.maps.event.removeListener(touchListener);
-          showToastMessage('Failed to geocode selected location.', 7000, true);
-        });
-      }
-    });
+    }
+  });
+}
+function postSelectedAlert() {
+  const alertType = document.getElementById('alertType');
+  const alertNotes = document.getElementById('alertNotes');
+  const selectedLocation = document.getElementById('selected-location');
+  if (!alertType || !alertNotes || !selectedLocation) {
+    console.error('Missing elements for posting alert:', { alertType: !!alertType, alertNotes: !!alertNotes, selectedLocation: !!selectedLocation });
+    showToastMessage('Error: Required elements not found.', 7000, true);
+    return;
   }
-  function postSelectedAlert() {
-    const alertType = document.getElementById('alertType');
-    const alertNotes = document.getElementById('alertNotes');
-    const selectedLocation = document.getElementById('selected-location');
-    if (!alertType || !alertNotes || !selectedLocation) {
-      console.error('Missing elements for posting alert:', { alertType: !!alertType, alertNotes: !!alertNotes, selectedLocation: !!selectedLocation });
-      showToastMessage('Error: Required elements not found.', 7000, true);
+  const type = alertType.value;
+  const notes = alertNotes.value.trim();
+  const [lat, lng] = selectedLocation.textContent.split(', ').map(Number);
+  const detailedAlertBox = document.getElementById('detailedAlertBox');
+  if (detailedAlertBox) {
+    detailedAlertBox.style.opacity = '0';
+    setTimeout(() => {
+      detailedAlertBox.classList.remove('active');
+      detailedAlertBox.style.display = 'none';
+      detailedAlertBox.style.left = '50%';
+      detailedAlertBox.style.top = '50%';
+      detailedAlertBox.style.transform = 'translate(-50%, -50%)';
+      addAlert(type, notes, new google.maps.LatLng(lat, lng)).then(() => {
+        showToastMessage('Your alert has been posted. Thank you!', 5000);
+      }).catch(err => {
+        showToastMessage(err.message || 'Failed to post alert.', 7000, true);
+      });
+    }, 200);
+  }
+}
+function reverseGeocode(lat, lng) {
+  return new Promise((resolve, reject) => {
+    if (!window.google || !google.maps) {
+      reject(new Error('Google Maps API not loaded'));
+      showToastMessage('Google Maps API not loaded.', 7000, true);
       return;
     }
-    const type = alertType.value;
-    const notes = alertNotes.value.trim();
-    const [lat, lng] = selectedLocation.textContent.split(', ').map(Number);
-    const detailedAlertBox = document.getElementById('detailedAlertBox');
-    if (detailedAlertBox) {
-      detailedAlertBox.style.opacity = '0';
-      setTimeout(() => {
-        detailedAlertBox.classList.remove('active');
-        detailedAlertBox.style.display = 'none';
-        detailedAlertBox.style.left = '50%';
-        detailedAlertBox.style.top = '50%';
-        detailedAlertBox.style.transform = 'translate(-50%, -50%)';
-        addAlert(type, notes, new google.maps.LatLng(lat, lng)).then(() => {
-          showToastMessage('Your alert has been posted. Thank you!', 5000);
-        }).catch(err => {
-          showToastMessage(err.message || 'Failed to post alert.', 7000, true);
-        });
-      }, 200);
-    }
-  }
-  function reverseGeocode(lat, lng) {
-    return new Promise((resolve, reject) => {
-      if (!window.google || !google.maps) {
-        reject(new Error('Google Maps API not loaded'));
-        showToastMessage('Google Maps API not loaded.', 7000, true);
-        return;
+    const geocoder = new google.maps.Geocoder();
+    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
+      if (status === google.maps.GeocoderStatus.OK && results[0]) {
+        resolve(results[0].formatted_address);
+      } else {
+        reject(new Error('Reverse geocoding failed'));
       }
-      const geocoder = new google.maps.Geocoder();
-      geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-        if (status === google.maps.GeocoderStatus.OK && results[0]) {
-          resolve(results[0].formatted_address);
-        } else {
-          reject(new Error('Reverse geocoding failed'));
-        }
-      });
     });
-  }
-  function makeDraggable(element) {
-    let isDragging = false;
-    let currentX = window.innerWidth / 2;
-    let currentY = window.innerHeight / 2;
-    let initialX = 0;
-    let initialY = 0;
-    let xOffset = 0;
-    let yOffset = 0;
-    element.style.position = 'fixed';
-    element.style.left = '50%';
-    element.style.top = '50%';
-    element.style.transform = 'translate(-50%, -50%)';
-    const h3 = element.querySelector('h3');
-    if (h3) {
-      const startDrag = (clientX, clientY, e) => {
-        if (e.target !== h3) return;
-        initialX = clientX - xOffset;
-        initialY = clientY - yOffset;
-        isDragging = true;
-        element.classList.add('dragging');
-        console.log('Started dragging detailedAlertBox');
-        showToastMessage('Dragging alert box.', 5000);
-        e.preventDefault();
-      };
-      h3.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY, e));
-      h3.addEventListener('touchstart', (e) => {
-        const touch = e.touches[0];
-        startDrag(touch.clientX, touch.clientY, e);
-      }, { passive: false });
-    }
-    function updatePosition(clientX, clientY) {
-      if (isDragging) {
-        currentX = clientX - initialX;
-        currentY = clientY - initialY;
-        xOffset = currentX;
-        yOffset = currentY;
-        const rect = element.getBoundingClientRect();
-        const maxX = window.innerWidth - rect.width - 15;
-        const maxY = window.innerHeight - rect.height - 15;
-        currentX = Math.max(15, Math.min(currentX, maxX));
-        currentY = Math.max(15, Math.min(currentY, maxY));
-        element.style.left = currentX + 'px';
-        element.style.top = currentY + 'px';
-        element.style.transform = 'none';
-        if (isDragging) requestAnimationFrame(() => updatePosition(clientX, clientY));
-      }
-    }
-    document.addEventListener('mousemove', (e) => {
-      if (isDragging) {
-        e.preventDefault();
-        updatePosition(e.clientX, e.clientY);
-      }
-    }, { passive: false });
-    document.addEventListener('touchmove', (e) => {
-      if (isDragging) {
-        e.preventDefault();
-        const touch = e.touches[0];
-        updatePosition(touch.clientX, touch.clientY);
-      }
-    }, { passive: false });
-    const stopDrag = (e) => {
-      isDragging = false;
-      element.classList.remove('dragging');
-      console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
-      showToastMessage('Alert box drag stopped.', 5000);
+  });
+}
+function makeDraggable(element) {
+  let isDragging = false;
+  let currentX = window.innerWidth / 2;
+  let currentY = window.innerHeight / 2;
+  let initialX = 0;
+  let initialY = 0;
+  let xOffset = 0;
+  let yOffset = 0;
+  element.style.position = 'fixed';
+  element.style.left = '50%';
+  element.style.top = '50%';
+  element.style.transform = 'translate(-50%, -50%)';
+  const h3 = element.querySelector('h3');
+  if (h3) {
+    const startDrag = (clientX, clientY, e) => {
+      if (e.target !== h3) return;
+      initialX = clientX - xOffset;
+      initialY = clientY - yOffset;
+      isDragging = true;
+      element.classList.add('dragging');
+      console.log('Started dragging detailedAlertBox');
+      showToastMessage('Dragging alert box.', 5000);
       e.preventDefault();
     };
-    document.addEventListener('mouseup', stopDrag);
-    document.addEventListener('touchend', stopDrag, { passive: false });
+    h3.addEventListener('mousedown', (e) => startDrag(e.clientX, e.clientY, e));
+    h3.addEventListener('touchstart', (e) => {
+      const touch = e.touches[0];
+      startDrag(touch.clientX, touch.clientY, e);
+    }, { passive: false });
   }
-  if (navAddress) {
-    navAddress.addEventListener('input', () => {
-      const query = navAddress.value.trim();
-      if (query.length > 2) {
-        autocompleteService.getPlacePredictions({ input: query }, (predictions, status) => {
-          if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
-            suggestions.innerHTML = '';
-            predictions.forEach(prediction => {
-              const item = document.createElement('div');
-              item.className = 'suggestion-item';
-              item.textContent = prediction.description;
-              const handleSelect = () => {
-                navAddress.value = prediction.description;
-                startNavigation(prediction.description);
-                navOverlay.style.display = 'none';
-                showToastMessage(`Selected destination: ${prediction.description}`, 5000);
-              };
-              item.addEventListener('click', handleSelect);
-              item.addEventListener('touchend', handleSelect, { passive: false });
-              suggestions.appendChild(item);
-            });
-            showOverlay();
-          }
-        });
-      }
-    });
+  function updatePosition(clientX, clientY) {
+    if (isDragging) {
+      currentX = clientX - initialX;
+      currentY = clientY - initialY;
+      xOffset = currentX;
+      yOffset = currentY;
+      const rect = element.getBoundingClientRect();
+      const maxX = window.innerWidth - rect.width - 15;
+      const maxY = window.innerHeight - rect.height - 15;
+      currentX = Math.max(15, Math.min(currentX, maxX));
+      currentY = Math.max(15, Math.min(currentY, maxY));
+      element.style.left = currentX + 'px';
+      element.style.top = currentY + 'px';
+      element.style.transform = 'none';
+      if (isDragging) requestAnimationFrame(() => updatePosition(clientX, clientY));
+    }
   }
-  if (closeOverlay) {
-    const handleCloseOverlay = () => {
-      navOverlay.style.display = 'none';
-      showToastMessage('Navigation overlay closed.', 5000);
-    };
-    closeOverlay.addEventListener('click', handleCloseOverlay);
-    closeOverlay.addEventListener('touchend', handleCloseOverlay, { passive: false });
-  }
-  if (cancelBtn) {
-    const handleCancel = () => stopNavigation();
-    cancelBtn.addEventListener('click', handleCancel);
-    cancelBtn.addEventListener('touchend', handleCancel, { passive: false });
-  }
-  if (recenterBtn) {
-    const handleRecenter = () => recenterMap();
-    recenterBtn.addEventListener('click', handleRecenter);
-    recenterBtn.addEventListener('touchend', handleRecenter, { passive: false });
-  }
-  if (muteBtn) {
-    const handleMute = () => {
-      isMuted = !isMuted;
-      muteBtn.classList.toggle('muted', isMuted);
-      showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
-    };
-    muteBtn.addEventListener('click', handleMute);
-    muteBtn.addEventListener('touchend', handleMute, { passive: false });
-  }
-  if (hazardBtn) {
-    const handleHazard = () => addHazardMarker();
-    hazardBtn.addEventListener('click', handleHazard);
-    hazardBtn.addEventListener('touchend', handleHazard, { passive: false });
-  }
-  if (micButton) {
-    const handleMic = () => startVoiceRecognition();
-    micButton.addEventListener('click', handleMic);
-    micButton.addEventListener('touchend', handleMic, { passive: false });
-  }
-  if (closeVoiceOverlay) {
-    const handleCloseVoice = () => {
-      stopVoiceRecognition();
-      voiceOverlay.style.display = 'none';
-      showToastMessage('Voice overlay closed.', 5000);
-    };
-    closeVoiceOverlay.addEventListener('click', handleCloseVoice);
-    closeVoiceOverlay.addEventListener('touchend', handleCloseVoice, { passive: false });
-  }
-  if (detailedAlertBtn) {
-    const handleDetailedAlert = () => showDetailedAlertBox();
-    detailedAlertBtn.addEventListener('click', handleDetailedAlert);
-    detailedAlertBtn.addEventListener('touchend', handleDetailedAlert, { passive: false });
-  }
-  if (closeDetailedAlertBtn) {
-    const handleCloseDetailed = () => {
-      detailedAlertBox.classList.remove('active');
-      detailedAlertBox.style.display = 'none';
-      showToastMessage('Detailed alert box closed.', 5000);
-    };
-    closeDetailedAlertBtn.addEventListener('click', handleCloseDetailed);
-    closeDetailedAlertBtn.addEventListener('touchend', handleCloseDetailed, { passive: false });
-  }
-  if (clickLocationBtn) {
-    const handleClickLocation = () => enableMapClick();
-    clickLocationBtn.addEventListener('click', handleClickLocation);
-    clickLocationBtn.addEventListener('touchend', handleClickLocation, { passive: false });
-  }
-  if (alertCurrentBtn) {
-    const handleAlertCurrent = () => alertAtCurrentLocation();
-    alertCurrentBtn.addEventListener('click', handleAlertCurrent);
-    alertCurrentBtn.addEventListener('touchend', handleAlertCurrent, { passive: false });
-  }
-  if (postAlertBtn) {
-    const handlePostAlert = () => postSelectedAlert();
-    postAlertBtn.addEventListener('click', handlePostAlert);
-    postAlertBtn.addEventListener('touchend', handlePostAlert, { passive: false });
-  }
-  if (cancelAlertBtn) {
-    const handleCancelAlert = () => {
-      detailedAlertBox.classList.remove('active');
-      detailedAlertBox.style.display = 'none';
-      showToastMessage('Alert creation cancelled.', 5000);
-    };
-    cancelAlertBtn.addEventListener('click', handleCancelAlert);
-    cancelAlertBtn.addEventListener('touchend', handleCancelAlert, { passive: false });
-  }
-  if (profileBtn) {
-    const handleProfile = () => {
-      profileHud.style.display = 'flex';
-      profileHud.classList.add('active');
-      showToastMessage('Profile opened.', 5000);
-    };
-    profileBtn.addEventListener('click', handleProfile);
-    profileBtn.addEventListener('touchend', handleProfile, { passive: false });
-  }
-  if (closeBtn) {
-    const handleCloseProfile = () => {
-      profileHud.classList.remove('active');
-      profileHud.style.display = 'none';
-      showToastMessage('Profile closed.', 5000);
-    };
-    closeBtn.addEventListener('click', handleCloseProfile);
-    closeBtn.addEventListener('touchend', handleCloseProfile, { passive: false });
-  }
-  if (tabButtons) {
-    tabButtons.forEach(button => {
-      const handleTabClick = () => {
-        tabButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-        currentTab = button.dataset.tab;
-        accountInfo.classList.remove('active');
-        editProfile.classList.remove('active');
-        alertsTab.classList.remove('active');
-        if (currentTab === 'account') accountInfo.classList.add('active');
-        else if (currentTab === 'edit') editProfile.classList.add('active');
-        else if (currentTab === 'alerts') {
-          alertsTab.classList.add('active');
-          updateAlertTable();
-        }
-        showToastMessage(`Switched to ${currentTab} tab.`, 5000);
-      };
-      button.addEventListener('click', handleTabClick);
-      button.addEventListener('touchend', handleTabClick, { passive: false });
-    });
-  }
-  if (saveProfileBtn) {
-    const handleSaveProfile = () => {
-      const updates = {
-        name: document.getElementById('edit-name')?.value.trim() || '',
-        username: document.getElementById('edit-username')?.value.trim() || '',
-        email: document.getElementById('edit-email')?.value.trim() || '',
-        age: document.getElementById('edit-age')?.value.trim() || '',
-        dob: document.getElementById('edit-dob')?.value.trim() || '',
-        location: document.getElementById('edit-location')?.value.trim() || ''
-      };
-      if (!updates.username || !updates.email) {
-        console.error('Username or email missing in profile update');
-        showToastMessage('Username and email are required.', 7000, true);
-        return;
-      }
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('No token available for profile update');
-        showToastMessage('Please log in to update profile.', 5000, true);
-        return;
-      }
-      fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(updates)
-      })
-        .then(response => {
-          if (!response.ok) throw new Error(`Profile update failed: ${response.status}`);
-          return response.json();
-        })
-        .then(data => {
-          userProfile = { ...userProfile, ...data };
-          currentUser = { ...currentUser, username: data.username, id: data._id };
-          updateProfileDisplay();
-          updateEditProfileForm();
-          console.log('Profile updated:', userProfile);
-          showToastMessage('Profile updated successfully.', 5000);
-          profileHud.classList.remove('active');
-          profileHud.style.display = 'none';
-          accountInfo.classList.add('active');
-        })
-        .catch(err => {
-          console.error('Profile update error:', err.message);
-          showToastMessage(`Failed to update profile: ${err.message}`, 7000, true);
-        });
-    };
-    saveProfileBtn.addEventListener('click', handleSaveProfile);
-    saveProfileBtn.addEventListener('touchend', handleSaveProfile, { passive: false });
-  }
-  if (settingsBtn) {
-    const handleSettings = () => {
-      settingsHud.style.display = 'flex';
-      settingsHud.classList.add('active');
-      showToastMessage('Settings opened.', 5000);
-    };
-    settingsBtn.addEventListener('click', handleSettings);
-    settingsBtn.addEventListener('touchend', handleSettings, { passive: false });
-  }
-  if (closeSettings) {
-    const handleCloseSettings = () => {
-      settingsHud.classList.remove('active');
-      settingsHud.style.display = 'none';
-      showToastMessage('Settings closed.', 5000);
-    };
-    closeSettings.addEventListener('click', handleCloseSettings);
-    closeSettings.addEventListener('touchend', handleCloseSettings, { passive: false });
-  }
-  if (loginBtn && loginUsername && loginPassword) {
-    const handleLogin = () => {
-      login(loginUsername.value, loginPassword.value, loginBtn, loginUsername, loginPassword);
-    };
-    loginBtn.addEventListener('click', handleLogin);
-    loginBtn.addEventListener('touchend', handleLogin, { passive: false });
-  }
-  if (rerouteYes) {
-    const handleRerouteYes = () => rerouteAroundHazards(currentHazards);
-    rerouteYes.addEventListener('click', handleRerouteYes);
-    rerouteYes.addEventListener('touchend', handleRerouteYes, { passive: false });
-  }
-  if (rerouteNo) {
-    const handleRerouteNo = () => ignoreHazards(currentHazards);
-    rerouteNo.addEventListener('click', handleRerouteNo);
-    rerouteNo.addEventListener('touchend', handleRerouteNo, { passive: false });
-  }
-  if (detailedAlertBox) {
-    makeDraggable(detailedAlertBox);
-  }
-  if (addAlertBtn) {
-    const handleAddAlert = () => showDetailedAlertBox();
-    addAlertBtn.addEventListener('click', handleAddAlert);
-    addAlertBtn.addEventListener('touchend', handleAddAlert, { passive: false });
-  }
-  document.addEventListener('touchstart', (e) => {
-    if (e.touches.length > 1) {
+  document.addEventListener('mousemove', (e) => {
+    if (isDragging) {
       e.preventDefault();
+      updatePosition(e.clientX, e.clientY);
     }
   }, { passive: false });
   document.addEventListener('touchmove', (e) => {
-    if (e.touches.length > 1) {
+    if (isDragging) {
       e.preventDefault();
+      const touch = e.touches[0];
+      updatePosition(touch.clientX, touch.clientY);
     }
   }, { passive: false });
-  document.addEventListener('contextmenu', (e) => {
+  const stopDrag = (e) => {
+    isDragging = false;
+    element.classList.remove('dragging');
+    console.log('Stopped dragging detailedAlertBox at:', { left: element.style.left, top: element.style.top });
+    showToastMessage('Alert box drag stopped.', 5000);
     e.preventDefault();
-    e.stopPropagation();
-    return false;
+  };
+  document.addEventListener('mouseup', stopDrag);
+  document.addEventListener('touchend', stopDrag, { passive: false });
+}
+if (navAddress) {
+  navAddress.addEventListener('input', () => {
+    const query = navAddress.value.trim();
+    if (query.length > 2) {
+      autocompleteService.getPlacePredictions({ input: query }, (predictions, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && predictions) {
+          suggestions.innerHTML = '';
+          predictions.forEach(prediction => {
+            const item = document.createElement('div');
+            item.className = 'suggestion-item';
+            item.textContent = prediction.description;
+            const handleSelect = () => {
+              navAddress.value = prediction.description;
+              startNavigation(prediction.description);
+              navOverlay.style.display = 'none';
+              showToastMessage(`Selected destination: ${prediction.description}`, 5000);
+            };
+            item.addEventListener('click', handleSelect);
+            item.addEventListener('touchend', handleSelect, { passive: false });
+            suggestions.appendChild(item);
+          });
+          showOverlay();
+        }
+      });
+    }
   });
-  console.timeEnd('DOM initialization');
+}
+if (closeOverlay) {
+  const handleCloseOverlay = () => {
+    navOverlay.style.display = 'none';
+    showToastMessage('Navigation overlay closed.', 5000);
+  };
+  closeOverlay.addEventListener('click', handleCloseOverlay);
+  closeOverlay.addEventListener('touchend', handleCloseOverlay, { passive: false });
+}
+if (cancelBtn) {
+  const handleCancel = () => stopNavigation();
+  cancelBtn.addEventListener('click', handleCancel);
+  cancelBtn.addEventListener('touchend', handleCancel, { passive: false });
+}
+if (recenterBtn) {
+  const handleRecenter = () => recenterMap();
+  recenterBtn.addEventListener('click', handleRecenter);
+  recenterBtn.addEventListener('touchend', handleRecenter, { passive: false });
+}
+if (muteBtn) {
+  const handleMute = () => {
+    isMuted = !isMuted;
+    muteBtn.classList.toggle('muted', isMuted);
+    showToastMessage(isMuted ? 'Voice navigation muted.' : 'Voice navigation unmuted.', 5000);
+  };
+  muteBtn.addEventListener('click', handleMute);
+  muteBtn.addEventListener('touchend', handleMute, { passive: false });
+}
+if (hazardBtn) {
+  const handleHazard = () => addHazardMarker();
+  hazardBtn.addEventListener('click', handleHazard);
+  hazardBtn.addEventListener('touchend', handleHazard, { passive: false });
+}
+if (micButton) {
+  const handleMic = () => startVoiceRecognition();
+  micButton.addEventListener('click', handleMic);
+  micButton.addEventListener('touchend', handleMic, { passive: false });
+}
+if (closeVoiceOverlay) {
+  const handleCloseVoice = () => {
+    stopVoiceRecognition();
+    voiceOverlay.style.display = 'none';
+    showToastMessage('Voice overlay closed.', 5000);
+  };
+  closeVoiceOverlay.addEventListener('click', handleCloseVoice);
+  closeVoiceOverlay.addEventListener('touchend', handleCloseVoice, { passive: false });
+}
+if (detailedAlertBtn) {
+  const handleDetailedAlert = () => showDetailedAlertBox();
+  detailedAlertBtn.addEventListener('click', handleDetailedAlert);
+  detailedAlertBtn.addEventListener('touchend', handleDetailedAlert, { passive: false });
+}
+if (closeDetailedAlertBtn) {
+  const handleCloseDetailed = () => {
+    detailedAlertBox.classList.remove('active');
+    detailedAlertBox.style.display = 'none';
+    showToastMessage('Detailed alert box closed.', 5000);
+  };
+  closeDetailedAlertBtn.addEventListener('click', handleCloseDetailed);
+  closeDetailedAlertBtn.addEventListener('touchend', handleCloseDetailed, { passive: false });
+}
+if (clickLocationBtn) {
+  const handleClickLocation = () => enableMapClick();
+  clickLocationBtn.addEventListener('click', handleClickLocation);
+  clickLocationBtn.addEventListener('touchend', handleClickLocation, { passive: false });
+}
+if (alertCurrentBtn) {
+  const handleAlertCurrent = () => alertAtCurrentLocation();
+  alertCurrentBtn.addEventListener('click', handleAlertCurrent);
+  alertCurrentBtn.addEventListener('touchend', handleAlertCurrent, { passive: false });
+}
+if (postAlertBtn) {
+  const handlePostAlert = () => postSelectedAlert();
+  postAlertBtn.addEventListener('click', handlePostAlert);
+  postAlertBtn.addEventListener('touchend', handlePostAlert, { passive: false });
+}
+if (cancelAlertBtn) {
+  const handleCancelAlert = () => {
+    detailedAlertBox.classList.remove('active');
+    detailedAlertBox.style.display = 'none';
+    showToastMessage('Alert creation cancelled.', 5000);
+  };
+  cancelAlertBtn.addEventListener('click', handleCancelAlert);
+  cancelAlertBtn.addEventListener('touchend', handleCancelAlert, { passive: false });
+}
+if (profileBtn) {
+  const handleProfile = () => {
+    profileHud.style.display = 'flex';
+    profileHud.classList.add('active');
+    showToastMessage('Profile opened.', 5000);
+  };
+  profileBtn.addEventListener('click', handleProfile);
+  profileBtn.addEventListener('touchend', handleProfile, { passive: false });
+}
+if (closeBtn) {
+  const handleCloseProfile = () => {
+    profileHud.classList.remove('active');
+    profileHud.style.display = 'none';
+    showToastMessage('Profile closed.', 5000);
+  };
+  closeBtn.addEventListener('click', handleCloseProfile);
+  closeBtn.addEventListener('touchend', handleCloseProfile, { passive: false });
+}
+if (tabButtons) {
+  tabButtons.forEach(button => {
+    const handleTabClick = () => {
+      tabButtons.forEach(btn => btn.classList.remove('active'));
+      button.classList.add('active');
+      currentTab = button.dataset.tab;
+      accountInfo.classList.remove('active');
+      editProfile.classList.remove('active');
+      alertsTab.classList.remove('active');
+      if (currentTab === 'account') accountInfo.classList.add('active');
+      else if (currentTab === 'edit') editProfile.classList.add('active');
+      else if (currentTab === 'alerts') {
+        alertsTab.classList.add('active');
+        updateAlertTable();
+      }
+      showToastMessage(`Switched to ${currentTab} tab.`, 5000);
+    };
+    button.addEventListener('click', handleTabClick);
+    button.addEventListener('touchend', handleTabClick, { passive: false });
+  });
+}
+if (saveProfileBtn) {
+  const handleSaveProfile = () => {
+    const updates = {
+      name: document.getElementById('edit-name')?.value.trim() || '',
+      username: document.getElementById('edit-username')?.value.trim() || '',
+      email: document.getElementById('edit-email')?.value.trim() || '',
+      age: document.getElementById('edit-age')?.value.trim() || '',
+      dob: document.getElementById('edit-dob')?.value.trim() || '',
+      location: document.getElementById('edit-location')?.value.trim() || ''
+    };
+    if (!updates.username || !updates.email) {
+      console.error('Username or email missing in profile update');
+      showToastMessage('Username and email are required.', 7000, true);
+      return;
+    }
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error('No token available for profile update');
+      showToastMessage('Please log in to update profile.', 5000, true);
+      return;
+    }
+    fetchWithTokenRefresh(`${BASE_URL}/api/auth/update`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify(updates)
+    })
+      .then(response => {
+        if (!response.ok) throw new Error(`Profile update failed: ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        userProfile = { ...userProfile, ...data };
+        currentUser = { ...currentUser, username: data.username, id: data._id };
+        updateProfileDisplay();
+        updateEditProfileForm();
+        console.log('Profile updated:', userProfile);
+        showToastMessage('Profile updated successfully.', 5000);
+        profileHud.classList.remove('active');
+        profileHud.style.display = 'none';
+        accountInfo.classList.add('active');
+      })
+      .catch(err => {
+        console.error('Profile update error:', err.message);
+        showToastMessage(`Failed to update profile: ${err.message}`, 7000, true);
+      });
+  };
+  saveProfileBtn.addEventListener('click', handleSaveProfile);
+  saveProfileBtn.addEventListener('touchend', handleSaveProfile, { passive: false });
+}
+if (settingsBtn) {
+  const handleSettings = () => {
+    settingsHud.style.display = 'flex';
+    settingsHud.classList.add('active');
+    showToastMessage('Settings opened.', 5000);
+  };
+  settingsBtn.addEventListener('click', handleSettings);
+  settingsBtn.addEventListener('touchend', handleSettings, { passive: false });
+}
+if (closeSettings) {
+  const handleCloseSettings = () => {
+    settingsHud.classList.remove('active');
+    settingsHud.style.display = 'none';
+    showToastMessage('Settings closed.', 5000);
+  };
+  closeSettings.addEventListener('click', handleCloseSettings);
+  closeSettings.addEventListener('touchend', handleCloseSettings, { passive: false });
+}
+if (loginBtn && loginUsername && loginPassword) {
+  const handleLogin = () => {
+    login(loginUsername.value, loginPassword.value, loginBtn, loginUsername, loginPassword);
+  };
+  loginBtn.addEventListener('click', handleLogin);
+  loginBtn.addEventListener('touchend', handleLogin, { passive: false });
+}
+if (rerouteYes) {
+  const handleRerouteYes = () => rerouteAroundHazards(currentHazards);
+  rerouteYes.addEventListener('click', handleRerouteYes);
+  rerouteYes.addEventListener('touchend', handleRerouteYes, { passive: false });
+}
+if (rerouteNo) {
+  const handleRerouteNo = () => ignoreHazards(currentHazards);
+  rerouteNo.addEventListener('click', handleRerouteNo);
+  rerouteNo.addEventListener('touchend', handleRerouteNo, { passive: false });
+}
+if (detailedAlertBox) {
+  makeDraggable(detailedAlertBox);
+}
+if (addAlertBtn) {
+  const handleAddAlert = () => showDetailedAlertBox();
+  addAlertBtn.addEventListener('click', handleAddAlert);
+  addAlertBtn.addEventListener('touchend', handleAddAlert, { passive: false });
+}
+document.addEventListener('touchstart', (e) => {
+  if (e.touches.length > 1) {
+    e.preventDefault();
+  }
+}, { passive: false });
+document.addEventListener('touchmove', (e) => {
+  if (e.touches.length > 1) {
+    e.preventDefault();
+  }
+}, { passive: false });
+document.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  return false;
+});
+console.timeEnd('DOM initialization');
 });
