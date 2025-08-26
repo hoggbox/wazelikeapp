@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Waze-Like GPS App</title>
+  <style>
+    #map {
+      height: 100vh;
+      width: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <script>
+    // Function to initialize the map
+    function initMap() {
+      // Get user's current location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+          const userLocation = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+
+          // Initialize the map centered on user location
+          const map = new google.maps.Map(document.getElementById('map'), {
+            center: userLocation,
+            zoom: 15, // Close zoom for GPS feel
+            mapId: '2666b5bd496d9c6026f43f82', // Your vector map ID with tilt/rotation enabled
+            tilt: 45, // Enable 3D tilt (45 degrees default)
+            heading: 0, // Initial rotation (0 = north up)
+            mapTypeControl: false, // Hide map type controls for simplicity
+            streetViewControl: false, // Disable Street View
+            rotateControl: true, // Enable rotation control for 360-degree user rotation
+            tiltInteractionEnabled: true // Allow user tilt gestures
+          });
+
+          // Custom bluish triangle marker (SVG icon for arrow-like GPS indicator)
+          const triangleIcon = {
+            path: 'M 0,-1 L -1,1 L 1,1 Z', // Triangle shape
+            fillColor: '#00BFFF', // Bluish color (deep sky blue)
+            fillOpacity: 1,
+            strokeWeight: 0,
+            scale: 10, // Size
+            anchor: new google.maps.Point(0, 0), // Center it
+            rotation: 0 // Initial direction (can update with heading later)
+          };
+
+          // Add marker at user's location
+          new google.maps.Marker({
+            position: userLocation,
+            map: map,
+            icon: triangleIcon,
+            title: 'Your Location'
+          });
+
+          // Optional: Watch for location updates (for moving GPS simulation)
+          navigator.geolocation.watchPosition(updatePosition => {
+            const newLocation = {
+              lat: updatePosition.coords.latitude,
+              lng: updatePosition.coords.longitude
+            };
+            map.setCenter(newLocation); // Recenter on movement
+          }, err => console.error('Location update error:', err), {
+            enableHighAccuracy: true // Better accuracy for GPS
+          });
+
+        }, err => {
+          console.error('Geolocation error:', err);
+          alert('Unable to get your location. Please enable location services.');
+        }, {
+          enableHighAccuracy: true
+        });
+      } else {
+        alert('Geolocation not supported by this browser.');
+      }
+    }
+  </script>
+
+  <!-- Load Google Maps JS API with your key and callback -->
+  <script async defer
+    src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&callback=initMap&libraries=places">
+  </script>
+</body>
+</html>
