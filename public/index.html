@@ -1861,47 +1861,100 @@
           const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
           minDist = Math.min(minDist, distToSegment);
         }
+        console.log('Checking if hazard is avoided, min distance:', minDist, 'Buffer:', BUFFER);
         return minDist > BUFFER;
       }
       async function calculateRouteWithHazards(directionsService, directionsRenderer, origin, destination, hazardData) {
-        const waypoints = [];
-        hazardData.forEach(hazard => {
-          // Simple example: add a waypoint offset from the hazard
-          const offsetLat = hazard.location.coordinates[1] + 0.001;
-          const offsetLng = hazard.location.coordinates[0] + 0.001;
-
-          waypoints.push({
-            location: { lat: offsetLat, lng: offsetLng },
-            stopover: false, // Ensure the waypoint is for passing through
-          });
-        });
-        const request = {
-          origin: origin,
-          destination: destination,
-          waypoints: waypoints,
-          optimizeWaypoints: true, // Optional: Let the API optimize the order
-          provideRouteAlternatives: true,
-          travelMode: google.maps.TravelMode.DRIVING,
-        };
-        try {
-          const response = await new Promise((resolve, reject) => {
-            directionsService.route(request, (result, status) => {
-              if (status === 'OK') {
-                resolve(result);
-              } else {
-                reject(status);
+        return new Promise(async (resolve) => {
+          if (!origin || !destination) {
+            console.error('Invalid origin or destination for route calculation:', origin, destination);
+            resolve(null);
+            return;
+          }
+          const waypoints = [];
+          for (const hazard of hazardData) {
+            const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+            const path = navState.currentRoute.routes[0].overview_path;
+            let closestIndex = 0;
+            let minDistance = Infinity;
+            path.forEach((point, index) => {
+              const distance = google.maps.geometry.spherical.computeDistanceBetween(hazardLatLng, point);
+              if (distance < minDistance) {
+                minDistance = distance;
+                closestIndex = index;
               }
             });
-          });
-          directionsRenderer.setDirections(response);
-        } catch (e) {
-          console.error("Directions request failed:", e);
-        }
+            const beforePoint = closestIndex > 0 ? path[closestIndex - 1] : path[0];
+            const hazardBearing = google.maps.geometry.spherical.computeHeading(beforePoint, hazardLatLng);
+            const offsetDistance = 0.001; // ~111 meters
+            const offsetPoint = google.maps.geometry.spherical.computeOffset(hazardLatLng, offsetDistance * 111000, hazardBearing + 90); // Perpendicular offset
+            waypoints.push({
+              location: { lat: offsetPoint.lat(), lng: offsetPoint.lng() },
+              stopover: false
+            });
+            console.log('Added waypoint for hazard:', hazard._id, 'at', { lat: offsetPoint.lat(), lng: offsetPoint.lng() });
+          }
+          const request = {
+            origin: origin,
+            destination: destination,
+            waypoints: waypoints,
+            optimizeWaypoints: true,
+            provideRouteAlternatives: true,
+            travelMode: google.maps.TravelMode.DRIVING
+          };
+          try {
+            const response = await new Promise((innerResolve, innerReject) => {
+              directionsService.route(request, (result, status) => {
+                console.log('Directions API response:', { status, routes: result?.routes?.length, routesDetails: result?.routes });
+                if (status === 'OK') {
+                  innerResolve(result);
+                } else {
+                  innerReject(status);
+                }
+              });
+            });
+            const hazardLatLng = new google.maps.LatLng(hazardData[0].location.coordinates[1], hazardData[0].location.coordinates[0]);
+            let bestAlt = null;
+            let bestTimeSaved = -Infinity;
+            const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
+            for (let i = 0; i < response.routes.length; i++) {
+              const alt = response.routes[i];
+              const altPath = alt.overview_path;
+              if (isHazardAvoided(hazardLatLng, altPath)) {
+                const altDuration = alt.legs.reduce((total, leg) => total + leg.duration.value, 0);
+                const timeSaved = currentDuration - altDuration;
+                console.log('Alternative route', i, 'avoids hazard. Time saved:', timeSaved, 'seconds');
+                if (timeSaved > bestTimeSaved) {
+                  bestAlt = alt;
+                  bestTimeSaved = timeSaved;
+                }
+              } else {
+                console.log('Alternative route', i, 'does not avoid hazard');
+              }
+            }
+            if (bestAlt) {
+              navState.alternativeRoute = { ...response, routes: [bestAlt] };
+              directionsRenderer.setDirections(navState.alternativeRoute);
+              const timeSavedMin = Math.round(bestTimeSaved / 60);
+              console.log(`Best alternative route found, time saved: ${timeSavedMin} minutes`);
+              resolve(timeSavedMin);
+            } else {
+              console.log('No alternative route avoids the hazard');
+              resolve(null);
+            }
+          } catch (e) {
+            console.error('Directions request failed:', e);
+            showToast('No alternative routes available for rerouting.');
+            resolve(null);
+          }
+        });
       }
       function showRerouteHud(hazard, timeSaved) {
         const rerouteHudContainer = document.getElementById('reroute-hud-container');
         const rerouteHud = document.getElementById('reroute-hud');
         const hazardMessage = document.getElementById('hazard-message');
+        const acceptButton = document.getElementById('accept-reroute-button');
+        const rejectButton = document.getElementById('reject-reroute-button');
         let timeText = '';
         if (timeSaved > 0) {
           timeText = `saves ${timeSaved} minutes`;
@@ -1910,9 +1963,12 @@
         } else {
           timeText = `adds ${Math.abs(timeSaved)} minutes`;
         }
-        hazardMessage.textContent = `${hazard.type} detected ahead (Votes: ${hazard.votes || 0}). Alternative route ${timeText}. Reroute?`;
+        hazardMessage.textContent = `${hazard.type} detected ahead. Alternative route ${timeText}. Reroute?`;
+        acceptButton.style.display = 'block';
+        rejectButton.style.display = 'block';
         rerouteHud.classList.add('active');
         rerouteHudContainer.classList.add('active');
+        directionsRenderer.setMap(null); // Clear original route
         alternativeRenderer.setMap(map);
         alternativeRenderer.setDirections(navState.alternativeRoute);
         map.setZoom(14);
@@ -1921,7 +1977,7 @@
           speak(`${hazard.type} reported ahead. Alternative route available.`);
         }
         showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available.`);
-        console.log(`Showing reroute HUD for ${hazard.type} at`, hazard.location, 'with votes:', hazard.votes || 0);
+        console.log(`Showing reroute HUD for ${hazard.type} at`, hazard.location);
         navState.alertState = 'OFFERING_REROUTE';
         setTimeout(() => {
           if (navState.alertState === 'OFFERING_REROUTE') {
@@ -1930,6 +1986,8 @@
             navState.currentHazard = null;
             navState.alternativeRoute = null;
             alternativeRenderer.setMap(null);
+            directionsRenderer.setMap(map);
+            directionsRenderer.setDirections(navState.originalRoute);
             rerouteHud.classList.remove('active');
             rerouteHudContainer.classList.remove('active');
             restoreNavigationView();
@@ -1946,6 +2004,7 @@
         }
       }
       function acceptReroute() {
+        console.log('Accept reroute clicked');
         if (navState.alternativeRoute && navState.currentHazard) {
           navState.ignoredHazards.push(navState.currentHazard._id);
           navState.currentRoute = navState.alternativeRoute;
@@ -1961,16 +2020,20 @@
           const rerouteHud = document.getElementById('reroute-hud');
           rerouteHudContainer.classList.remove('active');
           rerouteHud.classList.remove('active');
-          restoreNavigationView();
-          showToast('Alternative route accepted.');
-          console.log('Reroute accepted:', navState.alternativeRoute);
           navState.alertState = 'IDLE';
           navState.alternativeRoute = null;
           navState.currentHazard = null;
           navState.lastRecalculationTime = Date.now();
+          restoreNavigationView();
+          showToast('Alternative route accepted.');
+          console.log('Reroute accepted:', navState.currentRoute);
+        } else {
+          console.error('Cannot accept reroute: No alternative route or hazard');
+          showToast('Error accepting reroute. Please try again.');
         }
       }
       function rejectReroute() {
+        console.log('Reject reroute clicked');
         if (navState.currentHazard) {
           navState.ignoredHazards.push(navState.currentHazard._id);
         }
@@ -1980,20 +2043,20 @@
           directionsRenderer.setMap(null);
           directionsRenderer.setMap(map);
           directionsRenderer.setDirections(navState.currentRoute);
+          alternativeRenderer.setMap(null);
           updateBottomHUD(navState.currentRoute);
           updateHUD(navState.currentRoute, navState.userLocation);
         }
-        alternativeRenderer.setMap(null);
         const rerouteHudContainer = document.getElementById('reroute-hud-container');
         const rerouteHud = document.getElementById('reroute-hud');
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
-        restoreNavigationView();
-        showToast('Reroute rejected, continuing on original route.');
-        console.log('Reroute rejected');
         navState.alertState = 'IDLE';
         navState.alternativeRoute = null;
         navState.currentHazard = null;
+        restoreNavigationView();
+        showToast('Reroute rejected, continuing on original route.');
+        console.log('Reroute rejected');
       }
       function createAlertContent(type, votes) {
         const alertContent = document.createElement('div');
