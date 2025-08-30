@@ -115,7 +115,7 @@ app.post('/api/alerts', async (req, res) => {
     io.emit('alert', alert);
     res.status(201).json({ message: 'Alert saved successfully', alert });
   } catch (error) {
-    console.error('Error saving alert:', error);
+    console.error('Error saving alert:', error.message, error.stack);
     res.status(500).json({ error: 'Failed to save alert' });
   }
 });
@@ -233,7 +233,7 @@ const io = new Server(server, {
 });
 
 // Rate limiting for Socket.IO events
-const rateLimit = new Map();
+const rateLimitMap = new Map();
 const LOCATION_UPDATE_INTERVAL = 1000;
 
 io.on('connection', (socket) => {
@@ -250,11 +250,11 @@ io.on('connection', (socket) => {
       return;
     }
     const now = Date.now();
-    const lastUpdate = rateLimit.get(socket.id) || 0;
+    const lastUpdate = rateLimitMap.get(socket.id) || 0;
     if (now - lastUpdate < LOCATION_UPDATE_INTERVAL) {
       return;
     }
-    rateLimit.set(socket.id, now);
+    rateLimitMap.set(socket.id, now);
     console.log('Location update from', socket.id, ':', data.location);
     socket.broadcast.emit('locationUpdate', data);
   });
@@ -263,11 +263,19 @@ io.on('connection', (socket) => {
   });
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
-    rateLimit.delete(socket.id);
+    rateLimitMap.delete(socket.id);
   });
 });
 
-// Start server
+// Start server with port conflict handling
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode with Socket.IO`);
+}).on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use. Please stop the other process or change PORT.`);
+    process.exit(1);
+  } else {
+    console.error('Server startup error:', err);
+    process.exit(1);
+  }
 });
