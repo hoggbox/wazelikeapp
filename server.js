@@ -17,7 +17,7 @@ app.use(express.json());
 // Rate limiting for API endpoints
 const apiRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit to 100 requests per window
+  max: 200, // Increased to 200 for testing
   message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api', apiRateLimit);
@@ -138,7 +138,8 @@ app.get('/api/markers', async (req, res) => {
           },
           $maxDistance: parseInt(maxDistance)
         }
-      }
+      },
+      timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) } // Recent alerts only
     });
     console.log('Found markers:', markers.length);
     res.status(200).json(markers);
@@ -172,7 +173,7 @@ app.post('/api/hazards-near-route', async (req, res) => {
       bufferedPolygon = turf.flatten(bufferedPolygon);
       bufferedPolygon = bufferedPolygon.features[0];
     }
-    const simplifiedPolygon = turf.simplify(bufferedPolygon, { tolerance: 0.001, highQuality: true });
+    const simplifiedPolygon = turf.simplify(bufferedPolygon, { tolerance: 0.01, highQuality: true }); // Adjusted tolerance for better performance
     if (simplifiedPolygon.geometry.type !== 'Polygon') {
       console.error('Simplified geometry is not a valid polygon:', simplifiedPolygon.geometry.type);
       return res.status(500).json({ error: 'Failed to generate a valid buffer polygon' });
