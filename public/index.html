@@ -1749,7 +1749,7 @@
           return;
         }
         const path = navState.currentRoute.routes[0].overview_path;
-        console.log('Route path points:', path.length);
+        console.log('Route path points: ', path.length);
         const userLatLng = new google.maps.LatLng(navState.userLocation);
         let closestIndex = 0;
         let minDistance = Infinity;
@@ -1760,7 +1760,7 @@
             closestIndex = index;
           }
         });
-        console.log('Closest point index:', closestIndex, 'Distance:', minDistance);
+        console.log('Closest point index: ', closestIndex, 'Distance: ', minDistance);
         let segmentDistance = 0;
         const segmentPath = [];
         for (let i = closestIndex; i < path.length; i++) {
@@ -1779,14 +1779,14 @@
             segmentPath.push(path[i]);
           }
         }
-        console.log('Segment path points:', segmentPath.length, 'Total distance:', segmentDistance);
+        console.log('Segment path points: ', segmentPath.length, 'Total distance: ', segmentDistance);
         if (segmentPath.length < 2) {
           console.warn('Segment path too short for hazard check');
           return;
         }
         const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
         try {
-          console.log('Fetching hazards for polyline:', polyline);
+          console.log('Fetching hazards for polyline: ', polyline);
           const response = await fetch('/api/hazards-near-route', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1797,25 +1797,25 @@
             throw new Error(`HTTP error ${response.status}: ${errorText}`);
           }
           const hazards = await response.json();
-          console.log('Hazard check response:', hazards);
+          console.log('Hazard check response: ', hazards);
           if (hazards.length === 0) {
             console.log('No hazards detected near route');
             return;
           }
           const validHazards = hazards.filter(hazard => {
             if (navState.ignoredHazards.includes(hazard._id)) {
-              console.log('Ignoring previously handled hazard:', hazard._id);
+              console.log('Ignoring previously handled hazard: ', hazard._id);
               return false;
             }
             const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
             const isValid = distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= MAX_REROUTE_DISTANCE;
-            console.log('Hazard:', hazard._id, 'Distance:', distanceToHazard, 'Valid:', isValid);
+            console.log('Hazard: ', hazard._id, 'Distance: ', distanceToHazard, 'Valid: ', isValid);
             return isValid;
           });
           if (validHazards.length > 0) {
             const hazard = validHazards[0];
-            console.log('Valid hazard detected:', hazard);
+            console.log('Valid hazard detected: ', hazard);
             navState.currentHazard = hazard;
             navState.originalRoute = navState.currentRoute;
             const timeSaved = await calculateRouteWithHazards(directionsService, alternativeRenderer, navState.userLocation, navState.destination, validHazards);
@@ -1831,7 +1831,7 @@
             console.log('No valid hazards after filtering');
           }
         } catch (error) {
-          console.error('Error checking hazards:', error);
+          console.error('Error checking hazards: ', error);
           showToast('Unable to check for hazards. Please try again.');
         }
       }
@@ -1861,7 +1861,6 @@
           const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
           minDist = Math.min(minDist, distToSegment);
         }
-        console.log('Checking if hazard is avoided, min distance:', minDist, 'Buffer:', BUFFER);
         return minDist > BUFFER;
       }
       async function calculateRouteWithHazards(directionsService, directionsRenderer, origin, destination, hazardData) {
@@ -1955,6 +1954,8 @@
         const hazardMessage = document.getElementById('hazard-message');
         const acceptButton = document.getElementById('accept-reroute-button');
         const rejectButton = document.getElementById('reject-reroute-button');
+        const confirmButton = document.getElementById('confirm-hazard-button');
+        const dismissButton = document.getElementById('dismiss-hazard-button');
         let timeText = '';
         if (timeSaved > 0) {
           timeText = `saves ${timeSaved} minutes`;
@@ -1966,6 +1967,8 @@
         hazardMessage.textContent = `${hazard.type} detected ahead. Alternative route ${timeText}. Reroute?`;
         acceptButton.style.display = 'block';
         rejectButton.style.display = 'block';
+        confirmButton.style.display = 'block';
+        dismissButton.style.display = 'block';
         rerouteHud.classList.add('active');
         rerouteHudContainer.classList.add('active');
         directionsRenderer.setMap(null); // Clear original route
@@ -1977,7 +1980,7 @@
           speak(`${hazard.type} reported ahead. Alternative route available.`);
         }
         showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available.`);
-        console.log(`Showing reroute HUD for ${hazard.type} at`, hazard.location);
+        console.log(`Showing reroute HUD for ${hazard.type} at`, hazard.location, 'with votes:', hazard.votes || 0);
         navState.alertState = 'OFFERING_REROUTE';
         setTimeout(() => {
           if (navState.alertState === 'OFFERING_REROUTE') {
@@ -2057,6 +2060,49 @@
         restoreNavigationView();
         showToast('Reroute rejected, continuing on original route.');
         console.log('Reroute rejected');
+      }
+      function voteOnHazard(voteType) {
+        console.log(`${voteType} hazard clicked`);
+        if (!navState.currentHazard) {
+          console.warn('No current hazard to vote on');
+          showToast('No hazard selected for voting.');
+          return;
+        }
+        fetch('/api/alerts/vote', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            alertId: navState.currentHazard._id,
+            voteType: voteType,
+            userId: socket.id
+          })
+        })
+          .then(response => response.json())
+          .then(result => {
+            if (result.success) {
+              console.log(`${voteType} vote recorded for hazard:`, navState.currentHazard._id);
+              showToast(`Hazard ${voteType}ed successfully.`);
+              navState.ignoredHazards.push(navState.currentHazard._id);
+              const rerouteHudContainer = document.getElementById('reroute-hud-container');
+              const rerouteHud = document.getElementById('reroute-hud');
+              rerouteHudContainer.classList.remove('active');
+              rerouteHud.classList.remove('active');
+              navState.alertState = 'IDLE';
+              navState.currentHazard = null;
+              navState.alternativeRoute = null;
+              alternativeRenderer.setMap(null);
+              directionsRenderer.setMap(map);
+              directionsRenderer.setDirections(navState.originalRoute);
+              restoreNavigationView();
+            } else {
+              console.error(`Failed to record ${voteType} vote:`, result.error);
+              showToast(`Failed to record ${voteType} vote.`);
+            }
+          })
+          .catch(error => {
+            console.error(`Error recording ${voteType} vote:`, error);
+            showToast(`Error recording ${voteType} vote.`);
+          });
       }
       function createAlertContent(type, votes) {
         const alertContent = document.createElement('div');
