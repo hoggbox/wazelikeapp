@@ -1749,7 +1749,7 @@
           return;
         }
         const path = navState.currentRoute.routes[0].overview_path;
-        console.log('Route path points: ', path.length);
+        console.log('Route path points:', path.length);
         const userLatLng = new google.maps.LatLng(navState.userLocation);
         let closestIndex = 0;
         let minDistance = Infinity;
@@ -1760,7 +1760,7 @@
             closestIndex = index;
           }
         });
-        console.log('Closest point index: ', closestIndex, 'Distance: ', minDistance);
+        console.log('Closest point index:', closestIndex, 'Distance:', minDistance);
         let segmentDistance = 0;
         const segmentPath = [];
         for (let i = closestIndex; i < path.length; i++) {
@@ -1779,14 +1779,14 @@
             segmentPath.push(path[i]);
           }
         }
-        console.log('Segment path points: ', segmentPath.length, 'Total distance: ', segmentDistance);
+        console.log('Segment path points:', segmentPath.length, 'Total distance:', segmentDistance);
         if (segmentPath.length < 2) {
           console.warn('Segment path too short for hazard check');
           return;
         }
         const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
         try {
-          console.log('Fetching hazards for polyline: ', polyline);
+          console.log('Fetching hazards for polyline:', polyline);
           const response = await fetch('/api/hazards-near-route', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1797,25 +1797,25 @@
             throw new Error(`HTTP error ${response.status}: ${errorText}`);
           }
           const hazards = await response.json();
-          console.log('Hazard check response: ', hazards);
+          console.log('Hazard check response:', hazards);
           if (hazards.length === 0) {
             console.log('No hazards detected near route');
             return;
           }
           const validHazards = hazards.filter(hazard => {
             if (navState.ignoredHazards.includes(hazard._id)) {
-              console.log('Ignoring previously handled hazard: ', hazard._id);
+              console.log('Ignoring previously handled hazard:', hazard._id);
               return false;
             }
             const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
             const isValid = distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= MAX_REROUTE_DISTANCE;
-            console.log('Hazard: ', hazard._id, 'Distance: ', distanceToHazard, 'Valid: ', isValid);
+            console.log('Hazard:', hazard._id, 'Distance:', distanceToHazard, 'Valid:', isValid);
             return isValid;
           });
           if (validHazards.length > 0) {
             const hazard = validHazards[0];
-            console.log('Valid hazard detected: ', hazard);
+            console.log('Valid hazard detected:', hazard);
             navState.currentHazard = hazard;
             navState.originalRoute = navState.currentRoute;
             const timeSaved = await calculateRouteWithHazards(directionsService, alternativeRenderer, navState.userLocation, navState.destination, validHazards);
@@ -1831,7 +1831,7 @@
             console.log('No valid hazards after filtering');
           }
         } catch (error) {
-          console.error('Error checking hazards: ', error);
+          console.error('Error checking hazards:', error);
           showToast('Unable to check for hazards. Please try again.');
         }
       }
@@ -1861,6 +1861,7 @@
           const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
           minDist = Math.min(minDist, distToSegment);
         }
+        console.log('Checking if hazard is avoided, min distance:', minDist, 'Buffer:', BUFFER);
         return minDist > BUFFER;
       }
       async function calculateRouteWithHazards(directionsService, directionsRenderer, origin, destination, hazardData) {
@@ -1948,6 +1949,22 @@
           }
         });
       }
+      let toastTimeout = null;
+      function showToast(message, isCountdown = false, seconds = 0) {
+        const toast = document.getElementById('toast');
+        if (toastTimeout) {
+          clearTimeout(toastTimeout);
+          toastTimeout = null;
+        }
+        toast.textContent = message;
+        toast.classList.add('visible-toast');
+        if (!isCountdown) {
+          toastTimeout = setTimeout(() => {
+            toast.classList.remove('visible-toast');
+            toastTimeout = null;
+          }, 3000);
+        }
+      }
       function showRerouteHud(hazard, timeSaved) {
         const rerouteHudContainer = document.getElementById('reroute-hud-container');
         const rerouteHud = document.getElementById('reroute-hud');
@@ -1964,7 +1981,7 @@
         } else {
           timeText = `adds ${Math.abs(timeSaved)} minutes`;
         }
-        hazardMessage.textContent = `${hazard.type} detected ahead. Alternative route ${timeText}. Reroute?`;
+        hazardMessage.textContent = `${hazard.type} detected ahead (Votes: ${hazard.votes || 0}). Alternative route ${timeText}. Reroute?`;
         acceptButton.style.display = 'block';
         rejectButton.style.display = 'block';
         confirmButton.style.display = 'block';
@@ -1979,23 +1996,56 @@
         if (navState.voicePrompts) {
           speak(`${hazard.type} reported ahead. Alternative route available.`);
         }
-        showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available.`);
-        console.log(`Showing reroute HUD for ${hazard.type} at`, hazard.location, 'with votes:', hazard.votes || 0);
-        navState.alertState = 'OFFERING_REROUTE';
-        setTimeout(() => {
-          if (navState.alertState === 'OFFERING_REROUTE') {
-            console.log('Reroute HUD timed out, resetting state');
-            navState.alertState = 'IDLE';
-            navState.currentHazard = null;
-            navState.alternativeRoute = null;
-            alternativeRenderer.setMap(null);
-            directionsRenderer.setMap(map);
-            directionsRenderer.setDirections(navState.originalRoute);
-            rerouteHud.classList.remove('active');
-            rerouteHudContainer.classList.remove('active');
-            restoreNavigationView();
+        let countdown = 15;
+        showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available. Closing in ${countdown}s...`, true);
+        const countdownInterval = setInterval(() => {
+          countdown--;
+          if (countdown > 0) {
+            showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available. Closing in ${countdown}s...`, true);
+          } else {
+            showToast('Reroute HUD closed, continuing on original route.');
+            clearInterval(countdownInterval);
+            if (navState.alertState === 'OFFERING_REROUTE') {
+              console.log('Reroute HUD timed out, resetting state');
+              navState.alertState = 'IDLE';
+              navState.currentHazard = null;
+              navState.alternativeRoute = null;
+              navState.ignoredHazards.push(hazard._id);
+              alternativeRenderer.setMap(null);
+              directionsRenderer.setMap(map);
+              directionsRenderer.setDirections(navState.originalRoute);
+              rerouteHud.classList.remove('active');
+              rerouteHudContainer.classList.remove('active');
+              restoreNavigationView();
+            }
           }
-        }, REROUTE_HUD_TIMEOUT);
+        }, 1000);
+        navState.alertState = 'OFFERING_REROUTE';
+        const clearCountdown = () => {
+          clearInterval(countdownInterval);
+          if (toastTimeout) {
+            clearTimeout(toastTimeout);
+            toastTimeout = null;
+          }
+          document.getElementById('toast').classList.remove('visible-toast');
+        };
+        acceptButton.onclick = () => {
+          clearCountdown();
+          acceptReroute();
+        };
+        rejectButton.onclick = () => {
+          clearCountdown();
+          rejectReroute();
+        };
+        confirmButton.onclick = () => {
+          clearCountdown();
+          voteOnHazard('confirm');
+        };
+        dismissButton.onclick = () => {
+          clearCountdown();
+          voteOnHazard('dismiss');
+        };
+        console.log(`Showing reroute HUD for ${hazard.type} at`, hazard.location, 'with votes:', hazard.votes || 0);
       }
       function restoreNavigationView() {
         if (navState.isFollowing) {
@@ -2081,19 +2131,9 @@
           .then(result => {
             if (result.success) {
               console.log(`${voteType} vote recorded for hazard:`, navState.currentHazard._id);
-              showToast(`Hazard ${voteType}ed successfully.`);
+              showToast(`Hazard ${voteType}ed successfully. Select another action or close the HUD.`);
+              // Keep HUD open for further actions
               navState.ignoredHazards.push(navState.currentHazard._id);
-              const rerouteHudContainer = document.getElementById('reroute-hud-container');
-              const rerouteHud = document.getElementById('reroute-hud');
-              rerouteHudContainer.classList.remove('active');
-              rerouteHud.classList.remove('active');
-              navState.alertState = 'IDLE';
-              navState.currentHazard = null;
-              navState.alternativeRoute = null;
-              alternativeRenderer.setMap(null);
-              directionsRenderer.setMap(map);
-              directionsRenderer.setDirections(navState.originalRoute);
-              restoreNavigationView();
             } else {
               console.error(`Failed to record ${voteType} vote:`, result.error);
               showToast(`Failed to record ${voteType} vote.`);
@@ -2141,38 +2181,6 @@
           alertContent.appendChild(voteBadge);
         }
         return alertContent;
-      }
-      function showToast(message) {
-        const toast = document.getElementById('toast');
-        toast.textContent = message;
-        toast.classList.add('visible-toast');
-        setTimeout(() => {
-          toast.classList.remove('visible-toast');
-        }, 3000);
-      }
-      function fetchSpeedLimit(lat, lng) {
-        const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-        if (speedLimitCache.has(cacheKey)) {
-          console.log('Speed limit from cache:', cacheKey);
-          return Promise.resolve(speedLimitCache.get(cacheKey));
-        }
-        return fetch(`https://roads.googleapis.com/v1/speedLimits?path=${lat},${lng}&key=${ROADS_API_KEY}`)
-          .then(response => response.json())
-          .then(data => {
-            if (data.speedLimits && data.speedLimits[0]) {
-              const speedLimit = data.speedLimits[0].speedLimit; // in km/h
-              const speedLimitMph = Math.round(speedLimit / 1.60934); // Convert to mph
-              speedLimitCache.set(cacheKey, speedLimitMph);
-              console.log('Fetched speed limit:', speedLimitMph, 'mph for', cacheKey);
-              return speedLimitMph;
-            }
-            console.warn('No speed limit data available for:', cacheKey);
-            return null;
-          })
-          .catch(error => {
-            console.error('Error fetching speed limit:', error);
-            return null;
-          });
       }
       function speak(text) {
         if (!navState.voicePrompts || lastSpokenInstruction === text) return;
