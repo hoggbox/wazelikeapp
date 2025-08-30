@@ -1137,9 +1137,15 @@
         }
       }
       function closeAllHuds() {
-        document.getElementById('report-box').classList.remove('active');
-        document.getElementById('reroute-hud-container').classList.remove('active');
-        document.getElementById('settings-hud-container').classList.remove('active');
+        const reportBox = document.getElementById('report-box');
+        const rerouteHudContainer = document.getElementById('reroute-hud-container');
+        const settingsHudContainer = document.getElementById('settings-hud-container');
+        reportBox.classList.remove('active');
+        if (navState.alertState !== 'OFFERING_REROUTE') {
+          rerouteHudContainer.classList.remove('active');
+          document.getElementById('reroute-hud').classList.remove('active');
+        }
+        settingsHudContainer.classList.remove('active');
         if (navState.tempMarker) {
           navState.tempMarker.map = null;
           navState.tempMarker = null;
@@ -1148,9 +1154,11 @@
           google.maps.event.removeListener(navState.mapClickListener);
           navState.mapClickListener = null;
         }
-        navState.alertState = 'IDLE';
-        navState.tempAlertData = null;
-        console.log('All HUDs closed');
+        if (navState.alertState !== 'OFFERING_REROUTE') {
+          navState.alertState = 'IDLE';
+          navState.tempAlertData = null;
+        }
+        console.log('All HUDs closed (except reroute HUD if active)');
       }
       function recenterNonNavigation() {
         if (map) {
@@ -1569,7 +1577,10 @@
         }, REROUTE_CHECK_INTERVAL);
       }
       async function checkHazardsAndOfferReroute() {
-        if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') return;
+        if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || !navState.userLocation || navState.alertState === 'OFFERING_REROUTE') {
+          console.log('Hazard check skipped: Invalid state or navigation not active');
+          return;
+        }
         const path = navState.currentRoute.routes[0].overview_path;
         const userLatLng = new google.maps.LatLng(navState.userLocation);
         let closestIndex = 0;
@@ -1623,18 +1634,34 @@
                 showRerouteHud(hazard, timeSaved);
               } else {
                 console.log('No suitable alternative route found that avoids the hazard.');
-                showToast('Hazard detected, but no alternative route available that avoids it.');
+                showToast('Hazard detected, but no alternative route available.');
                 navState.ignoredHazards.push(hazard._id);
+                navState.currentHazard = null;
+                navState.alternativeRoute = null;
+                navState.alertState = 'IDLE';
+                // Schedule a recheck after a short delay to handle transient failures
+                setTimeout(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
               }
             } else {
               console.log('No valid hazards ahead after filtering.');
+              navState.currentHazard = null;
+              navState.alternativeRoute = null;
+              navState.alertState = 'IDLE';
             }
           } else {
             console.log('No hazards detected near route.');
+            navState.currentHazard = null;
+            navState.alternativeRoute = null;
+            navState.alertState = 'IDLE';
           }
         } catch (error) {
           console.error('Error checking hazards:', error);
-          showToast('Unable to check for hazards. Please try again.');
+          showToast('Unable to check for hazards. Retrying...');
+          navState.currentHazard = null;
+          navState.alternativeRoute = null;
+          navState.alertState = 'IDLE';
+          // Schedule a recheck after a short delay
+          setTimeout(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
         }
       }
       function projectPointToLine(p, a, b) {
@@ -1679,7 +1706,7 @@
               travelMode: google.maps.TravelMode.DRIVING,
               provideRouteAlternatives: true
             },
-            (response, status) => {
+                        (response, status) => {
               if (status === 'OK' && response.routes && response.routes.length > 1) {
                 const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
                 const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
@@ -1730,8 +1757,11 @@
           timeText = `adds ${Math.abs(timeSaved)} minutes`;
         }
         hazardMessage.textContent = `${hazard.type} detected ahead. Alternative route ${timeText} and avoids the hazard. Reroute?`;
-        rerouteHud.classList.add('active');
+        rerouteHudContainer.style.display = 'flex';
+        rerouteHudContainer.style.zIndex = '100';
         rerouteHudContainer.classList.add('active');
+        rerouteHud.style.display = 'flex';
+        rerouteHud.classList.add('active');
         alternativeRenderer.setMap(map);
         alternativeRenderer.setDirections(navState.alternativeRoute);
         map.setZoom(14);
@@ -1764,14 +1794,16 @@
           const rerouteHudContainer = document.getElementById('reroute-hud-container');
           const rerouteHud = document.getElementById('reroute-hud');
           rerouteHudContainer.classList.remove('active');
+          rerouteHudContainer.style.display = 'none';
           rerouteHud.classList.remove('active');
+          rerouteHud.style.display = 'none';
           restoreNavigationView();
           showToast('Alternative route accepted.');
           console.log('Reroute accepted:', navState.alternativeRoute);
           navState.alertState = 'IDLE';
           navState.alternativeRoute = null;
           navState.currentHazard = null;
-          navState.lastRecalculationTime = Date.now(); // Update recalculation time
+          navState.lastRecalculationTime = Date.now();
         }
       }
       function rejectReroute() {
@@ -1791,7 +1823,9 @@
         const rerouteHudContainer = document.getElementById('reroute-hud-container');
         const rerouteHud = document.getElementById('reroute-hud');
         rerouteHudContainer.classList.remove('active');
+        rerouteHudContainer.style.display = 'none';
         rerouteHud.classList.remove('active');
+        rerouteHud.style.display = 'none';
         restoreNavigationView();
         showToast('Reroute rejected, continuing on original route.');
         console.log('Reroute rejected');
@@ -1880,4 +1914,3 @@
   </script>
 </body>
 </html>
-</xaiArtifact>
