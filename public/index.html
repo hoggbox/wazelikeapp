@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -146,13 +145,15 @@
       font-size: 0.9rem;
       color: #555;
     }
-    #hazard-button, #recenter-button, #settings-button {
+    #hazard-button {
       position: fixed;
+      bottom: 40vh;
       right: 2vw;
       width: 5vw;
       height: 5vw;
       max-width: 40px;
       max-height: 40px;
+      background: #ff4444;
       border: 0.1rem solid #fff;
       border-radius: 50%;
       box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
@@ -161,10 +162,6 @@
       align-items: center;
       justify-content: center;
       cursor: pointer;
-    }
-    #hazard-button {
-      bottom: 40vh;
-      background: #ff4444;
     }
     #hazard-button::before {
       content: '+';
@@ -176,8 +173,22 @@
       background: #cc0000;
     }
     #recenter-button {
+      position: fixed;
       bottom: 32vh;
+      right: 2vw;
+      width: 5vw;
+      height: 5vw;
+      max-width: 40px;
+      max-height: 40px;
       background: #4CAF50;
+      border: 0.1rem solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
     }
     #recenter-button::before {
       content: '↻';
@@ -188,20 +199,6 @@
     #recenter-button:hover {
       background: #45a049;
     }
-    #settings-button {
-      bottom: 24vh;
-      background: #2196F3;
-    }
-    #settings-button::before {
-      content: '\f013';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #fff;
-      font-size: 1.2rem;
-    }
-    #settings-button:hover {
-      background: #1976D2;
-    }
     .report-container {
       position: fixed;
       top: 0;
@@ -211,7 +208,7 @@
       pointer-events: none;
       z-index: 15;
     }
-    #report-box, #reroute-hud-container, #settings-hud-container {
+    #report-box {
       position: absolute;
       top: 50%;
       left: 50%;
@@ -230,14 +227,13 @@
       overflow-y: auto;
       max-height: 80vh;
       color: white;
-      z-index: 100;
     }
-    #report-box.active, #reroute-hud-container.active, #settings-hud-container.active {
+    #report-box.active {
       display: flex;
-      transform: translate(-50%, -50%);
+      transform: translate(-50%, -50%) translateY(0);
       visibility: visible;
     }
-    #report-box::before, #reroute-hud-container::before, #settings-hud-container::before {
+    #report-box::before {
       content: '';
       position: fixed;
       top: 0;
@@ -248,16 +244,17 @@
       z-index: -1;
       display: none;
     }
-    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before {
+    #report-box.active::before {
       display: block;
     }
-    #report-box header, #reroute-hud-container header, #settings-hud-container header {
+    #report-box header {
       width: 100%;
       padding: 1vmin 0;
       position: relative;
       margin-bottom: 1vmin;
+      cursor: move;
     }
-    #report-close, #reroute-close, #settings-close {
+    #report-close {
       position: absolute;
       top: 0.5vmin;
       right: 0.5vmin;
@@ -271,7 +268,7 @@
       font-weight: bold;
       z-index: 1;
     }
-    #report-close:hover, #reroute-close:hover, #settings-close:hover {
+    #report-close:hover {
       background: #b71c1c;
     }
     .report-options {
@@ -354,6 +351,90 @@
     #cancel-alert-button:hover {
       background-color: #b71c1c;
     }
+    #toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 0.8vmin 1.5vmin;
+      border-radius: 0.4rem;
+      z-index: 1001;
+      transition: opacity 0.5s;
+      opacity: 0;
+      font-size: clamp(10px, 2vmin, 14px);
+      pointer-events: none;
+      max-width: 90vw;
+      text-align: center;
+    }
+    #toast.visible-toast {
+      opacity: 1;
+    }
+    #reroute-hud-container {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) translateY(100%);
+      width: 80vw;
+      max-width: 300px;
+      background: rgba(0, 0, 0, 0.7);
+      border-radius: 0.5rem;
+      padding: 1vmin;
+      pointer-events: auto;
+      display: none;
+      flex-direction: column;
+      transition: transform 0.3s ease;
+      transform-origin: center;
+      visibility: visible;
+      overflow-y: auto;
+      max-height: 80vh;
+      color: white;
+      z-index: 16;
+    }
+    #reroute-hud-container.active {
+      display: flex;
+      transform: translate(-50%, -50%) translateY(0);
+      visibility: visible;
+    }
+    #reroute-hud-container::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.3);
+      z-index: -1;
+      display: none;
+    }
+    #reroute-hud-container.active::before {
+      display: block;
+    }
+    #reroute-hud-container header {
+      width: 100%;
+      padding: 1vmin 0;
+      position: relative;
+      margin-bottom: 1vmin;
+      cursor: move;
+    }
+    #reroute-close {
+      position: absolute;
+      top: 0.5vmin;
+      right: 0.5vmin;
+      background: #d32f2f;
+      color: white;
+      border: none;
+      padding: 0.5vmin 1vmin;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(12px, 2.5vmin, 16px);
+      font-weight: bold;
+      z-index: 1;
+    }
+    #reroute-close:hover {
+      background: #b71c1c;
+    }
     #reroute-hud {
       display: none;
       flex-direction: column;
@@ -395,136 +476,35 @@
     #reject-reroute-button:hover {
       background-color: #b71c1c;
     }
-    #settings-tabs {
-      display: flex;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.3);
-      margin-bottom: 1.5vmin;
-    }
-    .settings-tab {
-      flex: 1;
-      padding: 0.5vmin;
-      text-align: center;
-      cursor: pointer;
-      font-size: clamp(12px, 2.2vmin, 16px);
-      color: rgba(255, 255, 255, 0.7);
-      transition: color 0.2s, border-bottom 0.2s;
-    }
-    .settings-tab.active {
-      color: white;
-      border-bottom: 2px solid #4CAF50;
-    }
-    .settings-tab:hover {
-      color: white;
-    }
-    #settings-content {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 1.5vmin;
-      padding: 1.5vmin;
-    }
-    .settings-option {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: clamp(10px, 2vmin, 14px);
-      padding-bottom: 1vmin;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-    .settings-option:last-child {
-      border-bottom: none;
-    }
-    .settings-option label {
-      color: white;
-      font-weight: 600;
-    }
-    .settings-option select {
-      padding: 0.5vmin;
-      border-radius: 0.3rem;
-      border: none;
-      font-size: clamp(10px, 2vmin, 14px);
-      background: #333;
-      color: white;
-      width: 50%;
-      transition: background 0.2s;
-    }
-    .settings-option select:hover {
-      background: #444;
-    }
-    .settings-option input[type="checkbox"] {
-      appearance: none;
-      width: 1.5rem;
-      height: 1.5rem;
-      background: #555;
-      border-radius: 0.3rem;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-    .settings-option input[type="checkbox"]:checked {
-      background: #333;
-      position: relative;
-    }
-    .settings-option input[type="checkbox"]:checked::before {
-      content: '\f00c';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #4CAF50;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 1rem;
-    }
-    .settings-option input[type="checkbox"]:hover {
-      background: #666;
-    }
-    #toast {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background-color: rgba(0, 0, 0, 0.7);
-      color: white;
-      padding: 0.8vmin 1.5vmin;
-      border-radius: 0.4rem;
-      z-index: 1001;
-      transition: opacity 0.5s;
-      opacity: 0;
-      font-size: clamp(10px, 2vmin, 14px);
-      pointer-events: none;
-      max-width: 90vw;
-      text-align: center;
-    }
-    #toast.visible-toast {
-      opacity: 1;
-    }
     @media (max-width: 414px) {
-      #hazard-button, #recenter-button, #settings-button {
+      #hazard-button {
         width: 8vw;
         height: 8vw;
         max-width: 32px;
         max-height: 32px;
+        bottom: 40vh;
         right: 3vw;
       }
-      #hazard-button {
-        bottom: 40vh;
-      }
-      #recenter-button {
-        bottom: 32vh;
-      }
-      #settings-button {
-        bottom: 24vh;
-      }
-      #hazard-button::before, #recenter-button::before, #settings-button::before {
+      #hazard-button::before {
         font-size: 1rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container {
+      #recenter-button {
+        width: 8vw;
+        height: 8vw;
+        max-width: 32px;
+        max-height: 32px;
+        bottom: 32vh;
+        right: 3vw;
+      }
+      #recenter-button::before {
+        font-size: 1rem;
+      }
+      #report-box {
         width: 90vw;
         max-width: none;
         padding: 1.5vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header {
+      #report-box header {
         padding: 1vmin 0;
         margin-bottom: 1vmin;
       }
@@ -542,33 +522,45 @@
         width: 90vw;
         max-width: none;
       }
+      #reroute-hud-container {
+        width: 90vw;
+        max-width: none;
+        padding: 1.5vmin;
+      }
+      #reroute-hud-container header {
+        padding: 1vmin 0;
+        margin-bottom: 1vmin;
+      }
     }
     @media (min-width: 415px) and (max-width: 768px) {
-      #hazard-button, #recenter-button, #settings-button {
+      #hazard-button {
         width: 6vw;
         height: 6vw;
         max-width: 36px;
         max-height: 36px;
+        bottom: 40vh;
         right: 2.5vw;
       }
-      #hazard-button {
-        bottom: 40vh;
-      }
-      #recenter-button {
-        bottom: 32vh;
-      }
-      #settings-button {
-        bottom: 24vh;
-      }
-      #hazard-button::before, #recenter-button::before, #settings-button::before {
+      #hazard-button::before {
         font-size: 1.1rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container {
+      #recenter-button {
+        width: 6vw;
+        height: 6vw;
+        max-width: 36px;
+        max-height: 36px;
+        bottom: 32vh;
+        right: 2.5vw;
+      }
+      #recenter-button::before {
+        font-size: 1.1rem;
+      }
+      #report-box {
         width: 80vw;
         max-width: 320px;
         padding: 1.2vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header {
+      #report-box header {
         padding: 1vmin 0;
         margin-bottom: 1vmin;
       }
@@ -583,33 +575,45 @@
         width: 80vw;
         max-width: 320px;
       }
+      #reroute-hud-container {
+        width: 80vw;
+        max-width: 320px;
+        padding: 1.2vmin;
+      }
+      #reroute-hud-container header {
+        padding: 1vmin 0;
+        margin-bottom: 1vmin;
+      }
     }
     @media (min-width: 769px) {
-      #hazard-button, #recenter-button, #settings-button {
+      #hazard-button {
         width: 5vw;
         height: 5vw;
         max-width: 40px;
         max-height: 40px;
+        bottom: 40vh;
         right: 2vw;
       }
-      #hazard-button {
-        bottom: 40vh;
-      }
-      #recenter-button {
-        bottom: 32vh;
-      }
-      #settings-button {
-        bottom: 24vh;
-      }
-      #hazard-button::before, #recenter-button::before, #settings-button::before {
+      #hazard-button::before {
         font-size: 1.2rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container {
+      #recenter-button {
+        width: 5vw;
+        height: 5vw;
+        max-width: 40px;
+        max-height: 40px;
+        bottom: 32vh;
+        right: 2vw;
+      }
+      #recenter-button::before {
+        font-size: 1.2rem;
+      }
+      #report-box {
         width: 30vw;
         max-width: 300px;
         padding: 1vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header {
+      #report-box header {
         padding: 1vmin 0;
         margin-bottom: 1vmin;
       }
@@ -623,6 +627,15 @@
       #toast {
         width: 30vw;
         max-width: 300px;
+      }
+      #reroute-hud-container {
+        width: 30vw;
+        max-width: 300px;
+        padding: 1vmin;
+      }
+      #reroute-hud-container header {
+        padding: 1vmin 0;
+        margin-bottom: 1vmin;
       }
     }
   </style>
@@ -647,7 +660,6 @@
   </div>
   <div id="hazard-button"></div>
   <div id="recenter-button"></div>
-  <div id="settings-button"></div>
   <div class="report-container">
     <div id="report-box">
       <header>
@@ -684,57 +696,6 @@
       <button id="reject-reroute-button">Reject</button>
     </div>
   </div>
-  <div id="settings-hud-container">
-    <header>
-      <button id="settings-close">X</button>
-    </header>
-    <div id="settings-tabs">
-      <div class="settings-tab active" data-tab="map-settings">Map Settings</div>
-      <div class="settings-tab" data-tab="profile">Profile</div>
-    </div>
-    <div id="settings-content">
-      <div id="map-settings" class="settings-tab-content">
-        <div class="settings-option">
-          <label for="traffic-layer-toggle">Show Traffic Layer</label>
-          <input type="checkbox" id="traffic-layer-toggle">
-        </div>
-        <div class="settings-option">
-          <label for="main-route-color">Main Route Color</label>
-          <select id="main-route-color">
-            <option value="#4285F4">Blue</option>
-            <option value="#FF0000">Red</option>
-            <option value="#008000">Green</option>
-            <option value="#800080">Purple</option>
-          </select>
-        </div>
-        <div class="settings-option">
-          <label for="alt-route-color">Alternate Route Color</label>
-          <select id="alt-route-color">
-            <option value="#FFA500">Orange</option>
-            <option value="#FFFF00">Yellow</option>
-            <option value="#FF69B4">Pink</option>
-            <option value="#00CED1">Cyan</option>
-          </select>
-        </div>
-        <div class="settings-option">
-          <label for="map-type">Map Type</label>
-          <select id="map-type">
-            <option value="roadmap">Roadmap</option>
-            <option value="satellite">Satellite</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="terrain">Terrain</option>
-          </select>
-        </div>
-        <div class="settings-option">
-          <label for="auto-recenter-toggle">Auto-Recenter</label>
-          <input type="checkbox" id="auto-recenter-toggle" checked>
-        </div>
-      </div>
-      <div id="profile" class="settings-tab-content" style="display: none;">
-        <p>Profile settings coming soon...</p>
-      </div>
-    </div>
-  </div>
   <div id="toast"></div>
   <script>
     let map;
@@ -743,12 +704,11 @@
     let directionsService;
     let directionsRenderer;
     let alternativeRenderer;
-    let trafficLayer;
     let watchId;
     let navState = {
       currentRoute: null,
       isNavigating: false,
-      isFollowing: localStorage.getItem('isFollowing') === 'true' ? true : false,
+      isFollowing: true,
       destination: null,
       userLocation: { lat: 33.083270, lng: -83.233040 },
       previousUserLocation: null,
@@ -762,30 +722,19 @@
       tempMarker: null,
       tempAlertData: null,
       alternativeRoute: null,
-      originalRoute: null,
       mapClickListener: null,
       ignoredHazards: [],
-      currentHazard: null,
-      navigationZoom: 18,
-      mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
-      altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
-      mapType: localStorage.getItem('mapType') || 'roadmap',
-      showTraffic: localStorage.getItem('showTraffic') === 'true',
-      lastRecalculationTime: 0
+      currentHazard: null
     };
     const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
     const mapId = '2666b5bd496d9c6026f43f82';
     const MAX_RETRIES = 3;
     let retryCount = 0;
     const socket = io();
-    const REROUTE_CHECK_INTERVAL = 10000; // 10 seconds
-    const OFF_ROUTE_TOLERANCE = 100; // 100 meters
-    const RECALC_COOLDOWN = 30000; // 30 seconds cooldown
-    const HAZARD_CHECK_INTERVAL = 5000; // 5 seconds
-    const MIN_REROUTE_DISTANCE = 500; // 500 meters
-    const MAX_REROUTE_DISTANCE = 3218.69; // ~2 miles
-    const MIN_ALERT_DISTANCE = 152.4; // 500 feet
-    const HAZARD_RADIUS = 50; // 50 meters for hazard proximity check
+    const REROUTE_CHECK_INTERVAL = 30000; // 30 seconds
+    const OFF_ROUTE_TOLERANCE = 50; // meters
+    const HAZARD_CHECK_INTERVAL = 5000; // 5 seconds for timely alerts
+    const MIN_REROUTE_DISTANCE = 500; // Minimum distance (meters) to hazard for reroute prompt
     window.addEventListener('deviceorientation', (event) => {
       if (event.webkitCompassHeading) {
         navState.deviceHeading = event.webkitCompassHeading;
@@ -802,7 +751,6 @@
     function adjustHud() {
       const reportBox = document.getElementById('report-box');
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
-      const settingsHudContainer = document.getElementById('settings-hud-container');
       const currentWidth = window.innerWidth;
       const currentHeight = window.innerHeight;
       const maxHeight = Math.min(currentHeight * 0.5, 400);
@@ -812,10 +760,7 @@
       rerouteHudContainer.style.maxHeight = `${maxHeight}px`;
       rerouteHudContainer.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
       rerouteHudContainer.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
-      settingsHudContainer.style.maxHeight = `${maxHeight}px`;
-      settingsHudContainer.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
-      settingsHudContainer.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
-      console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
+      console.log('Huds adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
     }
     async function initMap() {
       if (!window.google || !google.maps) {
@@ -823,7 +768,7 @@
         showToast('Failed to load map. Please check your network or API key.');
         return;
       }
-      const { Map, TrafficLayer } = await google.maps.importLibrary("maps");
+      const { Map } = await google.maps.importLibrary("maps");
       const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
       const { PlacesService, Autocomplete } = await google.maps.importLibrary("places");
       const { DirectionsService, DirectionsRenderer } = await google.maps.importLibrary("routes");
@@ -848,7 +793,7 @@
             };
             navState.deviceHeading = position.coords.heading || null;
             console.log('Initial location:', navState.userLocation, 'Heading:', navState.deviceHeading);
-            initializeMap(Map, AdvancedMarkerElement, PlacesService, Autocomplete, DirectionsService, DirectionsRenderer, spherical, encoding, TrafficLayer);
+            initializeMap(Map, AdvancedMarkerElement, PlacesService, Autocomplete, DirectionsService, DirectionsRenderer, spherical, encoding);
           },
           (error) => {
             console.error('Initial geolocation error:', error);
@@ -865,7 +810,7 @@
         handleGeolocationError({ code: 0 }, true);
       }
     }
-    function initializeMap(Map, AdvancedMarkerElement, PlacesService, Autocomplete, DirectionsService, DirectionsRenderer, spherical, encoding, TrafficLayer) {
+    function initializeMap(Map, AdvancedMarkerElement, PlacesService, Autocomplete, DirectionsService, DirectionsRenderer, spherical, encoding) {
       map = new Map(document.getElementById('map'), {
         center: navState.userLocation,
         zoom: 15,
@@ -878,28 +823,23 @@
         clickableIcons: false,
         renderer: 'WEBGL'
       });
-      map.setMapTypeId(navState.mapType);
-      trafficLayer = new TrafficLayer({ map: navState.showTraffic ? map : null });
       directionsService = new DirectionsService();
       directionsRenderer = new DirectionsRenderer({
         map: map,
         suppressMarkers: true,
-        preserveViewport: false,
+        preserveViewport: true,
         polylineOptions: {
-          strokeColor: navState.mainRouteColor,
+          strokeColor: '#4285F4',
           strokeWeight: 6,
-          strokeOpacity: 0.8,
-          zIndex: 5
+          strokeOpacity: 0.8
         }
       });
       alternativeRenderer = new DirectionsRenderer({
         map: null,
         suppressMarkers: true,
         polylineOptions: {
-          strokeColor: navState.altRouteColor,
-          strokeOpacity: 0.8,
-          strokeWeight: 4,
-          zIndex: 10,
+          strokeColor: '#FFA500',
+          strokeOpacity: 0,
           icons: [{
             icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
             offset: '0',
@@ -914,7 +854,7 @@
       markerElement.style.backgroundColor = '#4285F4';
       markerElement.style.borderRadius = '50%';
       markerElement.style.border = '2px solid white';
-      markerElement.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
+      markerElement.style.boxShadow = '0 0 5px rgba(0, 0, 0, 0.5)';
       markerElement.style.transform = 'rotate(0deg)';
       userMarker = new AdvancedMarkerElement({
         map: map,
@@ -952,12 +892,6 @@
           showToast('Invalid address selected. Please try again.');
         }
       });
-      // Load saved settings
-      document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
-      document.getElementById('main-route-color').value = navState.mainRouteColor;
-      document.getElementById('alt-route-color').value = navState.altRouteColor;
-      document.getElementById('map-type').value = navState.mapType;
-      document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
       fetchAndDisplayMarkers(map, navState.userLocation);
       socket.on('alert', (alert) => {
         new AdvancedMarkerElement({
@@ -971,18 +905,13 @@
         });
         console.log('Received real-time alert:', alert);
         if (navState.isNavigating) {
-          console.log('Triggering hazard check due to new alert');
           checkHazardsAndOfferReroute();
         }
       });
       document.getElementById('start-button').addEventListener('click', startGPS);
       document.getElementById('bottom-hud-stop').addEventListener('click', stopGPS);
       document.getElementById('hazard-button').addEventListener('click', () => {
-        if (navState.alertState === 'OFFERING_REROUTE') {
-          console.log('Hazard button ignored: Reroute HUD is active');
-          return;
-        }
-        closeAllHuds();
+        if (navState.alertState === 'OFFERING_REROUTE') return;
         const reportBox = document.getElementById('report-box');
         const reportOptions = document.querySelector('.report-options');
         const confirmAlert = document.getElementById('confirm-alert');
@@ -995,17 +924,6 @@
       document.getElementById('report-close').addEventListener('click', () => {
         cancelAlert();
         console.log('Report box closed');
-      });
-      document.getElementById('settings-button').addEventListener('click', () => {
-        closeAllHuds();
-        const settingsHudContainer = document.getElementById('settings-hud-container');
-        settingsHudContainer.classList.add('active');
-        console.log('Settings button clicked, settings HUD opened');
-      });
-      document.getElementById('settings-close').addEventListener('click', () => {
-        const settingsHudContainer = document.getElementById('settings-hud-container');
-        settingsHudContainer.classList.remove('active');
-        console.log('Settings HUD closed');
       });
       document.querySelectorAll('.report-button').forEach(button => {
         button.addEventListener('click', async () => {
@@ -1042,85 +960,13 @@
       document.getElementById('recenter-button').addEventListener('click', () => {
         if (navState.isNavigating) {
           navState.isFollowing = true;
-          localStorage.setItem('isFollowing', navState.isFollowing);
           directionsRenderer.setMap(map);
           map.panTo(navState.userLocation);
-          map.setZoom(navState.navigationZoom);
-          map.setTilt(45);
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
         } else {
           recenterNonNavigation();
           console.log('Recenter button clicked, re-centered to user location (non-navigation)');
         }
-      });
-      document.getElementById('traffic-layer-toggle').addEventListener('change', (e) => {
-        navState.showTraffic = e.target.checked;
-        localStorage.setItem('showTraffic', navState.showTraffic);
-        trafficLayer.setMap(navState.showTraffic ? map : null);
-        console.log('Traffic layer toggled:', navState.showTraffic);
-      });
-      document.getElementById('main-route-color').addEventListener('change', (e) => {
-        navState.mainRouteColor = e.target.value;
-        localStorage.setItem('mainRouteColor', navState.mainRouteColor);
-        directionsRenderer.setOptions({
-          polylineOptions: {
-            strokeColor: navState.mainRouteColor,
-            strokeWeight: 6,
-            strokeOpacity: 0.8,
-            zIndex: 5
-          }
-        });
-        if (navState.currentRoute) {
-          directionsRenderer.setDirections(navState.currentRoute);
-        }
-        console.log('Main route color changed to:', navState.mainRouteColor);
-      });
-      document.getElementById('alt-route-color').addEventListener('change', (e) => {
-        navState.altRouteColor = e.target.value;
-        localStorage.setItem('altRouteColor', navState.altRouteColor);
-        alternativeRenderer.setOptions({
-          polylineOptions: {
-            strokeColor: navState.altRouteColor,
-            strokeOpacity: 0.8,
-            strokeWeight: 4,
-            zIndex: 10,
-            icons: [{
-              icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
-              offset: '0',
-              repeat: '12px'
-            }]
-          }
-        });
-        if (navState.alternativeRoute) {
-          alternativeRenderer.setDirections(navState.alternativeRoute);
-        }
-        console.log('Alternate route color changed to:', navState.altRouteColor);
-      });
-      document.getElementById('map-type').addEventListener('change', (e) => {
-        navState.mapType = e.target.value;
-        localStorage.setItem('mapType', navState.mapType);
-        map.setMapTypeId(navState.mapType);
-        console.log('Map type changed to:', navState.mapType);
-      });
-      document.getElementById('auto-recenter-toggle').addEventListener('change', (e) => {
-        navState.isFollowing = e.target.checked;
-        localStorage.setItem('isFollowing', navState.isFollowing);
-        console.log('Auto-recenter toggled:', navState.isFollowing);
-        if (navState.isFollowing && navState.isNavigating) {
-          map.panTo(navState.userLocation);
-          map.setZoom(navState.navigationZoom);
-          map.setTilt(45);
-          map.setHeading(navState.currentHeading || 0);
-        }
-      });
-      document.querySelectorAll('.settings-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
-          document.querySelectorAll('.settings-tab-content').forEach(c => c.style.display = 'none');
-          tab.classList.add('active');
-          document.getElementById(tab.getAttribute('data-tab')).style.display = 'block';
-          console.log('Switched to tab:', tab.getAttribute('data-tab'));
-        });
       });
       async function fetchAndDisplayMarkers(map, center) {
         try {
@@ -1145,32 +991,6 @@
           showToast('Failed to load alerts.');
         }
       }
-      function closeAllHuds() {
-        const reportBox = document.getElementById('report-box');
-        const rerouteHudContainer = document.getElementById('reroute-hud-container');
-        const settingsHudContainer = document.getElementById('settings-hud-container');
-        reportBox.classList.remove('active');
-        if (navState.alertState !== 'OFFERING_REROUTE') {
-          rerouteHudContainer.classList.remove('active');
-          rerouteHudContainer.style.display = 'none';
-          document.getElementById('reroute-hud').classList.remove('active');
-          document.getElementById('reroute-hud').style.display = 'none';
-        }
-        settingsHudContainer.classList.remove('active');
-        if (navState.tempMarker) {
-          navState.tempMarker.map = null;
-          navState.tempMarker = null;
-        }
-        if (navState.mapClickListener) {
-          google.maps.event.removeListener(navState.mapClickListener);
-          navState.mapClickListener = null;
-        }
-        if (navState.alertState !== 'OFFERING_REROUTE') {
-          navState.alertState = 'IDLE';
-          navState.tempAlertData = null;
-        }
-        console.log('All HUDs closed (except reroute HUD if active)');
-      }
       function recenterNonNavigation() {
         if (map) {
           map.panTo(navState.userLocation);
@@ -1181,29 +1001,6 @@
         }
       }
       async function confirmAlertLocation(location, alertType) {
-        try {
-          const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`);
-          if (!response.ok) throw new Error('Failed to check nearby alerts');
-          const nearbyAlerts = await response.json();
-          if (nearbyAlerts.length > 0) {
-            showToast('Cannot place alert within 500ft of another alert. Please choose a different location.');
-            navState.alertState = 'IDLE';
-            if (navState.mapClickListener) {
-              google.maps.event.removeListener(navState.mapClickListener);
-              navState.mapClickListener = null;
-            }
-            return;
-          }
-        } catch (error) {
-          console.error('Error checking nearby alerts:', error);
-          showToast('Error checking nearby alerts. Please try again.');
-          navState.alertState = 'IDLE';
-          if (navState.mapClickListener) {
-            google.maps.event.removeListener(navState.mapClickListener);
-            navState.mapClickListener = null;
-          }
-          return;
-        }
         navState.alertState = 'CONFIRMING_ALERT';
         if (navState.mapClickListener) {
           google.maps.event.removeListener(navState.mapClickListener);
@@ -1270,7 +1067,6 @@
             console.log('Alert saved to MongoDB:', result.alert);
             showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
             if (navState.isNavigating) {
-              console.log('Triggering hazard check after posting alert');
               checkHazardsAndOfferReroute();
             }
           } else {
@@ -1313,25 +1109,6 @@
         showToast('Alert placement cancelled.');
         console.log('Alert placement cancelled');
       }
-      function checkOffRoute(userLatLng) {
-        if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) return false;
-        const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
-        const now = Date.now();
-        if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
-          console.log('Recalculation skipped due to cooldown');
-          return false;
-        }
-        if (!google.maps.geometry.poly.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) {
-          console.log('User off-route detected, recalculating...');
-          showToast('You are off-route. Recalculating route...');
-          navState.lastRecalculationTime = now;
-          calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
-            showToast('Route recalculated successfully.');
-          });
-          return true;
-        }
-        return false;
-      }
       function onPositionUpdate(position) {
         try {
           const { latitude, longitude, heading, speed } = position.coords;
@@ -1365,8 +1142,6 @@
                   ));
             navState.deviceHeading = routeHeading;
             console.log('Snapped to polyline point:', pos, 'Bearing:', navState.deviceHeading);
-            const userLatLng = new google.maps.LatLng(navState.userLocation);
-            checkOffRoute(userLatLng);
           }
           navState.userLocation = pos;
           userMarker.position = pos;
@@ -1378,8 +1153,7 @@
           if (navState.isNavigating && navState.isFollowing) {
             map.panTo(navState.userLocation);
             map.setHeading(navState.currentHeading);
-            navState.navigationZoom = speed && speed > 0 ? (speed > 13.89 ? 16 : speed > 6.94 ? 17 : 18) : 18;
-            map.setZoom(navState.navigationZoom);
+            map.setZoom(speed && speed > 0 ? (speed > 13.89 ? 16 : speed > 6.94 ? 17 : 18) : 18);
             map.setTilt(45);
             console.log('Camera updated: Center:', navState.userLocation, 'Zoom:', map.getZoom(), 'Heading:', navState.currentHeading, 'Tilt: 45');
           }
@@ -1396,21 +1170,18 @@
           return;
         }
         navState.isNavigating = true;
-        navState.isFollowing = localStorage.getItem('isFollowing') === 'true';
+        navState.isFollowing = true;
         document.getElementById('search-container').classList.add('hidden');
         document.getElementById('hud-container').style.display = 'flex';
         document.getElementById('bottom-hud-container').style.display = 'flex';
         directionsRenderer.setMap(map);
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
           const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
-          navState.originalRoute = navState.currentRoute;
           map.panTo({ lat: startLocation.lat(), lng: startLocation.lng() });
-          navState.navigationZoom = 18;
-          map.setZoom(navState.navigationZoom);
+          map.setZoom(18);
           map.setTilt(45);
           console.log('Navigation started, centered on:', startLocation);
           startRerouteCheck();
-          if (navState.hazardCheckInterval) clearInterval(navState.hazardCheckInterval);
           navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
           watchId = navigator.geolocation.watchPosition(
             onPositionUpdate,
@@ -1444,20 +1215,15 @@
         navState.isNavigating = false;
         navState.isFollowing = false;
         navState.currentRoute = null;
-        navState.originalRoute = null;
         navState.routePolyline = null;
         navState.ignoredHazards = [];
         navState.currentHazard = null;
-        navState.alternativeRoute = null;
-        navState.alertState = 'IDLE';
-        navState.lastRecalculationTime = 0;
         document.getElementById('search-container').classList.remove('hidden');
         document.getElementById('search-container').style.display = 'flex';
         document.getElementById('hud-container').style.display = 'none';
         document.getElementById('bottom-hud-container').style.display = 'none';
         directionsRenderer.setMap(null);
         alternativeRenderer.setMap(null);
-        trafficLayer.setMap(null);
         if (destMarker) destMarker.setMap(null);
         document.getElementById('start-button').style.display = 'none';
         map.setOptions({
@@ -1487,14 +1253,6 @@
             if (status === 'OK') {
               navState.currentRoute = response;
               navState.routePolyline = response.routes[0].overview_path;
-              directionsRenderer.setOptions({
-                polylineOptions: {
-                  strokeColor: navState.mainRouteColor,
-                  strokeWeight: 6,
-                  strokeOpacity: 0.8,
-                  zIndex: 5
-                }
-              });
               directionsRenderer.setDirections(response);
               console.log('Polyline rendered with strokeWeight: 6');
               updateHUD(response, origin);
@@ -1585,23 +1343,20 @@
         navState.rerouteCheckTimeout = setTimeout(() => {
           if (navState.isNavigating && navState.currentRoute && navState.userLocation && navState.routePolyline) {
             const userLatLng = new google.maps.LatLng(navState.userLocation);
-            checkOffRoute(userLatLng);
+            const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
+            if (!google.maps.geometry.poly.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) { // Approximate tolerance in degrees
+              console.log('User off-route, recalculating...');
+              showToast('You are off-route. Recalculating route...');
+              calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
+                showToast('Route recalculated successfully.');
+              });
+            }
           }
           startRerouteCheck();
         }, REROUTE_CHECK_INTERVAL);
       }
       async function checkHazardsAndOfferReroute() {
-        if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || !navState.userLocation || navState.alertState === 'OFFERING_REROUTE') {
-          console.log('Hazard check skipped: Invalid state or navigation not active', {
-            isNavigating: navState.isNavigating,
-            hasCurrentRoute: !!navState.currentRoute,
-            hasRoutes: navState.currentRoute && !!navState.currentRoute.routes,
-            hasUserLocation: !!navState.userLocation,
-            alertState: navState.alertState
-          });
-          return;
-        }
-        console.log('Checking for hazards on route...');
+        if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') return;
         const path = navState.currentRoute.routes[0].overview_path;
         const userLatLng = new google.maps.LatLng(navState.userLocation);
         let closestIndex = 0;
@@ -1613,71 +1368,61 @@
             closestIndex = index;
           }
         });
-        const segmentPath = path.slice(closestIndex).filter((_, index) => index % 5 === 0);
+        // Simplify polyline to reduce server load (every 5th point up to 2 miles)
+        let segmentDistance = 0;
+        const segmentPath = [];
+        for (let i = closestIndex; i < path.length; i += 5) {
+          segmentPath.push(path[i]);
+          if (i < path.length - 1) {
+            segmentDistance += google.maps.geometry.spherical.computeDistanceBetween(path[i], path[i + 1]);
+            if (segmentDistance > 3218.69) break; // 2 miles
+          }
+        }
+        const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
         try {
-          const response = await fetch('/api/markers?lat=' + navState.userLocation.lat + '&lng=' + navState.userLocation.lng + '&maxDistance=' + MAX_REROUTE_DISTANCE);
+          const response = await fetch('/api/hazards-near-route', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ polyline })
+          });
           if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`HTTP error ${response.status}: ${errorText}`);
           }
           const hazards = await response.json();
-          console.log('Hazards fetched:', hazards);
-          if (hazards.length === 0) {
-            console.log('No hazards detected near route.');
-            navState.currentHazard = null;
-            navState.alternativeRoute = null;
-            navState.alertState = 'IDLE';
-            return;
-          }
-          const validHazards = hazards.filter(hazard => {
-            if (navState.ignoredHazards.includes(hazard._id)) {
-              console.log('Ignoring previously handled hazard:', hazard._id);
-              return false;
-            }
-            const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
-            const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
-            if (distanceToHazard < MIN_REROUTE_DISTANCE || distanceToHazard > MAX_REROUTE_DISTANCE) {
-              console.log('Hazard out of range:', hazard._id, distanceToHazard);
-              return false;
-            }
-            const isOnPath = segmentPath.some(point => {
-              const distance = google.maps.geometry.spherical.computeDistanceBetween(hazardLatLng, point);
-              return distance <= HAZARD_RADIUS;
+          console.log('Hazard check response:', hazards);
+          if (hazards.length > 0) {
+            // Filter hazards by distance and ignored list
+            const validHazards = hazards.filter(hazard => {
+              if (navState.ignoredHazards.includes(hazard._id)) {
+                console.log('Ignoring previously handled hazard:', hazard._id);
+                return false;
+              }
+              const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+              const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
+              return distanceToHazard >= MIN_REROUTE_DISTANCE; // Only consider hazards far enough ahead
             });
-            console.log('Hazard check:', hazard._id, 'isOnPath:', isOnPath);
-            return isOnPath;
-          });
-          if (validHazards.length > 0) {
-            const hazard = validHazards[0];
-            console.log('Hazard detected on route:', hazard);
-            navState.currentHazard = hazard;
-            navState.originalRoute = navState.currentRoute;
-            const timeSaved = await checkAlternativeRoute(hazard);
-            if (timeSaved !== null) {
-              console.log('Valid alternative route found, showing reroute HUD');
-              showRerouteHud(hazard, timeSaved);
+            if (validHazards.length > 0) {
+              const hazard = validHazards[0];
+              console.log('Hazards detected near route:', hazard);
+              navState.currentHazard = hazard;
+              const timeSaved = await checkAlternativeRoute(hazard);
+              if (timeSaved !== null) {
+                showRerouteHud(hazard, timeSaved);
+              } else {
+                console.log('No suitable alternative route found that avoids the hazard.');
+                showToast('Hazard detected, but no alternative route available that avoids it.');
+                navState.ignoredHazards.push(hazard._id); // Ignore if no alternative
+              }
             } else {
-              console.log('No suitable alternative route found.');
-              showToast('Hazard detected, but no alternative route available.');
-              navState.ignoredHazards.push(hazard._id);
-              navState.currentHazard = null;
-              navState.alternativeRoute = null;
-              navState.alertState = 'IDLE';
-              setTimeout(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
+              console.log('No valid hazards ahead after filtering.');
             }
           } else {
-            console.log('No valid hazards on route after filtering.');
-            navState.currentHazard = null;
-            navState.alternativeRoute = null;
-            navState.alertState = 'IDLE';
+            console.log('No hazards detected near route.');
           }
         } catch (error) {
           console.error('Error checking hazards:', error);
-          showToast('Unable to check for hazards. Retrying...');
-          navState.currentHazard = null;
-          navState.alternativeRoute = null;
-          navState.alertState = 'IDLE';
-          setTimeout(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
+          showToast('Unable to check for hazards. Please try again.');
         }
       }
       function projectPointToLine(p, a, b) {
@@ -1700,7 +1445,7 @@
         return google.maps.geometry.spherical.computeDistanceBetween(point, proj);
       }
       function isHazardAvoided(hazardPoint, path) {
-        const BUFFER = HAZARD_RADIUS;
+        const BUFFER = 50; // meters - adjust as needed for "around"
         let minDist = Infinity;
         for (let i = 0; i < path.length - 1; i++) {
           const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
@@ -1710,13 +1455,6 @@
       }
       async function checkAlternativeRoute(hazard) {
         return new Promise((resolve) => {
-          if (!navState.userLocation || !navState.destination) {
-            console.error('Missing userLocation or destination for route calculation');
-            resolve(null);
-            return;
-          }
-          console.log('Checking alternative routes for hazard:', hazard._id);
-          // Primary method: Manual check of alternative routes
           directionsService.route(
             {
               origin: navState.userLocation,
@@ -1748,73 +1486,15 @@
                     routes: [bestAlt]
                   };
                   const timeSavedMin = Math.round(bestTimeSaved / 60);
-                  console.log(`Manual check: Alternative route found, time saved: ${timeSavedMin} minutes`);
+                  console.log(`Alternative route found that avoids hazard and changes time by ${timeSavedMin} minutes`);
                   resolve(timeSavedMin);
                 } else {
-                  console.log('Manual check: No alternative route avoids the hazard, trying waypoint method');
-                  // Fallback: Waypoint-based routing
-                  directionsService.route(
-                    {
-                      origin: navState.userLocation,
-                      destination: navState.destination,
-                      travelMode: google.maps.TravelMode.DRIVING,
-                      waypoints: [{
-                        location: new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]),
-                        stopover: false
-                      }],
-                      optimizeWaypoints: false
-                    },
-                    (wpResponse, wpStatus) => {
-                      if (wpStatus === 'OK' && wpResponse.routes && wpResponse.routes.length > 0) {
-                        const wpRoute = wpResponse.routes[0];
-                        const wpDuration = wpRoute.legs[0].duration.value;
-                        const timeSaved = currentDuration - wpDuration;
-                        navState.alternativeRoute = {
-                          ...wpResponse,
-                          routes: [wpRoute]
-                        };
-                        const timeSavedMin = Math.round(timeSaved / 60);
-                        console.log(`Waypoint method: Alternative route found, time saved: ${timeSavedMin} minutes`);
-                        resolve(timeSavedMin);
-                      } else {
-                        console.error('Waypoint method failed:', wpStatus);
-                        resolve(null);
-                      }
-                    }
-                  );
+                  console.log('No alternative route that avoids the hazard.');
+                  resolve(null);
                 }
               } else {
-                console.error('Manual check: No alternative routes available or request failed:', status);
-                // Fallback: Waypoint-based routing
-                directionsService.route(
-                  {
-                    origin: navState.userLocation,
-                    destination: navState.destination,
-                    travelMode: google.maps.TravelMode.DRIVING,
-                    waypoints: [{
-                      location: new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]),
-                      stopover: false
-                    }],
-                    optimizeWaypoints: false
-                  },
-                  (wpResponse, wpStatus) => {
-                    if (wpStatus === 'OK' && wpResponse.routes && wpResponse.routes.length > 0) {
-                      const wpRoute = wpResponse.routes[0];
-                      const wpDuration = wpRoute.legs[0].duration.value;
-                      const timeSaved = navState.currentRoute.routes[0].legs[0].duration.value - wpDuration;
-                      navState.alternativeRoute = {
-                        ...wpResponse,
-                        routes: [wpRoute]
-                      };
-                      const timeSavedMin = Math.round(timeSaved / 60);
-                      console.log(`Waypoint method: Alternative route found, time saved: ${timeSavedMin} minutes`);
-                      resolve(timeSavedMin);
-                    } else {
-                      console.error('Waypoint method failed:', wpStatus);
-                      resolve(null);
-                    }
-                  }
-                );
+                console.error('No alternative routes available or request failed:', status);
+                resolve(null);
               }
             }
           );
@@ -1832,84 +1512,42 @@
         } else {
           timeText = `adds ${Math.abs(timeSaved)} minutes`;
         }
-        hazardMessage.textContent = `${hazard.type} detected ahead. Alternative route ${timeText} and avoids the hazard. Reroute?`;
-        rerouteHudContainer.style.display = 'flex';
-        rerouteHudContainer.style.zIndex = '100';
-        rerouteHudContainer.classList.add('active');
-        rerouteHud.style.display = 'flex';
+        hazardMessage.textContent = `${hazard.type} has been detected ahead on your route. Alternative route ${timeText} and avoids the hazard. Would you like to reroute?`;
         rerouteHud.classList.add('active');
+        rerouteHudContainer.classList.add('active');
         alternativeRenderer.setMap(map);
         alternativeRenderer.setDirections(navState.alternativeRoute);
-        map.setZoom(14);
-        map.setTilt(0);
         showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available.`);
-        console.log(`Showing reroute HUD for ${hazard.type} at`, hazard.location);
+        console.log(`Offering reroute for ${hazard.type} at`, hazard.location);
         navState.alertState = 'OFFERING_REROUTE';
       }
-      function restoreNavigationView() {
-        if (navState.isFollowing) {
-          map.panTo(navState.userLocation);
-          map.setZoom(navState.navigationZoom);
-          map.setTilt(45);
-          map.setHeading(navState.currentHeading || 0);
-          console.log('Restored navigation view: Zoom:', navState.navigationZoom, 'Tilt: 45');
-        }
-      }
       function acceptReroute() {
-        if (!navState.alternativeRoute || !navState.currentHazard) {
-          console.error('Cannot accept reroute: No alternative route or hazard');
-          showToast('Error: No alternative route available.');
-          return;
-        }
-        console.log('Accepting reroute for hazard:', navState.currentHazard._id);
-        navState.ignoredHazards.push(navState.currentHazard._id);
-        navState.currentRoute = navState.alternativeRoute;
-        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
-        navState.originalRoute = navState.currentRoute;
-        directionsRenderer.setMap(null);
-        directionsRenderer.setMap(map);
-        directionsRenderer.setDirections(navState.currentRoute);
-        alternativeRenderer.setMap(null);
-        updateBottomHUD(navState.currentRoute);
-        updateHUD(navState.currentRoute, navState.userLocation);
-        const rerouteHudContainer = document.getElementById('reroute-hud-container');
-        const rerouteHud = document.getElementById('reroute-hud');
-        rerouteHudContainer.classList.remove('active');
-        rerouteHudContainer.style.display = 'none';
-        rerouteHud.classList.remove('active');
-        rerouteHud.style.display = 'none';
-        restoreNavigationView();
-        showToast('Alternative route accepted.');
-        console.log('Reroute accepted:', navState.alternativeRoute);
-        navState.alertState = 'IDLE';
-        navState.alternativeRoute = null;
-        navState.currentHazard = null;
-        navState.lastRecalculationTime = Date.now();
-      }
-      function rejectReroute() {
-        if (navState.currentHazard) {
-          navState.ignoredHazards.push(navState.currentHazard._id);
-          console.log('Rejecting reroute, ignoring hazard:', navState.currentHazard._id);
-        }
-        if (navState.originalRoute) {
-          navState.currentRoute = navState.originalRoute;
+        if (navState.alternativeRoute && navState.currentHazard) {
+          navState.ignoredHazards.push(navState.currentHazard._id); // Ignore this hazard
+          navState.currentRoute = navState.alternativeRoute;
           navState.routePolyline = navState.currentRoute.routes[0].overview_path;
-          directionsRenderer.setMap(null);
-          directionsRenderer.setMap(map);
           directionsRenderer.setDirections(navState.currentRoute);
+          alternativeRenderer.setMap(null);
           updateBottomHUD(navState.currentRoute);
           updateHUD(navState.currentRoute, navState.userLocation);
+          showToast('Alternative route accepted.');
+          console.log('Reroute accepted:', navState.alternativeRoute);
+          navState.alertState = 'IDLE';
+          navState.alternativeRoute = null;
+          navState.currentHazard = null;
         }
+      }
+      function rejectReroute() {
         alternativeRenderer.setMap(null);
+        if (navState.currentHazard) {
+          navState.ignoredHazards.push(navState.currentHazard._id);
+        }
+        showToast('Reroute rejected, continuing on current route.');
+        console.log('Reroute rejected');
         const rerouteHudContainer = document.getElementById('reroute-hud-container');
         const rerouteHud = document.getElementById('reroute-hud');
         rerouteHudContainer.classList.remove('active');
-        rerouteHudContainer.style.display = 'none';
         rerouteHud.classList.remove('active');
-        rerouteHud.style.display = 'none';
-        restoreNavigationView();
-        showToast('Reroute rejected, continuing on original route.');
-        console.log('Reroute rejected');
         navState.alertState = 'IDLE';
         navState.alternativeRoute = null;
         navState.currentHazard = null;
@@ -1942,7 +1580,7 @@
       function handleGeolocationError(error, isInitial = false) {
         let message = 'Failed to get location. Please try again later.';
         if (error.code === 1) {
-          message = 'Location access denied. Please enable location permissions in browser settings.';
+          message = 'Location access denied. Please enable location permissions in your browser settings.';
         } else if (error.code === 2) {
           message = 'Location unavailable. Ensure location services are enabled and try again.';
         } else if (error.code === 3) {
@@ -1962,7 +1600,7 @@
               };
               navState.deviceHeading = position.coords.heading || null;
               console.log('Initial location:', navState.userLocation, 'Heading:', navState.deviceHeading);
-              initializeMap(google.maps.Map, google.maps.marker.AdvancedMarkerElement, google.maps.places.PlacesService, google.maps.places.Autocomplete, google.maps.DirectionsService, google.maps.DirectionsRenderer, google.maps.geometry.spherical, google.maps.geometry.encoding, google.maps.TrafficLayer);
+              initializeMap(google.maps.Map, google.maps.marker.AdvancedMarkerElement, google.maps.places.PlacesService, google.maps.places.Autocomplete, google.maps.DirectionsService, google.maps.DirectionsRenderer, google.maps.geometry.spherical, google.maps.geometry.encoding);
             },
             (error) => {
               console.error('Retry geolocation error:', error);
@@ -1976,8 +1614,89 @@
           ), backoff);
         } else if (isInitial) {
           navState.userLocation = { lat: 33.083270, lng: -83.233040 };
-          initializeMap(google.maps.Map, google.maps.marker.AdvancedMarkerElement, google.maps.places.PlacesService, google.maps.places.Autocomplete, google.maps.DirectionsService, google.maps.DirectionsRenderer, google.maps.geometry.spherical, google.maps.geometry.encoding, google.maps.TrafficLayer);
+          initializeMap(google.maps.Map, google.maps.marker.AdvancedMarkerElement, google.maps.places.PlacesService, google.maps.places.Autocomplete, google.maps.DirectionsService, google.maps.DirectionsRenderer, google.maps.geometry.spherical, google.maps.geometry.encoding);
         }
+      }
+      const reportBox = document.getElementById('report-box');
+      const header = reportBox.querySelector('header');
+      const reportClose = document.getElementById('report-close');
+      let isDragging = false;
+      let startX, startY, initialLeft, initialTop;
+      function startDrag(e) {
+        if (navState.alertState === 'CONFIRMING_ALERT') return;
+        isDragging = true;
+        const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        startX = clientX;
+        startY = clientY;
+        initialLeft = reportBox.offsetLeft;
+        initialTop = reportBox.offsetTop;
+        document.addEventListener('mousemove', drag);
+        document.addEventListener('mouseup', stopDrag);
+        document.addEventListener('touchmove', drag);
+        document.addEventListener('touchend', stopDrag);
+      }
+      function drag(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        const dx = clientX - startX;
+        const dy = clientY - startY;
+        reportBox.style.left = `${initialLeft + dx}px`;
+        reportBox.style.top = `${initialTop + dy}px`;
+        reportBox.style.bottom = 'auto';
+        reportBox.style.right = 'auto';
+      }
+      function stopDrag() {
+        isDragging = false;
+        document.removeEventListener('mousemove', drag);
+        document.removeEventListener('mouseup', stopDrag);
+        document.removeEventListener('touchmove', drag);
+        document.removeEventListener('touchend', stopDrag);
+      }
+      header.addEventListener('mousedown', startDrag);
+      header.addEventListener('touchstart', startDrag);
+      reportClose.addEventListener('mousedown', (e) => e.stopPropagation());
+      reportClose.addEventListener('touchstart', (e) => e.stopPropagation());
+      const rerouteHudContainer = document.getElementById('reroute-hud-container');
+      const rerouteHeader = rerouteHudContainer.querySelector('header');
+      const rerouteClose = document.getElementById('reroute-close');
+      rerouteHeader.addEventListener('mousedown', startRerouteDrag);
+      rerouteHeader.addEventListener('touchstart', startRerouteDrag);
+      rerouteClose.addEventListener('mousedown', (e) => e.stopPropagation());
+      rerouteClose.addEventListener('touchstart', (e) => e.stopPropagation());
+      function startRerouteDrag(e) {
+        isDragging = true;
+        const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        startX = clientX;
+        startY = clientY;
+        initialLeft = rerouteHudContainer.offsetLeft;
+        initialTop = rerouteHudContainer.offsetTop;
+        document.addEventListener('mousemove', dragReroute);
+        document.addEventListener('mouseup', stopRerouteDrag);
+        document.addEventListener('touchmove', dragReroute);
+        document.addEventListener('touchend', stopRerouteDrag);
+      }
+      function dragReroute(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+        const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+        const dx = clientX - startX;
+        const dy = clientY - startY;
+        rerouteHudContainer.style.left = `${initialLeft + dx}px`;
+        rerouteHudContainer.style.top = `${initialTop + dy}px`;
+        rerouteHudContainer.style.bottom = 'auto';
+        rerouteHudContainer.style.right = 'auto';
+      }
+      function stopRerouteDrag() {
+        isDragging = false;
+        document.removeEventListener('mousemove', dragReroute);
+        document.removeEventListener('mouseup', stopRerouteDrag);
+        document.removeEventListener('touchmove', dragReroute);
+        document.removeEventListener('touchend', stopRerouteDrag);
       }
       adjustHud();
       window.addEventListener('resize', adjustHud);
