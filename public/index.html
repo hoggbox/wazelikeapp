@@ -827,7 +827,7 @@
       directionsRenderer = new DirectionsRenderer({
         map: map,
         suppressMarkers: true,
-        preserveViewport: true,
+        preserveViewport: false,
         polylineOptions: {
           strokeColor: '#4285F4',
           strokeWeight: 6,
@@ -840,6 +840,7 @@
         polylineOptions: {
           strokeColor: '#FFA500',
           strokeOpacity: 0,
+          zIndex: 10,
           icons: [{
             icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
             offset: '0',
@@ -1455,6 +1456,11 @@
       }
       async function checkAlternativeRoute(hazard) {
         return new Promise((resolve) => {
+          if (!navState.userLocation || !navState.destination) {
+            console.error('Missing userLocation or destination for route calculation');
+            resolve(null);
+            return;
+          }
           directionsService.route(
             {
               origin: navState.userLocation,
@@ -1526,10 +1532,19 @@
           navState.ignoredHazards.push(navState.currentHazard._id); // Ignore this hazard
           navState.currentRoute = navState.alternativeRoute;
           navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+          directionsRenderer.setMap(null); // Clear current route
+          directionsRenderer.setMap(map); // Re-attach to map
           directionsRenderer.setDirections(navState.currentRoute);
           alternativeRenderer.setMap(null);
           updateBottomHUD(navState.currentRoute);
           updateHUD(navState.currentRoute, navState.userLocation);
+          // Force map to update view
+          if (navState.isFollowing) {
+            map.panTo(navState.userLocation);
+            map.setZoom(18);
+            map.setTilt(45);
+            map.setHeading(navState.currentHeading || 0);
+          }
           showToast('Alternative route accepted.');
           console.log('Reroute accepted:', navState.alternativeRoute);
           navState.alertState = 'IDLE';
