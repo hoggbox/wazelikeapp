@@ -1,9 +1,10 @@
 {
   "name": "w2.0",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Waze-like GPS app with hazard alerts",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -16,6 +17,10 @@
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "mongoose": "^8.18.0",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "express-rate-limit": "^7.4.0"
+  },
+  "engines": {
+    "node": ">=22.16.0"
   }
 }
