@@ -5,7 +5,6 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const turf = require('@turf/turf');
-const rateLimit = require('express-rate-limit');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -13,14 +12,6 @@ const PORT = process.env.PORT || 3000;
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-// Rate limiting for API endpoints
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit to 100 requests per window
-  message: 'Too many requests from this IP, please try again later.'
-});
-app.use('/api', apiLimiter);
 
 // MongoDB Alert Schema with GeoJSON and TTL
 const alertSchema = new mongoose.Schema({
@@ -38,8 +29,7 @@ const alertSchema = new mongoose.Schema({
   },
   userId: { type: String },
   timestamp: { type: Date, default: Date.now, expires: 3600 }, // Auto-delete after 1 hour
-  address: { type: String },
-  votes: { type: Number, default: 0 } // Added for hazard voting
+  address: { type: String } // Optional: Reverse-geocoded address
 });
 
 // Ensure 2dsphere index for geospatial queries
@@ -47,33 +37,17 @@ alertSchema.index({ location: '2dsphere' });
 
 const Alert = mongoose.model('Alert', alertSchema);
 
-// Connect to MongoDB Atlas with reconnection logic
+// Connect to MongoDB Atlas
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 10000,
+  serverSelectionTimeoutMS: 5000,
   maxPoolSize: 10,
   retryWrites: true,
   retryReads: true
 })
   .then(() => console.log('Connected to MongoDB Atlas (pinmap database)'))
   .catch(err => console.error('MongoDB connection error:', err));
-
-// Handle MongoDB connection errors and reconnection
-mongoose.connection.on('error', err => {
-  console.error('MongoDB connection error:', err);
-});
-mongoose.connection.on('disconnected', () => {
-  console.warn('MongoDB disconnected, attempting to reconnect...');
-  mongoose.connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-    serverSelectionTimeoutMS: 10000,
-    maxPoolSize: 10,
-    retryWrites: true,
-    retryReads: true
-  });
-});
 
 // Serve static files from /public
 app.use(express.static('public'));
@@ -90,6 +64,7 @@ app.post('/api/alerts', async (req, res) => {
     if (!type || !location || !location.coordinates || !timestamp) {
       return res.status(400).json({ error: 'Invalid alert data' });
     }
+    // Validate coordinates
     if (!Array.isArray(location.coordinates) || location.coordinates.length !== 2) {
       return res.status(400).json({ error: 'Invalid coordinates format' });
     }
@@ -105,12 +80,10 @@ app.post('/api/alerts', async (req, res) => {
       },
       userId,
       timestamp: new Date(timestamp),
-      address,
-      votes: 0
+      address
     });
     await alert.save();
-    console.log('Alert saved:', alert);
-    io.emit('alert', alert);
+    io.emit('alert', alert); // Broadcast to all clients
     res.status(201).json({ message: 'Alert saved successfully', alert });
   } catch (error) {
     console.error('Error saving alert:', error);
@@ -125,7 +98,6 @@ app.get('/api/markers', async (req, res) => {
     if (isNaN(parseFloat(lng)) || isNaN(parseFloat(lat))) {
       return res.status(400).json({ error: 'Invalid latitude or longitude' });
     }
-    console.log('Fetching markers near:', { lat, lng, maxDistance });
     const markers = await Alert.find({
       location: {
         $near: {
@@ -133,11 +105,10 @@ app.get('/api/markers', async (req, res) => {
             type: 'Point',
             coordinates: [parseFloat(lng), parseFloat(lat)]
           },
-          $maxDistance: parseInt(maxDistance)
+          $maxDistance: parseInt(maxDistance) // Default 50km
         }
       }
     });
-    console.log('Found markers:', markers.length);
     res.status(200).json(markers);
   } catch (err) {
     console.error('Error fetching markers:', err);
@@ -152,65 +123,49 @@ app.post('/api/hazards-near-route', async (req, res) => {
     if (!polyline || !Array.isArray(polyline) || polyline.length < 2) {
       return res.status(400).json({ error: 'Invalid polyline data: must be an array with at least 2 points' });
     }
-    console.log('Received polyline points:', polyline.length);
+    // Validate polyline coordinates
     for (const [lng, lat] of polyline) {
       if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
         return res.status(400).json({ error: `Invalid coordinates in polyline: [${lng}, ${lat}]` });
       }
     }
+    // Convert polyline to GeoJSON LineString
     const routeLineString = turf.lineString(polyline);
+    
+    // Create a buffered polygon (2 miles ≈ 3.21869 km)
     const bufferDistance = 3.21869; // 2 miles in kilometers
     let bufferedPolygon = turf.buffer(routeLineString, bufferDistance, { units: 'kilometers' });
+
+    // Handle MultiPolygon case
     if (bufferedPolygon.geometry.type === 'MultiPolygon') {
-      console.warn('MultiPolygon detected, flattening to first polygon');
       bufferedPolygon = turf.flatten(bufferedPolygon);
-      bufferedPolygon = bufferedPolygon.features[0];
+      bufferedPolygon = bufferedPolygon.features[0]; // Use the first polygon
     }
+
+    // Simplify to prevent self-intersection
     const simplifiedPolygon = turf.simplify(bufferedPolygon, { tolerance: 0.001, highQuality: true });
+
+    // Validate geometry
     if (simplifiedPolygon.geometry.type !== 'Polygon') {
       console.error('Simplified geometry is not a valid polygon:', simplifiedPolygon.geometry.type);
       return res.status(500).json({ error: 'Failed to generate a valid buffer polygon' });
     }
-    console.log('Searching for hazards within buffered polygon');
+
+    console.log('Searching for hazards intersecting with buffered polygon...');
+
     const hazards = await Alert.find({
       location: {
         $geoWithin: {
           $geometry: simplifiedPolygon.geometry
         }
       },
-      timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) }
-    }).limit(5); // Increased limit for flexibility
-    console.log('Found hazards:', hazards.length);
+      timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) } // Recent alerts
+    }).limit(1); // Closest hazard
+
     res.status(200).json(hazards);
   } catch (err) {
     console.error('Error checking hazards near route:', err);
     res.status(500).json({ error: err.message });
-  }
-});
-
-// API endpoint for voting on hazards
-app.post('/api/alerts/vote', async (req, res) => {
-  const { alertId, voteType, userId } = req.body;
-  try {
-    if (!alertId || !voteType || !userId) {
-      return res.status(400).json({ error: 'Missing alertId, voteType, or userId' });
-    }
-    if (!['confirm', 'dismiss'].includes(voteType)) {
-      return res.status(400).json({ error: 'Invalid voteType' });
-    }
-    const alert = await Alert.findById(alertId);
-    if (!alert) {
-      return res.status(404).json({ error: 'Alert not found' });
-    }
-    // Simple voting logic: increment for confirm, decrement for dismiss
-    alert.votes = voteType === 'confirm' ? alert.votes + 1 : Math.max(0, alert.votes - 1);
-    await alert.save();
-    console.log(`Vote recorded: ${voteType} for alert ${alertId} by user ${userId}, new votes: ${alert.votes}`);
-    io.emit('alert', alert); // Broadcast updated alert
-    res.status(200).json({ success: true, alert });
-  } catch (error) {
-    console.error(`Error recording ${voteType} vote for alert ${alertId}:`, error);
-    res.status(500).json({ error: 'Failed to record vote' });
   }
 });
 
@@ -227,33 +182,35 @@ const io = new Server(server, {
 
 // Rate limiting for Socket.IO events
 const rateLimit = new Map();
-const LOCATION_UPDATE_INTERVAL = 1000;
+const LOCATION_UPDATE_INTERVAL = 1000; // 1 update per second per user
 
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
+
+  // Send recent alerts to new clients (last 1 hour)
   Alert.find({ timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) } })
     .then(alerts => {
       alerts.forEach(alert => socket.emit('alert', alert));
-      console.log('Sent', alerts.length, 'recent alerts to client:', socket.id);
     })
-    .catch(err => console.error('Error fetching alerts for new client:', err));
+    .catch(err => console.error('Error fetching alerts:', err));
+
   socket.on('locationUpdate', (data) => {
     if (!data.location || typeof data.location.lat !== 'number' || typeof data.location.lng !== 'number') {
       console.error('Invalid location data from', socket.id, ':', data);
       return;
     }
+
     const now = Date.now();
     const lastUpdate = rateLimit.get(socket.id) || 0;
     if (now - lastUpdate < LOCATION_UPDATE_INTERVAL) {
       return;
     }
     rateLimit.set(socket.id, now);
+
     console.log('Location update from', socket.id, ':', data.location);
     socket.broadcast.emit('locationUpdate', data);
   });
-  socket.on('error', (err) => {
-    console.error('Socket.IO error for client', socket.id, ':', err);
-  });
+
   socket.on('disconnect', () => {
     console.log('User disconnected:', socket.id);
     rateLimit.delete(socket.id);
