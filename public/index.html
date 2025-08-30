@@ -840,7 +840,7 @@
     const OFF_ROUTE_TOLERANCE = 100;
     const RECALC_COOLDOWN = 30000;
     const HAZARD_CHECK_INTERVAL = 5000;
-    const MIN_REROUTE_DISTANCE = 500;
+    const MIN_REROUTE_DISTANCE = 152.4;
     const MAX_REROUTE_DISTANCE = 3218.69;
     const MIN_ALERT_DISTANCE = 152.4;
     const REROUTE_HUD_TIMEOUT = 30000;
@@ -1008,10 +1008,13 @@
         title: 'Your Location'
       });
       const input = document.getElementById('search-input');
+      console.log('Google Maps Places loaded:', typeof google.maps.places.Autocomplete);
       const autocomplete = new Autocomplete(input);
       autocomplete.bindTo('bounds', map);
       autocomplete.addListener('place_changed', () => {
+        console.log('Place changed event fired');
         const place = autocomplete.getPlace();
+        console.log('Selected place:', place);
         if (place && place.geometry && place.geometry.location) {
           navState.destination = {
             lat: place.geometry.location.lat(),
@@ -1031,6 +1034,7 @@
             content: destMarkerElement,
             title: 'Destination'
           });
+          console.log('Start button element:', document.getElementById('start-button'));
           document.getElementById('start-button').style.display = 'block';
         } else {
           console.error('No location for selected place:', place);
@@ -1382,36 +1386,6 @@
         navState.tempMarker = null;
         console.log('Alert posted');
       }
-      async function voteOnHazard(voteType) {
-        if (!navState.currentHazard) {
-          console.warn('No current hazard to vote on');
-          return;
-        }
-        try {
-          const response = await fetch('/api/alerts/vote', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              alertId: navState.currentHazard._id,
-              voteType: voteType,
-              userId: socket.id
-            })
-          });
-          const result = await response.json();
-          if (response.ok) {
-            console.log(`${voteType} vote recorded for hazard:`, navState.currentHazard._id);
-            showToast(`Hazard ${voteType}ed successfully.`);
-            navState.alertState = 'IDLE';
-            navState.currentHazard = null;
-          } else {
-            console.error(`Failed to record ${voteType} vote:`, result.error);
-            showToast(`Failed to record ${voteType} vote.`);
-          }
-        } catch (error) {
-          console.error(`Error recording ${voteType} vote:`, error);
-          showToast(`Error recording ${voteType} vote.`);
-        }
-      }
       function cancelAlert() {
         if (navState.tempMarker) {
           navState.tempMarker.map = null;
@@ -1548,6 +1522,7 @@
         }
       }
       function startGPS() {
+        console.log('startGPS called, destination:', navState.destination);
         if (!navigator.geolocation) {
           showToast('Geolocation is not supported by this browser.');
           return;
@@ -1629,6 +1604,7 @@
         console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: 0, tilt: 0 });
       }
       function calculateAndDisplayRoute(origin, dest, callback) {
+        console.log('Calculating route from', origin, 'to', dest);
         if (!origin || !dest) {
           console.error('Invalid origin or destination:', origin, dest);
           showToast('Invalid route. Please select a destination.');
@@ -1757,105 +1733,105 @@
           startRerouteCheck();
         }, REROUTE_CHECK_INTERVAL);
       }
-async function checkHazardsAndOfferReroute() {
-  if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') {
-    console.log('Hazard check skipped:', {
-      isNavigating: navState.isNavigating,
-      hasRoute: !!navState.currentRoute,
-      hasRoutes: !!(navState.currentRoute && navState.currentRoute.routes),
-      alertState: navState.alertState
-    });
-    return;
-  }
-  const path = navState.currentRoute.routes[0].overview_path;
-  console.log('Route path points:', path.length);
-  const userLatLng = new google.maps.LatLng(navState.userLocation);
-  let closestIndex = 0;
-  let minDistance = Infinity;
-  path.forEach((point, index) => {
-    const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, point);
-    if (distance < minDistance) {
-      minDistance = distance;
-      closestIndex = index;
-    }
-  });
-  console.log('Closest point index:', closestIndex, 'Distance:', minDistance);
-  let segmentDistance = 0;
-  const segmentPath = [];
-  for (let i = closestIndex; i < path.length; i++) {
-    if ((i - closestIndex) % 5 === 0) {
-      segmentPath.push(path[i]);
-    }
-    if (i < path.length - 1) {
-      segmentDistance += google.maps.geometry.spherical.computeDistanceBetween(path[i], path[i + 1]);
-      if (segmentDistance > MAX_REROUTE_DISTANCE) {
-        // Ensure the last point is included for accurate polyline
-        if ((i - closestIndex) % 5 !== 0) {
-          segmentPath.push(path[i]);
+      async function checkHazardsAndOfferReroute() {
+        if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') {
+          console.log('Hazard check skipped:', {
+            isNavigating: navState.isNavigating,
+            hasRoute: !!navState.currentRoute,
+            hasRoutes: !!(navState.currentRoute && navState.currentRoute.routes),
+            alertState: navState.alertState
+          });
+          return;
         }
-        break;
+        const path = navState.currentRoute.routes[0].overview_path;
+        console.log('Route path points:', path.length);
+        const userLatLng = new google.maps.LatLng(navState.userLocation);
+        let closestIndex = 0;
+        let minDistance = Infinity;
+        path.forEach((point, index) => {
+          const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, point);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestIndex = index;
+          }
+        });
+        console.log('Closest point index:', closestIndex, 'Distance:', minDistance);
+        let segmentDistance = 0;
+        const segmentPath = [];
+        for (let i = closestIndex; i < path.length; i++) {
+          if ((i - closestIndex) % 5 === 0) {
+            segmentPath.push(path[i]);
+          }
+          if (i < path.length - 1) {
+            segmentDistance += google.maps.geometry.spherical.computeDistanceBetween(path[i], path[i + 1]);
+            if (segmentDistance > MAX_REROUTE_DISTANCE) {
+              // Ensure the last point is included for accurate polyline
+              if ((i - closestIndex) % 5 !== 0) {
+                segmentPath.push(path[i]);
+              }
+              break;
+            }
+          } else {
+            // Always include the very last point if we reach the end
+            segmentPath.push(path[i]);
+          }
+        }
+        console.log('Segment path points:', segmentPath.length, 'Total distance:', segmentDistance);
+        if (segmentPath.length < 2) {
+          console.warn('Segment path too short for hazard check');
+          return;
+        }
+        const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
+        try {
+          console.log('Fetching hazards for polyline:', polyline);
+          const response = await fetch('/api/hazards-near-route', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ polyline })
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP error ${response.status}: ${errorText}`);
+          }
+          const hazards = await response.json();
+          console.log('Hazard check response:', hazards);
+          if (hazards.length > 0) {
+            const validHazards = hazards.filter(hazard => {
+              if (navState.ignoredHazards.includes(hazard._id)) {
+                console.log('Ignoring previously handled hazard:', hazard._id);
+                return false;
+              }
+              const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+              const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
+              const isValid = distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= MAX_REROUTE_DISTANCE;
+              console.log('Hazard:', hazard._id, 'Distance:', distanceToHazard, 'Valid:', isValid);
+              return isValid;
+            });
+            if (validHazards.length > 0) {
+              const hazard = validHazards[0];
+              console.log('Valid hazard detected:', hazard);
+              navState.currentHazard = hazard;
+              navState.originalRoute = navState.currentRoute;
+              const timeSaved = await checkAlternativeRoute(hazard);
+              if (timeSaved !== null) {
+                showRerouteHud(hazard, timeSaved);
+              } else {
+                console.log('No suitable alternative route found for hazard:', hazard._id);
+                showToast('Hazard detected, but no alternative route available.');
+                navState.ignoredHazards.push(hazard._id);
+                navState.currentHazard = null;
+              }
+            } else {
+              console.log('No valid hazards after filtering');
+            }
+          } else {
+            console.log('No hazards detected near route');
+          }
+        } catch (error) {
+          console.error('Error checking hazards:', error);
+          showToast('Unable to check for hazards. Please try again.');
+        }
       }
-    } else {
-      // Always include the very last point if we reach the end
-      segmentPath.push(path[i]);
-    }
-  }
-  console.log('Segment path points:', segmentPath.length, 'Total distance:', segmentDistance);
-  if (segmentPath.length < 2) {
-    console.warn('Segment path too short for hazard check');
-    return;
-  }
-  const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
-  try {
-    console.log('Fetching hazards for polyline:', polyline);
-    const response = await fetch('/api/hazards-near-route', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ polyline })
-    });
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP error ${response.status}: ${errorText}`);
-    }
-    const hazards = await response.json();
-    console.log('Hazard check response:', hazards);
-    if (hazards.length > 0) {
-      const validHazards = hazards.filter(hazard => {
-        if (navState.ignoredHazards.includes(hazard._id)) {
-          console.log('Ignoring previously handled hazard:', hazard._id);
-          return false;
-        }
-        const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
-        const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
-        const isValid = distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= MAX_REROUTE_DISTANCE;
-        console.log('Hazard:', hazard._id, 'Distance:', distanceToHazard, 'Valid:', isValid);
-        return isValid;
-      });
-      if (validHazards.length > 0) {
-        const hazard = validHazards[0];
-        console.log('Valid hazard detected:', hazard);
-        navState.currentHazard = hazard;
-        navState.originalRoute = navState.currentRoute;
-        const timeSaved = await checkAlternativeRoute(hazard);
-        if (timeSaved !== null) {
-          showRerouteHud(hazard, timeSaved);
-        } else {
-          console.log('No suitable alternative route found for hazard:', hazard._id);
-          showToast('Hazard detected, but no alternative route available.');
-          navState.ignoredHazards.push(hazard._id);
-          navState.currentHazard = null;
-        }
-      } else {
-        console.log('No valid hazards after filtering');
-      }
-    } else {
-      console.log('No hazards detected near route');
-    }
-  } catch (error) {
-    console.error('Error checking hazards:', error);
-    showToast('Unable to check for hazards. Please try again.');
-  }
-}
       function projectPointToLine(p, a, b) {
         const lat1 = a.lat();
         const lng1 = a.lng();
@@ -2203,4 +2179,3 @@ async function checkHazardsAndOfferReroute() {
   </script>
 </body>
 </html>
-</xaiArtifact>

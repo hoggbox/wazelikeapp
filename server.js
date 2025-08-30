@@ -89,6 +89,7 @@ app.get('/', (req, res) => {
 app.post('/api/alerts', async (req, res) => {
   try {
     const { type, location, timestamp, userId, address } = req.body;
+    console.log('Received alert data:', req.body);
     if (!type || !location || !location.coordinates || !timestamp) {
       return res.status(400).json({ error: 'Invalid alert data' });
     }
@@ -111,7 +112,7 @@ app.post('/api/alerts', async (req, res) => {
       votes: 0
     });
     await alert.save();
-    console.log('Alert saved:', { id: alert._id, type, location: [lng, lat], timestamp, userId });
+    console.log('Emitting alert to clients:', { id: alert._id, type });
     io.emit('alert', alert);
     res.status(201).json({ message: 'Alert saved successfully', alert });
   } catch (error) {
