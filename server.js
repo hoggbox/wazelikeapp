@@ -14,10 +14,6 @@ const authMiddleware = require('./middleware/auth');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
-
 // Configure Winston logger
 const logger = winston.createLogger({
   level: 'info',
@@ -31,6 +27,16 @@ const logger = winston.createLogger({
     new winston.transports.File({ filename: 'combined.log' })
   ]
 });
+
+// Middleware
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production'
+    ? 'https://wazelikeapp.onrender.com'
+    : ['http://localhost:3000', 'https://wazelikeapp.onrender.com'],
+  methods: ['GET', 'POST', 'DELETE'],
+  credentials: true
+}));
+app.use(express.json());
 
 // MongoDB Alert Schema with GeoJSON and TTL
 const alertSchema = new mongoose.Schema({
@@ -231,7 +237,8 @@ const io = new Server(server, {
     origin: process.env.NODE_ENV === 'production'
       ? 'https://wazelikeapp.onrender.com'
       : ['http://localhost:3000', 'https://wazelikeapp.onrender.com'],
-    methods: ['GET', 'POST']
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 });
 

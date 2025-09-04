@@ -912,7 +912,7 @@
 <div id="auth-container" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white;">
   <h2 id="auth-title">Login</h2>
   <form id="auth-form" style="display: flex; flex-direction: column; gap: 10px; width: 300px;">
-    <input type="text" id="username" name="username" placeholder="Username" style="display: none;" required>
+    <input type="text" id="username" name="username" placeholder="Username" style="display: none;">
     <input type="email" id="email" name="email" placeholder="Email" required>
     <input type="password" id="password" name="password" placeholder="Password" required>
     <button type="submit">Submit</button>
@@ -2466,100 +2466,119 @@
     console.error('Failed to load Google Maps script');
     showToast('Failed to load map. Please check your network or API key.');
   };
-  document.head.appendChild(script);
-  // Auth logic
-  let isRegister = false;
-  function switchAuthMode() {
-    isRegister = !isRegister;
-    document.getElementById('auth-title').textContent = isRegister ? 'Register' : 'Login';
-    document.getElementById('username').style.display = isRegister ? 'block' : 'none';
-    document.getElementById('auth-switch').innerHTML = isRegister ? 'Already have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Login</a>' : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
-  }
-  document.getElementById('auth-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    const username = document.getElementById('username').value;
-    const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-    const body = isRegister ? { username, email, password } : { email, password };
-    try {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      const data = await response.json();
-      if (response.ok) {
-        localStorage.setItem('token', data.token);
-        localStorage.setItem('userId', data.user.id);
-        document.getElementById('auth-container').style.display = 'none';
-        initApp();
-      } else {
-        showToast(data.error);
-      }
-    } catch (error) {
-      showToast('Error: ' + error.message);
-    }
-  });
-  function checkAuth() {
-    const token = localStorage.getItem('token');
-    if (token) {
+document.head.appendChild(script);
+// Auth logic
+let isRegister = false;
+function switchAuthMode() {
+  isRegister = !isRegister;
+  const usernameInput = document.getElementById('username');
+  document.getElementById('auth-title').textContent = isRegister ? 'Register' : 'Login';
+  usernameInput.style.display = isRegister ? 'block' : 'none';
+  usernameInput.required = isRegister; // Toggle required based on mode
+  document.getElementById('auth-switch').innerHTML = isRegister
+    ? 'Already have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Login</a>'
+    : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
+  console.log('Switched auth mode, isRegister:', isRegister, 'Username required:', usernameInput.required);
+}
+
+document.getElementById('auth-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  console.log('Form submitted, isRegister:', isRegister);
+  const email = document.getElementById('email').value;
+  const password = document.getElementById('password').value;
+  const username = document.getElementById('username').value;
+  console.log('Form data:', { email, password, username });
+  const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+  const body = isRegister ? { username, email, password } : { email, password };
+  console.log('Sending to endpoint:', endpoint, 'Body:', body);
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    console.log('Response status:', response.status);
+    const data = await response.json();
+    console.log('Response data:', data);
+    if (response.ok) {
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('userId', data.user.id);
       document.getElementById('auth-container').style.display = 'none';
+      console.log('Authentication successful, token:', data.token, 'userId:', data.user.id);
       initApp();
     } else {
-      document.getElementById('auth-container').style.display = 'flex';
+      console.error('Server error response:', data.error);
+      showToast(data.error || 'Authentication failed');
     }
+  } catch (error) {
+    console.error('Fetch error:', error.message);
+    showToast('Error: ' + error.message);
   }
-  function initApp() {
-    socket = io({ auth: { token: localStorage.getItem('token') } });
-    socket.on('connect_error', (err) => {
-      console.error('Socket connection error:', err.message);
-      if (err.message.includes('Authentication')) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        location.reload();
-      }
+});
+
+function checkAuth() {
+  const token = localStorage.getItem('token');
+  if (token) {
+    console.log('Token found, initializing app:', token);
+    document.getElementById('auth-container').style.display = 'none';
+    initApp();
+  } else {
+    console.log('No token found, showing auth form');
+    document.getElementById('auth-container').style.display = 'flex';
+  }
+}
+
+function initApp() {
+  socket = io({ auth: { token: localStorage.getItem('token') } });
+  socket.on('connect', () => {
+    console.log('Socket.IO connected for user:', localStorage.getItem('userId'));
+  });
+  socket.on('connect_error', (err) => {
+    console.error('Socket connection error:', err.message);
+    if (err.message.includes('Authentication')) {
+      console.log('Invalid token, clearing localStorage and reloading');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      location.reload();
+    }
+  });
+  socket.on('alert', (alert) => {
+    const isTrafficCamera = alert.type === 'Traffic Camera';
+    if (isTrafficCamera && !showTrafficCameras) return;
+    new AdvancedMarkerElement({
+      map,
+      position: {
+        lat: alert.location.coordinates[1],
+        lng: alert.location.coordinates[0]
+      },
+      content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+      title: `${alert.type} Alert`
     });
-    socket.on('alert', (alert) => {
-      const isTrafficCamera = alert.type === 'Traffic Camera';
-      if (isTrafficCamera && !showTrafficCameras) return; // Skip if disabled
-      new AdvancedMarkerElement({
-        map,
-        position: {
-          lat: alert.location.coordinates[1],
-          lng: alert.location.coordinates[0]
-        },
-        content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-        title: `${alert.type} Alert`
+    console.log('Received real-time alert:', alert);
+    if (isTrafficCamera) {
+      cameraPositions.push({
+        lat: alert.location.coordinates[1],
+        lng: alert.location.coordinates[0]
       });
-      console.log('Received real-time alert:', alert);
-      if (isTrafficCamera) {
-        cameraPositions.push({
-          lat: alert.location.coordinates[1],
-          lng: alert.location.coordinates[0]
-        });
-      }
-      if (navState.isNavigating && !isTrafficCamera) {
-        checkHazardsAndOfferReroute();
-      }
-    });
-    socket.on('alertDeleted', (id) => {
-      console.log('Alert deleted via socket:', id);
-      // Remove from cameraPositions if it was a traffic camera
-      const alert = currentAlerts.find(a => a._id === id);
-      if (alert && alert.type === 'Traffic Camera') {
-        cameraPositions = cameraPositions.filter(pos =>
-          pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
-        );
-        cameraAlertShown.delete(`mongo-${id}`);
-      }
-      // Reload markers to reflect deletion
-      fetchAndDisplayMarkers(map, navState.userLocation);
-    });
-    initMap();
-  }
-  // Call checkAuth on load
-  window.addEventListener('load', checkAuth);
+    }
+    if (navState.isNavigating && !isTrafficCamera) {
+      checkHazardsAndOfferReroute();
+    }
+  });
+  socket.on('alertDeleted', (id) => {
+    console.log('Alert deleted via socket:', id);
+    const alert = currentAlerts.find(a => a._id === id);
+    if (alert && alert.type === 'Traffic Camera') {
+      cameraPositions = cameraPositions.filter(pos =>
+        pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+      );
+      cameraAlertShown.delete(`mongo-${id}`);
+    }
+    fetchAndDisplayMarkers(map, navState.userLocation);
+  });
+  initMap();
+}
+
+// Call checkAuth on load
+window.addEventListener('load', checkAuth);
 </script>
-</body>
-</html>
