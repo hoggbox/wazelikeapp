@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -910,6 +909,16 @@
     </div>
   </div>
   <div id="toast"></div>
+  <div id="auth-container" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white;">
+    <h2 id="auth-title">Login</h2>
+    <form id="auth-form" style="display: flex; flex-direction: column; gap: 10px; width: 300px;">
+      <input type="text" id="username" placeholder="Username" style="display: none;" required>
+      <input type="email" id="email" placeholder="Email" required>
+      <input type="password" id="password" placeholder="Password" required>
+      <button type="submit">Submit</button>
+    </form>
+    <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
+  </div>
   <script>
     let map;
     let userMarker;
@@ -961,7 +970,7 @@
     const mapId = '2666b5bd496d9c6026f43f82';
     const MAX_RETRIES = 3;
     let retryCount = 0;
-    const socket = io();
+    let socket; // Defined later with token
     const REROUTE_CHECK_INTERVAL = 10000; // 10 seconds
     const OFF_ROUTE_TOLERANCE = 100; // 100 meters
     const RECALC_COOLDOWN = 30000; // 30 seconds
@@ -1219,7 +1228,7 @@
         // Remove from cameraPositions if it was a traffic camera
         const alert = currentAlerts.find(a => a._id === id);
         if (alert && alert.type === 'Traffic Camera') {
-          cameraPositions = cameraPositions.filter(pos => 
+          cameraPositions = cameraPositions.filter(pos =>
             pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
           );
           cameraAlertShown.delete(`mongo-${id}`);
@@ -1480,10 +1489,10 @@
             <div class="alert-field"><strong>Date:</strong> ${dateObj.toLocaleDateString()}</div>
             <div class="alert-field"><strong>Timestamp:</strong> ${dateObj.toLocaleTimeString()}</div>
             <div class="alert-field"><strong>How long active:</strong> ${formatDuration(durationMs)}</div>
-            <div class="alert-field"><strong>User who posted:</strong> Anonymous</div>
+            <div class="alert-field"><strong>User who posted:</strong> ${alert.userId ? alert.userId.username : 'Anonymous'}</div>
             <div class="alert-actions">
               <button class="center-btn" data-lat="${alert.location.coordinates[1]}" data-lng="${alert.location.coordinates[0]}">Center</button>
-              ${alert.userId === socket.id ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
+              ${alert.userId && alert.userId._id === localStorage.getItem('userId') ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
             </div>
           `;
           content.appendChild(item);
@@ -1508,7 +1517,10 @@
       async function deleteAlert(id, item) {
         try {
           const response = await fetch(`/api/alerts/${id}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
           });
           if (response.ok) {
             item.remove();
@@ -1517,7 +1529,7 @@
             // Remove from cameraPositions if it was a traffic camera
             const alert = currentAlerts.find(a => a._id === id);
             if (alert && alert.type === 'Traffic Camera') {
-              cameraPositions = cameraPositions.filter(pos => 
+              cameraPositions = cameraPositions.filter(pos =>
                 pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
               );
               cameraAlertShown.delete(`mongo-${id}`);
@@ -1600,8 +1612,7 @@
             type: 'Point',
             coordinates: [location.lng(), location.lat()]
           },
-          timestamp: new Date(),
-          userId: socket.id
+          timestamp: new Date()
         };
         try {
           const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.lat()},${location.lng()}&key=${API_KEY}`);
@@ -1650,7 +1661,10 @@
         try {
           const response = await fetch('/api/alerts', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
             body: JSON.stringify(navState.tempAlertData)
           });
           const result = await response.json();
@@ -1803,10 +1817,10 @@
             <div class="alert-field"><strong>Date:</strong> ${dateObj.toLocaleDateString()}</div>
             <div class="alert-field"><strong>Timestamp:</strong> ${dateObj.toLocaleTimeString()}</div>
             <div class="alert-field"><strong>How long active:</strong> ${formatDuration(durationMs)}</div>
-            <div class="alert-field"><strong>User who posted:</strong> Anonymous</div>
+            <div class="alert-field"><strong>User who posted:</strong> ${alert.userId ? alert.userId.username : 'Anonymous'}</div>
             <div class="alert-actions">
               <button class="center-btn" data-lat="${alert.location.coordinates[1]}" data-lng="${alert.location.coordinates[0]}">Center</button>
-              ${alert.userId === socket.id ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
+              ${alert.userId && alert.userId._id === localStorage.getItem('userId') ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
             </div>
           `;
           content.appendChild(item);
@@ -1831,7 +1845,10 @@
       async function deleteAlert(id, item) {
         try {
           const response = await fetch(`/api/alerts/${id}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            }
           });
           if (response.ok) {
             item.remove();
@@ -1840,7 +1857,7 @@
             // Remove from cameraPositions if it was a traffic camera
             const alert = currentAlerts.find(a => a._id === id);
             if (alert && alert.type === 'Traffic Camera') {
-              cameraPositions = cameraPositions.filter(pos => 
+              cameraPositions = cameraPositions.filter(pos =>
                 pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
               );
               cameraAlertShown.delete(`mongo-${id}`);
@@ -2178,7 +2195,10 @@
         try {
           const response = await fetch('/api/hazards-near-route', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('token')}`
+            },
             body: JSON.stringify({ polyline, maxDistance: hazardAlertDistance * 1609.34 })
           });
           if (!response.ok) {
@@ -2643,6 +2663,64 @@
       showToast('Failed to load map. Please check your network or API key.');
     };
     document.head.appendChild(script);
+    // Auth logic
+    let isRegister = false;
+    function switchAuthMode() {
+      isRegister = !isRegister;
+      document.getElementById('auth-title').textContent = isRegister ? 'Register' : 'Login';
+      document.getElementById('username').style.display = isRegister ? 'block' : 'none';
+      document.getElementById('auth-switch').innerHTML = isRegister ? 'Already have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Login</a>' : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
+    }
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const username = document.getElementById('username').value;
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const body = isRegister ? { username, email, password } : { email, password };
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('userId', data.user.id);
+          document.getElementById('auth-container').style.display = 'none';
+          initApp();
+        } else {
+          showToast(data.error);
+        }
+      } catch (error) {
+        showToast('Error: ' + error.message);
+      }
+    });
+    function checkAuth() {
+      const token = localStorage.getItem('token');
+      if (token) {
+        document.getElementById('auth-container').style.display = 'none';
+        initApp();
+      } else {
+        document.getElementById('auth-container').style.display = 'flex';
+      }
+    }
+    function initApp() {
+      socket = io({ auth: { token: localStorage.getItem('token') } });
+      socket.on('connect_error', (err) => {
+        console.error('Socket connection error:', err.message);
+        if (err.message.includes('Authentication')) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          location.reload();
+        }
+      });
+      // Existing map init code goes here, but since it's already in initMap, call it
+      initMap();
+    }
+    // Call checkAuth on load
+    window.addEventListener('load', checkAuth);
   </script>
 </body>
 </html>

@@ -7,6 +7,9 @@ const cors = require('cors');
 const turf = require('@turf/turf');
 const winston = require('winston');
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
+const authRoutes = require('./routes/auth');
+const authMiddleware = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -47,7 +50,7 @@ const alertSchema = new mongoose.Schema({
       required: true
     }
   },
-  userId: { type: String },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   timestamp: { type: Date, default: Date.now, expires: 3600 }, // Auto-delete after 1 hour
   address: { type: String } // Optional: Reverse-geocoded address
 });
@@ -77,10 +80,13 @@ app.get('/', (req, res) => {
   res.sendFile(__dirname + '/public/index.html');
 });
 
-// API endpoint to save alerts and broadcast via Socket.IO
-app.post('/api/alerts', async (req, res) => {
+// Auth routes
+app.use('/api/auth', authRoutes);
+
+// Protected API endpoint to save alerts
+app.post('/api/alerts', authMiddleware, async (req, res) => {
   try {
-    const { type, location, timestamp, userId, address } = req.body;
+    const { type, location, timestamp, address } = req.body;
     if (!type || !location || !location.coordinates || !timestamp) {
       logger.warn('Invalid alert data received:', req.body);
       return res.status(400).json({ error: 'Invalid alert data: type, location, and timestamp are required' });
@@ -101,7 +107,7 @@ app.post('/api/alerts', async (req, res) => {
         type: 'Point',
         coordinates: [lng, lat]
       },
-      userId,
+      userId: req.user.id,
       timestamp: new Date(timestamp),
       address
     });
@@ -115,7 +121,7 @@ app.post('/api/alerts', async (req, res) => {
   }
 });
 
-// API endpoint to retrieve markers within a radius
+// API endpoint to retrieve markers within a radius (no auth required for viewing, but populate username)
 app.get('/api/markers', async (req, res) => {
   const { lat, lng, maxDistance = 50000, type } = req.query;
   try {
@@ -137,7 +143,7 @@ app.get('/api/markers', async (req, res) => {
     if (type) {
       query.type = type; // Filter by type if provided
     }
-    const markers = await Alert.find(query);
+    const markers = await Alert.find(query).populate('userId', 'username');
     logger.info(`Fetched ${markers.length} markers for lat:${lat}, lng:${lng}, maxDistance:${maxDistance}, type:${type || 'all'}`);
     res.status(200).json(markers);
   } catch (err) {
@@ -146,15 +152,19 @@ app.get('/api/markers', async (req, res) => {
   }
 });
 
-// API endpoint to delete an alert
-app.delete('/api/alerts/:id', async (req, res) => {
+// API endpoint to delete an alert (protected, only owner)
+app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await Alert.findByIdAndDelete(id);
-    if (!result) {
+    const alert = await Alert.findById(id);
+    if (!alert) {
       logger.warn(`Alert not found for deletion: ${id}`);
       return res.status(404).json({ error: 'Alert not found' });
     }
+    if (alert.userId.toString() !== req.user.id) {
+      return res.status(403).json({ error: 'Not authorized to delete this alert' });
+    }
+    await Alert.findByIdAndDelete(id);
     logger.info('Alert deleted:', id);
     io.emit('alertDeleted', id); // Broadcast deletion to clients
     res.status(200).json({ message: 'Alert deleted successfully' });
@@ -164,8 +174,8 @@ app.delete('/api/alerts/:id', async (req, res) => {
   }
 });
 
-// API endpoint to check for hazards near a route polyline
-app.post('/api/hazards-near-route', async (req, res) => {
+// API endpoint to check for hazards near a route polyline (protected)
+app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
   const { polyline, maxDistance = 3218.69 } = req.body; // Default 2 miles in meters
   try {
     if (!polyline || !Array.isArray(polyline) || polyline.length < 2) {
@@ -225,21 +235,36 @@ const io = new Server(server, {
   }
 });
 
+// Socket.IO authentication middleware
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) {
+    return next(new Error('Authentication error: No token provided'));
+  }
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.user = decoded;
+    next();
+  } catch (err) {
+    next(new Error('Authentication error: Invalid token'));
+  }
+});
+
 // Rate limiting for Socket.IO events
 const socketRateLimit = new Map();
 const LOCATION_UPDATE_INTERVAL = 1000; // 1 update per second per user
 
 io.on('connection', (socket) => {
-  logger.info('User connected:', socket.id);
+  logger.info('User connected:', socket.user.id);
   // Send recent alerts to new clients (last 1 hour)
-  Alert.find({ timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) } })
+  Alert.find({ timestamp: { $gte: new Date(Date.now() - 60 * 60 * 1000) } }).populate('userId', 'username')
     .then(alerts => {
       alerts.forEach(alert => socket.emit('alert', alert));
     })
     .catch(err => logger.error('Error fetching alerts for new client:', err));
   socket.on('locationUpdate', (data) => {
     if (!data.location || typeof data.location.lat !== 'number' || typeof data.location.lng !== 'number') {
-      logger.warn('Invalid location data from:', socket.id, data);
+      logger.warn('Invalid location data from:', socket.user.id, data);
       return;
     }
     const now = Date.now();
@@ -248,11 +273,11 @@ io.on('connection', (socket) => {
       return;
     }
     socketRateLimit.set(socket.id, now);
-    logger.info('Location update from:', socket.id, data.location);
-    socket.broadcast.emit('locationUpdate', data);
+    logger.info('Location update from:', socket.user.id, data.location);
+    socket.broadcast.emit('locationUpdate', { ...data, userId: socket.user.id });
   });
   socket.on('disconnect', () => {
-    logger.info('User disconnected:', socket.id);
+    logger.info('User disconnected:', socket.user.id);
     socketRateLimit.delete(socket.id);
   });
 });
