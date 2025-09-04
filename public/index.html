@@ -499,6 +499,19 @@
       font-size: clamp(10px, 2vmin, 14px);
       color: white;
     }
+    #logout-button {
+      margin: 0.5vmin;
+      padding: 0.8vmin 1.5vmin;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+      background-color: #d32f2f;
+    }
+    #logout-button:hover {
+      background-color: #b71c1c;
+    }
     #toast {
       position: fixed;
       top: 20px;
@@ -814,7 +827,7 @@
     </header>
     <div id="settings-tabs">
       <div class="settings-tab active" data-tab="map-settings">Map Settings</div>
-      <div class="settings-tab" data-tab="profile">Profile</div>
+      <div class="settings-tab" data-tab="account">Account</div>
     </div>
     <div id="settings-content">
       <div id="map-settings" class="settings-tab-content">
@@ -876,8 +889,8 @@
           <input type="checkbox" id="use-default-distances" checked>
         </div>
       </div>
-      <div id="profile" class="settings-tab-content" style="display: none;">
-        <p>Profile settings coming soon...</p>
+      <div id="account" class="settings-tab-content" style="display: none;">
+        <button id="logout-button">Logout</button>
       </div>
     </div>
   </div>
@@ -887,13 +900,9 @@
     </header>
     <div id="alerts-tabs">
       <div class="alerts-tab active" data-tab="information">Information</div>
-      <div class="alerts-tab" data-tab="user">User</div>
       <div class="alerts-tab" data-tab="tools">Tools</div>
     </div>
     <div id="information" class="alerts-tab-content"></div>
-    <div id="user" class="alerts-tab-content" style="display: none;">
-      <p>Nothing right now</p>
-    </div>
     <div id="tools" class="alerts-tab-content" style="display: none;">
       <button id="center-alerts-btn">Center on Alerts</button>
     </div>
@@ -1421,7 +1430,7 @@
           document.querySelectorAll('.settings-tab-content').forEach(c => c.style.display = 'none');
           tab.classList.add('active');
           document.getElementById(tab.getAttribute('data-tab')).style.display = 'block';
-          console.log('Switched to tab:', tab.getAttribute('data-tab'));
+          console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         });
       });
       document.querySelectorAll('.alerts-tab').forEach(tab => {
@@ -1432,6 +1441,16 @@
           document.getElementById(tab.getAttribute('data-tab')).style.display = 'block';
           console.log('Switched to alerts tab:', tab.getAttribute('data-tab'));
         });
+      });
+      document.getElementById('logout-button').addEventListener('click', () => {
+        console.log('Logout button clicked, clearing localStorage');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        socket.disconnect();
+        document.getElementById('settings-hud-container').classList.remove('active');
+        document.getElementById('auth-container').style.display = 'flex';
+        showToast('Logged out successfully');
+        console.log('User logged out, showing auth form');
       });
       adjustHud();
       window.addEventListener('resize', adjustHud);
@@ -1658,6 +1677,7 @@
         showToast('Failed to load alerts.');
       }
     }
+
     function fetchCurrentAlerts() {
       const center = navState.userLocation;
       const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
@@ -1675,6 +1695,7 @@
           showToast('Failed to load current alerts.');
         });
     }
+
     function formatDuration(ms) {
       const seconds = Math.floor(ms / 1000);
       const minutes = Math.floor(seconds / 60);
@@ -1685,6 +1706,7 @@
       if (minutes > 0) return `${minutes} minutes`;
       return `${seconds} seconds`;
     }
+
     function displayAlertsInHud(alerts) {
       const content = document.getElementById('information');
       content.innerHTML = '';
@@ -2637,6 +2659,18 @@
       });
       initMap();
     }
+
+    document.getElementById('logout-button').addEventListener('click', () => {
+      console.log('Logout button clicked, clearing localStorage');
+      localStorage.removeItem('token');
+      localStorage.removeItem('userId');
+      socket.disconnect();
+      document.getElementById('settings-hud-container').classList.remove('active');
+      document.getElementById('auth-container').style.display = 'flex';
+      showToast('Logged out successfully');
+      console.log('User logged out, showing auth form');
+      location.reload(); // Ensure fresh state
+    });
 
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker&loading=async`;
