@@ -982,7 +982,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 19, // Tighter zoom for Google Maps-like view
+      navigationZoom: 18, // Increased for tighter view
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -1676,7 +1676,6 @@
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
           showToast('Route recalculated successfully.');
           console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
-          restoreNavigationView();
         });
         return true;
       }
@@ -1859,60 +1858,41 @@
       try {
         const { latitude, longitude, heading, speed } = position.coords;
         console.log('Location update received:', { lat: latitude, lng: longitude, speed, heading });
-        if (isNaN(latitude) || isNaN(longitude)) {
-          console.error('Invalid GPS coordinates:', { latitude, longitude });
-          showToast('Invalid GPS data received.');
-          return;
-        }
         navState.previousUserLocation = navState.userLocation;
         navState.userLocation = { lat: latitude, lng: longitude };
         let pos = navState.userLocation;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
-          // Skip polyline snapping for first 30s of navigation
-          const now = Date.now();
-          if (now - navState.navigationStartTime < 30000) {
-            console.log('Skipping polyline snap during initial navigation period:', pos);
-          } else {
-            const path = navState.currentRoute.routes[0].overview_path;
-            let minDistance = Infinity;
-            let closestIndex = 0;
-            path.forEach((point, index) => {
-              const distance = GoogleMaps.spherical.computeDistanceBetween(
-                new google.maps.LatLng(pos),
-                point
-              );
-              if (distance < minDistance) {
-                minDistance = distance;
-                closestIndex = index;
-              }
-            });
-            // Only snap if within 200m of route start
-            if (minDistance < 200) {
-              pos = { lat: path[closestIndex].lat(), lng: path[closestIndex].lng() };
-              console.log('Snapped to polyline point:', pos, 'Distance:', minDistance);
-            } else {
-              console.log('User too far from route start, using raw GPS:', pos);
+          const path = navState.currentRoute.routes[0].overview_path;
+          let minDistance = Infinity;
+          let closestIndex = 0;
+          path.forEach((point, index) => {
+            const distance = GoogleMaps.spherical.computeDistanceBetween(
+              new google.maps.LatLng(pos),
+              point
+            );
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestIndex = index;
             }
-            const nextPoint = closestIndex < path.length - 1 ? path[closestIndex + 1] : path[closestIndex - 1] || path[closestIndex];
-            const routeHeading = heading && !isNaN(heading)
-              ? heading
-              : (navState.deviceHeading !== null
-                ? navState.deviceHeading
-                : GoogleMaps.spherical.computeHeading(
-                    new google.maps.LatLng(pos),
-                    nextPoint
-                  ));
-            if (Math.abs(routeHeading - navState.currentHeading) > 5) {
-              navState.currentHeading = routeHeading;
-              console.log('Heading updated:', navState.currentHeading);
-            }
-            const userLatLng = new google.maps.LatLng(navState.userLocation);
-            try {
-              checkOffRoute(userLatLng);
-            } catch (error) {
-              console.error('checkOffRoute failed:', error);
-              showToast('Error checking route deviation. Continuing with raw location.');
-            }
+          });
+          pos = { lat: path[closestIndex].lat(), lng: path[closestIndex].lng() };
+          const nextPoint = closestIndex < path.length - 1 ? path[closestIndex + 1] : path[closestIndex - 1] || path[closestIndex];
+          const routeHeading = heading && !isNaN(heading)
+            ? heading
+            : (navState.deviceHeading !== null
+              ? navState.deviceHeading
+              : GoogleMaps.spherical.computeHeading(
+                  new google.maps.LatLng(pos),
+                  nextPoint
+                ));
+          navState.deviceHeading = routeHeading;
+          console.log('Snapped to polyline point:', pos, 'Bearing:', navState.deviceHeading);
+          const userLatLng = new google.maps.LatLng(navState.userLocation);
+          try {
+            checkOffRoute(userLatLng);
+          } catch (error) {
+            console.error('checkOffRoute failed:', error);
+            showToast('Error checking route deviation. Continuing with raw location.');
           }
         }
         navState.userLocation = pos;
@@ -1932,14 +1912,6 @@
         navState.lastKnownPosition = pos;
         socket.emit('locationUpdate', { location: navState.userLocation });
         updateHUD(navState.currentRoute, navState.userLocation);
-        // Check if user marker is visible
-        if (navState.isNavigating && navState.isFollowing) {
-          const bounds = map.getBounds();
-          if (bounds && !bounds.contains(new google.maps.LatLng(navState.userLocation))) {
-            console.warn('User marker not in view, adjusting center');
-            restoreNavigationView();
-          }
-        }
       } catch (error) {
         console.error('Error in position update:', error);
         showToast('Error updating location. Please ensure GPS is enabled.');
@@ -1954,114 +1926,49 @@
       }
       navState.isNavigating = true;
       navState.isFollowing = localStorage.getItem('isFollowing') === 'true';
-      navState.navigationStartTime = Date.now();
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
       directionsRenderer.setMap(map);
-      // Get fresh GPS position with retries
-      let gpsRetryCount = 0;
-      function tryGetPosition() {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            navState.userLocation = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude
-            };
-            navState.deviceHeading = position.coords.heading || null;
-            console.log('Fresh GPS position for navigation start:', navState.userLocation, 'Heading:', navState.deviceHeading);
-            if (userMarker) {
-              userMarker.position = navState.userLocation;
-              userMarker.map = map;
-            }
-            calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
-              const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
-              navState.originalRoute = navState.currentRoute;
-              restoreNavigationView();
-              console.log('Navigation started, centered on:', startLocation);
-              startRerouteCheck();
-              navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
-              if (showTrafficCameras) {
-                cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
-              }
-              if (watchId) {
-                navigator.geolocation.clearWatch(watchId);
-              }
-              watchId = navigator.geolocation.watchPosition(
-                onPositionUpdate,
-                (error) => {
-                  console.error('Geolocation watch error:', error);
-                  showToast('Error getting location: ' + error.message);
-                },
-                {
-                  enableHighAccuracy: true,
-                  maximumAge: 0,
-                  timeout: 15000
-                }
-              );
-              console.log('GPS tracking started, watchId:', watchId);
-              // Initial position update
-              navigator.geolocation.getCurrentPosition(
-                onPositionUpdate,
-                (error) => {
-                  console.error('Immediate position update error:', error);
-                  showToast('Error getting initial navigation position.');
-                },
-                {
-                  enableHighAccuracy: true,
-                  maximumAge: 0,
-                  timeout: 15000
-                }
-              );
-            });
-          },
+      calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
+        const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
+        navState.originalRoute = navState.currentRoute;
+        restoreNavigationView();
+        console.log('Navigation started, centered on:', startLocation);
+        startRerouteCheck();
+        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
+        if (showTrafficCameras) {
+          cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
+        }
+        if (watchId) {
+          navigator.geolocation.clearWatch(watchId);
+        }
+        watchId = navigator.geolocation.watchPosition(
+          onPositionUpdate,
           (error) => {
-            console.error('GPS error in startGPS:', error);
-            if (gpsRetryCount < MAX_RETRIES) {
-              gpsRetryCount++;
-              const backoff = 5000 * Math.pow(2, gpsRetryCount);
-              console.log(`Retrying GPS in startGPS (attempt ${gpsRetryCount}/${MAX_RETRIES}, backoff: ${backoff}ms)`);
-              setTimeout(tryGetPosition, backoff);
-            } else {
-              console.error('Max GPS retries reached, using fallback position:', navState.userLocation);
-              showToast('Failed to get fresh location. Using last known position.');
-              calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
-                const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
-                navState.originalRoute = navState.currentRoute;
-                restoreNavigationView();
-                console.log('Navigation started with fallback position:', startLocation);
-                startRerouteCheck();
-                navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
-                if (showTrafficCameras) {
-                  cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
-                }
-                if (watchId) {
-                  navigator.geolocation.clearWatch(watchId);
-                }
-                watchId = navigator.geolocation.watchPosition(
-                  onPositionUpdate,
-                  (error) => {
-                    console.error('Geolocation watch error:', error);
-                    showToast('Error getting location: ' + error.message);
-                  },
-                  {
-                    enableHighAccuracy: true,
-                    maximumAge: 0,
-                    timeout: 15000
-                  }
-                );
-                console.log('GPS tracking started with fallback, watchId:', watchId);
-              });
-            }
+            console.error('Geolocation watch error:', error);
+            showToast('Error getting location: ' + error.message);
           },
           {
             enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0
+            maximumAge: 0,
+            timeout: 5000
           }
         );
-      }
-      tryGetPosition();
+        console.log('GPS tracking started, watchId:', watchId);
+        navigator.geolocation.getCurrentPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Immediate position update error:', error);
+            showToast('Error getting initial navigation position.');
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000
+          }
+        );
+      });
     }
 
     function stopGPS() {
@@ -2091,7 +1998,6 @@
       navState.currentHazard = null;
       navState.alternativeRoute = null;
       navState.lastRecalculationTime = 0;
-      navState.navigationStartTime = 0;
       document.getElementById('search-container').classList.remove('hidden');
       document.getElementById('search-container').style.display = 'flex';
       document.getElementById('hud-container').style.display = 'none';
@@ -2308,7 +2214,7 @@
             } else {
               console.log('No suitable alternative route found that avoids the hazard.');
               showToast('Hazard detected, but no alternative route available that avoids it.');
-              if (hazard._id) navState.ignoredHazards.push(hazard._id);
+              navState.ignoredHazards.push(hazard._id);
             }
           } else {
             console.log('No valid hazards ahead after filtering.');
@@ -2464,75 +2370,21 @@
     }
 
     function restoreNavigationView() {
-      if (navState.isFollowing && navState.isNavigating && navState.userLocation) {
+      if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation);
-        // Offset center to hide all road/map behind user
-        const offsetLat = navState.userLocation.lat + (0.00045 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~50m north
+        // Offset center to position user marker near bottom of screen
+        const offsetLat = navState.userLocation.lat + (0.0002 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~22m north
         map.panTo({ lat: offsetLat, lng: navState.userLocation.lng });
-        map.setZoom(navState.navigationZoom); // 20 for ultra-tight view
+        map.setZoom(navState.navigationZoom); // 18 for tight view
         map.setTilt(45);
         map.setHeading(navState.currentHeading || 0);
         console.log('Navigation view restored: Center:', { lat: offsetLat, lng: navState.userLocation.lng }, 'Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
-        // Verify user marker is visible
-        const bounds = map.getBounds();
-        if (bounds && !bounds.contains(userLatLng)) {
-          console.warn('User marker not in view, adjusting center');
-          map.panTo(navState.userLocation);
-          setTimeout(() => {
-            map.panTo({ lat: offsetLat, lng: navState.userLocation.lng });
-            console.log('Re-adjusted center to include user marker:', { lat: offsetLat, lng: navState.userLocation.lng });
-          }, 100);
-        }
       }
     }
 
     function acceptReroute() {
-      if (!navState.alternativeRoute) {
-        console.error('No alternative route available for reroute');
-        showToast('No alternative route available.');
-        return;
-      }
-      // Get fresh GPS position with retries
-      let gpsRetryCount = 0;
-      function tryGetPositionForReroute() {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            navState.userLocation = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude
-            };
-            navState.deviceHeading = position.coords.heading || null;
-            console.log('Fresh GPS position for reroute:', navState.userLocation, 'Heading:', navState.deviceHeading);
-            if (userMarker) {
-              userMarker.position = navState.userLocation;
-              userMarker.map = map;
-            }
-            finalizeReroute();
-          },
-          (error) => {
-            console.error('GPS error in acceptReroute:', error);
-            if (gpsRetryCount < MAX_RETRIES) {
-              gpsRetryCount++;
-              const backoff = 5000 * Math.pow(2, gpsRetryCount);
-              console.log(`Retrying GPS in acceptReroute (attempt ${gpsRetryCount}/${MAX_RETRIES}, backoff: ${backoff}ms)`);
-              setTimeout(tryGetPositionForReroute, backoff);
-            } else {
-              console.error('Max GPS retries reached in acceptReroute, using fallback position:', navState.userLocation);
-              showToast('Failed to get fresh location for reroute. Using last known position.');
-              finalizeReroute();
-            }
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 0
-          }
-        );
-      }
-      function finalizeReroute() {
-        if (navState.currentHazard && navState.currentHazard._id) {
-          navState.ignoredHazards.push(navState.currentHazard._id);
-        }
+      if (navState.alternativeRoute && navState.currentHazard) {
+        navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         navState.originalRoute = navState.currentRoute;
@@ -2546,22 +2398,34 @@
         const rerouteHud = document.getElementById('reroute-hud');
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
-        navState.isFollowing = true;
+        navState.isFollowing = true; // Ensure following is enabled
         localStorage.setItem('isFollowing', navState.isFollowing);
         restoreNavigationView();
         showToast('Alternative route accepted.');
-        console.log('Reroute accepted:', navState.currentRoute.routes[0].legs[0].distance.text);
+        console.log('Reroute accepted:', navState.alternativeRoute.routes[0].legs[0].distance.text);
         navState.alertState = 'IDLE';
         navState.alternativeRoute = null;
         navState.currentHazard = null;
         navState.pendingReroute = null;
         navState.lastRecalculationTime = Date.now();
+        // Force immediate position update to ensure navigation sync
+        navigator.geolocation.getCurrentPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Immediate position update after reroute failed:', error);
+            showToast('Error syncing navigation after reroute.');
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000
+          }
+        );
       }
-      tryGetPositionForReroute();
     }
 
     function rejectReroute() {
-      if (navState.currentHazard && navState.currentHazard._id) {
+      if (navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
       }
       if (navState.originalRoute) {
@@ -2627,7 +2491,7 @@
       cameraHudContainer.classList.remove('active');
       cameraHud.classList.remove('active');
       console.log('Camera alert dismissed');
-      if (navState.pendingReroute && navState.pendingReroute.hazard && navState.pendingReroute.timeSaved !== null) {
+      if (navState.pendingReroute) {
         const { hazard, timeSaved } = navState.pendingReroute;
         showRerouteHud(hazard, timeSaved);
         navState.pendingReroute = null;
@@ -2737,7 +2601,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 15000,
+            timeout: 5000,
             maximumAge: 0
           }
         ), backoff);
