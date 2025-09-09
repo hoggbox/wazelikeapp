@@ -982,7 +982,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 19, // Tighter zoom for Google Maps-like view
+      navigationZoom: 20, // Ultra-tight zoom for Google Maps-like view
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -1022,6 +1022,10 @@
       }
       if (navState.deviceHeading !== null) {
         console.log('Device orientation heading:', navState.deviceHeading);
+        if (navState.isNavigating && navState.isFollowing) {
+          navState.currentHeading = navState.deviceHeading;
+          restoreNavigationView();
+        }
       }
     });
     function animate() {
@@ -1419,7 +1423,7 @@
         cameraAlertShown.clear();
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
-      document.getElementById('hazard-alert-distance').addEventListener('input', (e) => {
+      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
@@ -1427,7 +1431,7 @@
           console.log('Hazard alert distance set to:', hazardAlertDistance, 'miles');
         }
       });
-      document.getElementById('camera-alert-distance').addEventListener('input', (e) => {
+      document.getElementById('camera-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           cameraAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
@@ -1651,6 +1655,7 @@
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
     }
+
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
         console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -1660,11 +1665,6 @@
       const now = Date.now();
       if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
         console.log('Recalculation skipped due to cooldown');
-        return false;
-      }
-      if (!GoogleMaps.poly) {
-        console.error('GoogleMaps.poly not defined, cannot check route deviation');
-        showToast('Navigation error: Geometry library not loaded');
         return false;
       }
       if (!GoogleMaps.poly) {
@@ -1888,8 +1888,8 @@
                   new google.maps.LatLng(pos),
                   nextPoint
                 ));
-          navState.deviceHeading = routeHeading;
-          console.log('Snapped to polyline point:', pos, 'Bearing:', navState.deviceHeading);
+          navState.currentHeading = routeHeading;
+          console.log('Snapped to polyline point:', pos, 'Bearing:', navState.currentHeading);
           const userLatLng = new google.maps.LatLng(navState.userLocation);
           try {
             checkOffRoute(userLatLng);
@@ -2375,10 +2375,10 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation);
-        // Offset center to position user marker at bottom of screen, hide traveled path
-        const offsetLat = navState.userLocation.lat + (0.0004 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~44m north
+        // Offset center to position user marker at bottom, hide traveled path
+        const offsetLat = navState.userLocation.lat + (0.0006 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~66m north
         map.panTo({ lat: offsetLat, lng: navState.userLocation.lng });
-        map.setZoom(navState.navigationZoom); // 19 for tight view
+        map.setZoom(navState.navigationZoom); // 20 for ultra-tight view
         map.setTilt(45);
         map.setHeading(navState.currentHeading || 0);
         console.log('Navigation view restored: Center:', { lat: offsetLat, lng: navState.userLocation.lng }, 'Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
@@ -2401,7 +2401,7 @@
         const rerouteHud = document.getElementById('reroute-hud');
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
-        navState.isFollowing = true; // Ensure following is enabled
+        navState.isFollowing = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
         restoreNavigationView();
         showToast('Alternative route accepted.');
@@ -2411,7 +2411,6 @@
         navState.currentHazard = null;
         navState.pendingReroute = null;
         navState.lastRecalculationTime = Date.now();
-        // Force immediate position update to sync navigation
         navigator.geolocation.getCurrentPosition(
           onPositionUpdate,
           (error) => {
