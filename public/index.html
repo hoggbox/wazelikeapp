@@ -982,7 +982,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 18,
+      navigationZoom: 18, // Increased for tighter view
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -1348,9 +1348,7 @@
           navState.isFollowing = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
           directionsRenderer.setMap(map);
-          map.panTo(navState.userLocation);
-          map.setZoom(navState.navigationZoom);
-          map.setTilt(45);
+          restoreNavigationView();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
         } else {
           recenterNonNavigation();
@@ -1410,10 +1408,7 @@
         localStorage.setItem('isFollowing', navState.isFollowing);
         console.log('Auto-recenter toggled:', navState.isFollowing);
         if (navState.isFollowing && navState.isNavigating) {
-          map.panTo(navState.userLocation);
-          map.setZoom(navState.navigationZoom);
-          map.setTilt(45);
-          map.setHeading(navState.currentHeading || 0);
+          restoreNavigationView();
         }
       });
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
@@ -1636,6 +1631,7 @@
       navState.tempMarker = null;
       console.log('Alert posted');
     }
+
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
@@ -1656,6 +1652,7 @@
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
     }
+
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
         console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -1910,12 +1907,7 @@
           }
         }
         if (navState.isNavigating && navState.isFollowing) {
-          map.panTo(navState.userLocation);
-          map.setHeading(navState.currentHeading || 0);
-          navState.navigationZoom = speed && speed > 0 ? (speed > 13.89 ? 16 : speed > 6.94 ? 17 : 18) : 18;
-          map.setZoom(navState.navigationZoom);
-          map.setTilt(45);
-          console.log('Camera updated: Center:', navState.userLocation, 'Zoom:', map.getZoom(), 'Heading:', navState.currentHeading, 'Tilt: 45');
+          restoreNavigationView();
         }
         navState.lastKnownPosition = pos;
         socket.emit('locationUpdate', { location: navState.userLocation });
@@ -1941,10 +1933,7 @@
       calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.originalRoute = navState.currentRoute;
-        map.panTo({ lat: startLocation.lat(), lng: startLocation.lng() });
-        navState.navigationZoom = 16;
-        map.setZoom(navState.navigationZoom);
-        map.setTilt(45);
+        restoreNavigationView();
         console.log('Navigation started, centered on:', startLocation);
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
@@ -2060,10 +2049,7 @@
             updateBottomHUD(response);
             if (callback) callback();
             if (navState.isFollowing) {
-              map.panTo(navState.userLocation);
-              map.setZoom(navState.navigationZoom);
-              map.setTilt(45);
-              console.log('Forced recenter after route calculation:', navState.userLocation);
+              restoreNavigationView();
             }
           } else {
             console.error('Directions request failed:', status);
@@ -2384,12 +2370,15 @@
     }
 
     function restoreNavigationView() {
-      if (navState.isFollowing) {
-        map.panTo(navState.userLocation);
-        map.setZoom(navState.navigationZoom);
+      if (navState.isFollowing && navState.isNavigating) {
+        const userLatLng = new google.maps.LatLng(navState.userLocation);
+        // Offset center to position user marker near bottom of screen
+        const offsetLat = navState.userLocation.lat + (0.0002 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~22m north
+        map.panTo({ lat: offsetLat, lng: navState.userLocation.lng });
+        map.setZoom(navState.navigationZoom); // 18 for tight view
         map.setTilt(45);
         map.setHeading(navState.currentHeading || 0);
-        console.log('Restored navigation view: Zoom:', navState.navigationZoom, 'Tilt: 45');
+        console.log('Navigation view restored: Center:', { lat: offsetLat, lng: navState.userLocation.lng }, 'Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
       }
     }
 
@@ -2409,14 +2398,29 @@
         const rerouteHud = document.getElementById('reroute-hud');
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
+        navState.isFollowing = true; // Ensure following is enabled
+        localStorage.setItem('isFollowing', navState.isFollowing);
         restoreNavigationView();
         showToast('Alternative route accepted.');
-        console.log('Reroute accepted:', navState.alternativeRoute);
+        console.log('Reroute accepted:', navState.alternativeRoute.routes[0].legs[0].distance.text);
         navState.alertState = 'IDLE';
         navState.alternativeRoute = null;
         navState.currentHazard = null;
         navState.pendingReroute = null;
         navState.lastRecalculationTime = Date.now();
+        // Force immediate position update to ensure navigation sync
+        navigator.geolocation.getCurrentPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Immediate position update after reroute failed:', error);
+            showToast('Error syncing navigation after reroute.');
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000
+          }
+        );
       }
     }
 
