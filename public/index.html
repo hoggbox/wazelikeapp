@@ -982,7 +982,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 20, // Ultra-tight zoom
+      navigationZoom: 19, // Tighter zoom for Google Maps-like view
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -1020,12 +1020,8 @@
       } else if (event.alpha !== null) {
         navState.deviceHeading = 360 - event.alpha;
       }
-      if (navState.deviceHeading !== null && Math.abs(navState.deviceHeading - navState.currentHeading) > 5) {
-        navState.currentHeading = navState.deviceHeading;
-        console.log('Device orientation heading updated:', navState.currentHeading);
-        if (navState.isNavigating && navState.isFollowing) {
-          restoreNavigationView();
-        }
+      if (navState.deviceHeading !== null) {
+        console.log('Device orientation heading:', navState.deviceHeading);
       }
     });
     function animate() {
@@ -1110,7 +1106,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 10000,
+            timeout: 5000,
             maximumAge: 0
           }
         );
@@ -1423,7 +1419,7 @@
         cameraAlertShown.clear();
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
-      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
+      document.getElementById('hazard-alert-distance').addEventListener('input', (e) => {
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
@@ -1431,7 +1427,7 @@
           console.log('Hazard alert distance set to:', hazardAlertDistance, 'miles');
         }
       });
-      document.getElementById('camera-alert-distance').addEventListener('change', (e) => {
+      document.getElementById('camera-alert-distance').addEventListener('input', (e) => {
         if (!navState.useDefaultDistances) {
           cameraAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
@@ -1872,45 +1868,51 @@
         navState.userLocation = { lat: latitude, lng: longitude };
         let pos = navState.userLocation;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
-          const path = navState.currentRoute.routes[0].overview_path;
-          let minDistance = Infinity;
-          let closestIndex = 0;
-          path.forEach((point, index) => {
-            const distance = GoogleMaps.spherical.computeDistanceBetween(
-              new google.maps.LatLng(pos),
-              point
-            );
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestIndex = index;
-            }
-          });
-          // Only snap to polyline if within tolerance to avoid jumping
-          if (minDistance < OFF_ROUTE_TOLERANCE) {
-            pos = { lat: path[closestIndex].lat(), lng: path[closestIndex].lng() };
-            console.log('Snapped to polyline point:', pos, 'Distance:', minDistance);
+          // Skip polyline snapping for first 30s of navigation
+          const now = Date.now();
+          if (now - navState.navigationStartTime < 30000) {
+            console.log('Skipping polyline snap during initial navigation period:', pos);
           } else {
-            console.log('User too far from route start, using raw GPS:', pos);
-          }
-          const nextPoint = closestIndex < path.length - 1 ? path[closestIndex + 1] : path[closestIndex - 1] || path[closestIndex];
-          const routeHeading = heading && !isNaN(heading)
-            ? heading
-            : (navState.deviceHeading !== null
-              ? navState.deviceHeading
-              : GoogleMaps.spherical.computeHeading(
-                  new google.maps.LatLng(pos),
-                  nextPoint
-                ));
-          if (Math.abs(routeHeading - navState.currentHeading) > 5) {
-            navState.currentHeading = routeHeading;
-            console.log('Heading updated:', navState.currentHeading);
-          }
-          const userLatLng = new google.maps.LatLng(navState.userLocation);
-          try {
-            checkOffRoute(userLatLng);
-          } catch (error) {
-            console.error('checkOffRoute failed:', error);
-            showToast('Error checking route deviation. Continuing with raw location.');
+            const path = navState.currentRoute.routes[0].overview_path;
+            let minDistance = Infinity;
+            let closestIndex = 0;
+            path.forEach((point, index) => {
+              const distance = GoogleMaps.spherical.computeDistanceBetween(
+                new google.maps.LatLng(pos),
+                point
+              );
+              if (distance < minDistance) {
+                minDistance = distance;
+                closestIndex = index;
+              }
+            });
+            // Only snap if within 200m of route start
+            if (minDistance < 200) {
+              pos = { lat: path[closestIndex].lat(), lng: path[closestIndex].lng() };
+              console.log('Snapped to polyline point:', pos, 'Distance:', minDistance);
+            } else {
+              console.log('User too far from route start, using raw GPS:', pos);
+            }
+            const nextPoint = closestIndex < path.length - 1 ? path[closestIndex + 1] : path[closestIndex - 1] || path[closestIndex];
+            const routeHeading = heading && !isNaN(heading)
+              ? heading
+              : (navState.deviceHeading !== null
+                ? navState.deviceHeading
+                : GoogleMaps.spherical.computeHeading(
+                    new google.maps.LatLng(pos),
+                    nextPoint
+                  ));
+            if (Math.abs(routeHeading - navState.currentHeading) > 5) {
+              navState.currentHeading = routeHeading;
+              console.log('Heading updated:', navState.currentHeading);
+            }
+            const userLatLng = new google.maps.LatLng(navState.userLocation);
+            try {
+              checkOffRoute(userLatLng);
+            } catch (error) {
+              console.error('checkOffRoute failed:', error);
+              showToast('Error checking route deviation. Continuing with raw location.');
+            }
           }
         }
         navState.userLocation = pos;
@@ -1952,6 +1954,7 @@
       }
       navState.isNavigating = true;
       navState.isFollowing = localStorage.getItem('isFollowing') === 'true';
+      navState.navigationStartTime = Date.now();
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
@@ -1993,10 +1996,23 @@
                 {
                   enableHighAccuracy: true,
                   maximumAge: 0,
-                  timeout: 10000
+                  timeout: 15000
                 }
               );
               console.log('GPS tracking started, watchId:', watchId);
+              // Initial position update
+              navigator.geolocation.getCurrentPosition(
+                onPositionUpdate,
+                (error) => {
+                  console.error('Immediate position update error:', error);
+                  showToast('Error getting initial navigation position.');
+                },
+                {
+                  enableHighAccuracy: true,
+                  maximumAge: 0,
+                  timeout: 15000
+                }
+              );
             });
           },
           (error) => {
@@ -2031,7 +2047,7 @@
                   {
                     enableHighAccuracy: true,
                     maximumAge: 0,
-                    timeout: 10000
+                    timeout: 15000
                   }
                 );
                 console.log('GPS tracking started with fallback, watchId:', watchId);
@@ -2040,7 +2056,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 10000,
+            timeout: 15000,
             maximumAge: 0
           }
         );
@@ -2075,6 +2091,7 @@
       navState.currentHazard = null;
       navState.alternativeRoute = null;
       navState.lastRecalculationTime = 0;
+      navState.navigationStartTime = 0;
       document.getElementById('search-container').classList.remove('hidden');
       document.getElementById('search-container').style.display = 'flex';
       document.getElementById('hud-container').style.display = 'none';
@@ -2291,7 +2308,7 @@
             } else {
               console.log('No suitable alternative route found that avoids the hazard.');
               showToast('Hazard detected, but no alternative route available that avoids it.');
-              navState.ignoredHazards.push(hazard._id);
+              if (hazard._id) navState.ignoredHazards.push(hazard._id);
             }
           } else {
             console.log('No valid hazards ahead after filtering.');
@@ -2450,7 +2467,7 @@
       if (navState.isFollowing && navState.isNavigating && navState.userLocation) {
         const userLatLng = new google.maps.LatLng(navState.userLocation);
         // Offset center to hide all road/map behind user
-        const offsetLat = navState.userLocation.lat + (0.0005 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~55m north
+        const offsetLat = navState.userLocation.lat + (0.00045 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~50m north
         map.panTo({ lat: offsetLat, lng: navState.userLocation.lng });
         map.setZoom(navState.navigationZoom); // 20 for ultra-tight view
         map.setTilt(45);
@@ -2507,7 +2524,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 10000,
+            timeout: 15000,
             maximumAge: 0
           }
         );
@@ -2610,7 +2627,7 @@
       cameraHudContainer.classList.remove('active');
       cameraHud.classList.remove('active');
       console.log('Camera alert dismissed');
-      if (navState.pendingReroute) {
+      if (navState.pendingReroute && navState.pendingReroute.hazard && navState.pendingReroute.timeSaved !== null) {
         const { hazard, timeSaved } = navState.pendingReroute;
         showRerouteHud(hazard, timeSaved);
         navState.pendingReroute = null;
@@ -2720,7 +2737,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 10000,
+            timeout: 15000,
             maximumAge: 0
           }
         ), backoff);
