@@ -982,7 +982,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 18, // Increased for tighter view
+      navigationZoom: 19, // Tighter zoom for Google Maps-like view
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -1631,7 +1631,6 @@
       navState.tempMarker = null;
       console.log('Alert posted');
     }
-
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
@@ -1652,7 +1651,6 @@
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
     }
-
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
         console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -1662,6 +1660,11 @@
       const now = Date.now();
       if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
         console.log('Recalculation skipped due to cooldown');
+        return false;
+      }
+      if (!GoogleMaps.poly) {
+        console.error('GoogleMaps.poly not defined, cannot check route deviation');
+        showToast('Navigation error: Geometry library not loaded');
         return false;
       }
       if (!GoogleMaps.poly) {
@@ -2372,10 +2375,10 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation);
-        // Offset center to position user marker near bottom of screen
-        const offsetLat = navState.userLocation.lat + (0.0002 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~22m north
+        // Offset center to position user marker at bottom of screen, hide traveled path
+        const offsetLat = navState.userLocation.lat + (0.0004 / Math.cos(navState.userLocation.lat * Math.PI / 180)); // ~44m north
         map.panTo({ lat: offsetLat, lng: navState.userLocation.lng });
-        map.setZoom(navState.navigationZoom); // 18 for tight view
+        map.setZoom(navState.navigationZoom); // 19 for tight view
         map.setTilt(45);
         map.setHeading(navState.currentHeading || 0);
         console.log('Navigation view restored: Center:', { lat: offsetLat, lng: navState.userLocation.lng }, 'Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
@@ -2408,7 +2411,7 @@
         navState.currentHazard = null;
         navState.pendingReroute = null;
         navState.lastRecalculationTime = Date.now();
-        // Force immediate position update to ensure navigation sync
+        // Force immediate position update to sync navigation
         navigator.geolocation.getCurrentPosition(
           onPositionUpdate,
           (error) => {
