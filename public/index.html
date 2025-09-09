@@ -975,17 +975,17 @@
       lastRecalculationTime: 0,
       useDefaultDistances: useDefaultDistances
     };
-    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
-    const mapId = '2666b5bd496d9c6026f43f82';
+    const API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your Google Maps API key
+    const mapId = 'YOUR_MAP_ID_HERE'; // Replace with your Google Maps mapId
     const MAX_RETRIES = 3;
     let retryCount = 0;
     let socket;
     const REROUTE_CHECK_INTERVAL = 10000;
-    const OFF_ROUTE_TOLERANCE = 100;
-    const RECALC_COOLDOWN = 30000;
+    const OFF_ROUTE_TOLERANCE = 100; // meters
+    const RECALC_COOLDOWN = 30000; // milliseconds
     const HAZARD_CHECK_INTERVAL = 5000;
-    const MIN_REROUTE_DISTANCE = 500;
-    const MIN_ALERT_DISTANCE = 152.4;
+    const MIN_REROUTE_DISTANCE = 500; // meters
+    const MIN_ALERT_DISTANCE = 152.4; // 500 feet
     const CAMERA_CHECK_INTERVAL = 5000;
     let GoogleMaps = {
       Map: null,
@@ -996,7 +996,8 @@
       DirectionsRenderer: null,
       spherical: null,
       encoding: null,
-      TrafficLayer: null
+      TrafficLayer: null,
+      poly: null // Added for poly geometry module
     };
     window.addEventListener('deviceorientation', (event) => {
       if (event.webkitCompassHeading) {
@@ -1055,6 +1056,7 @@
         GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
         GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
         GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
+        GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly); // Added for poly module
         console.log('Google Maps libraries loaded:', Object.keys(GoogleMaps).filter(k => GoogleMaps[k]));
       } catch (error) {
         console.error('Failed to load Google Maps libraries:', error);
@@ -1090,7 +1092,7 @@
           {
             enableHighAccuracy: true,
             timeout: 5000,
-            maximumAge: 0
+            maximumAge: 0 // Force fresh location
           }
         );
       } else {
@@ -1306,6 +1308,17 @@
       document.getElementById('reject-reroute-button').addEventListener('click', rejectReroute);
       document.getElementById('camera-close').addEventListener('click', dismissCameraAlert);
       document.getElementById('dismiss-camera-button').addEventListener('click', dismissCameraAlert);
+      document.getElementById('logout-button').addEventListener('click', () => {
+        console.log('Logout button clicked, clearing localStorage');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        socket.disconnect();
+        document.getElementById('settings-hud-container').classList.remove('active');
+        document.getElementById('auth-container').style.display = 'flex';
+        showToast('Logged out successfully');
+        console.log('User logged out, showing auth form');
+        location.reload();
+      });
       map.addListener('dragstart', () => {
         if (navState.isNavigating) {
           navState.isFollowing = false;
@@ -1393,7 +1406,7 @@
         cameraAlertShown.clear();
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
-      document.getElementById('hazard-alert-distance').addEventListener('input', (e) => {
+      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
@@ -1401,7 +1414,7 @@
           console.log('Hazard alert distance set to:', hazardAlertDistance, 'miles');
         }
       });
-      document.getElementById('camera-alert-distance').addEventListener('input', (e) => {
+      document.getElementById('camera-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           cameraAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
@@ -1451,6 +1464,7 @@
         document.getElementById('auth-container').style.display = 'flex';
         showToast('Logged out successfully');
         console.log('User logged out, showing auth form');
+        location.reload();
       });
       adjustHud();
       window.addEventListener('resize', adjustHud);
@@ -1600,6 +1614,7 @@
       navState.tempMarker = null;
       console.log('Alert posted');
     }
+
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
@@ -1620,15 +1635,24 @@
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
     }
+
     function checkOffRoute(userLatLng) {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) return false;
+      if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
+        console.log('checkOffRoute skipped: Not navigating or no route data');
+        return false;
+      }
       const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
       const now = Date.now();
       if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
         console.log('Recalculation skipped due to cooldown');
         return false;
       }
-      if (!GoogleMaps.spherical || !GoogleMaps.spherical.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) {
+      if (!GoogleMaps.poly) {
+        console.error('GoogleMaps.poly not defined, cannot check route deviation');
+        showToast('Navigation error: Geometry library not loaded');
+        return false;
+      }
+      if (!GoogleMaps.poly.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) {
         console.log('User off-route detected, recalculating...');
         showToast('You are off-route. Recalculating route...');
         navState.lastRecalculationTime = now;
@@ -1637,8 +1661,10 @@
         });
         return true;
       }
+      console.log('User on route');
       return false;
     }
+
     async function fetchAndDisplayMarkers(map, center) {
       try {
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
@@ -1813,9 +1839,9 @@
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, heading, speed } = position.coords;
+        console.log('Location update received:', { lat: latitude, lng: longitude, speed, heading });
         navState.previousUserLocation = navState.userLocation;
         navState.userLocation = { lat: latitude, lng: longitude };
-        console.log('Location update:', navState.userLocation, 'Speed:', speed, 'Heading:', heading);
         let pos = navState.userLocation;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           const path = navState.currentRoute.routes[0].overview_path;
@@ -1844,18 +1870,27 @@
           navState.deviceHeading = routeHeading;
           console.log('Snapped to polyline point:', pos, 'Bearing:', navState.deviceHeading);
           const userLatLng = new google.maps.LatLng(navState.userLocation);
-          checkOffRoute(userLatLng);
+          try {
+            checkOffRoute(userLatLng);
+          } catch (error) {
+            console.error('checkOffRoute failed:', error);
+            // Continue updating marker even if checkOffRoute fails
+          }
         }
         navState.userLocation = pos;
-        userMarker.position = pos;
-        userMarker.map = map;
+        if (userMarker) {
+          userMarker.position = pos;
+          userMarker.map = map;
+        }
         if (heading && !isNaN(heading) && Math.abs(heading - navState.currentHeading) > 5) {
           navState.currentHeading = heading;
-          userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
+          if (userMarker && userMarker.content) {
+            userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
+          }
         }
         if (navState.isNavigating && navState.isFollowing) {
           map.panTo(navState.userLocation);
-          map.setHeading(navState.currentHeading);
+          map.setHeading(navState.currentHeading || 0);
           navState.navigationZoom = speed && speed > 0 ? (speed > 13.89 ? 16 : speed > 6.94 ? 17 : 18) : 18;
           map.setZoom(navState.navigationZoom);
           map.setTilt(45);
@@ -1866,12 +1901,14 @@
         updateHUD(navState.currentRoute, navState.userLocation);
       } catch (error) {
         console.error('Error in position update:', error);
+        showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
 
     function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
+        console.error('Geolocation not supported');
         return;
       }
       navState.isNavigating = true;
@@ -1884,7 +1921,7 @@
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.originalRoute = navState.currentRoute;
         map.panTo({ lat: startLocation.lat(), lng: startLocation.lng() });
-        navState.navigationZoom = 18;
+        navState.navigationZoom = 16; // Start with closer zoom
         map.setZoom(navState.navigationZoom);
         map.setTilt(45);
         console.log('Navigation started, centered on:', startLocation);
@@ -1893,19 +1930,35 @@
         if (showTrafficCameras) {
           cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
         }
+        if (watchId) {
+          navigator.geolocation.clearWatch(watchId);
+        }
         watchId = navigator.geolocation.watchPosition(
           onPositionUpdate,
           (error) => {
-            console.error('Geolocation error:', error);
+            console.error('Geolocation watch error:', error);
             showToast('Error getting location: ' + error.message);
           },
           {
             enableHighAccuracy: true,
-            maximumAge: 1000,
+            maximumAge: 0, // Force fresh location
             timeout: 5000
           }
         );
-        console.log('GPS tracking started.');
+        console.log('GPS tracking started, watchId:', watchId);
+        // Force an immediate position update
+        navigator.geolocation.getCurrentPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Immediate position update error:', error);
+            showToast('Error getting initial navigation position.');
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000
+          }
+        );
       });
     }
 
@@ -1982,10 +2035,17 @@
               }
             });
             directionsRenderer.setDirections(response);
-            console.log('Polyline rendered with strokeWeight: 6');
+            console.log('Route calculated and polyline rendered:', response.routes[0].legs[0].distance.text);
             updateHUD(response, origin);
             updateBottomHUD(response);
             if (callback) callback();
+            // Force recenter and zoom after route display
+            if (navState.isFollowing) {
+              map.panTo(navState.userLocation);
+              map.setZoom(navState.navigationZoom);
+              map.setTilt(45);
+              console.log('Forced recenter after route calculation:', navState.userLocation);
+            }
           } else {
             console.error('Directions request failed:', status);
             showToast('Directions request failed: ' + status);
@@ -2659,18 +2719,6 @@
       });
       initMap();
     }
-
-    document.getElementById('logout-button').addEventListener('click', () => {
-      console.log('Logout button clicked, clearing localStorage');
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      socket.disconnect();
-      document.getElementById('settings-hud-container').classList.remove('active');
-      document.getElementById('auth-container').style.display = 'flex';
-      showToast('Logged out successfully');
-      console.log('User logged out, showing auth form');
-      location.reload(); // Ensure fresh state
-    });
 
     const script = document.createElement('script');
     script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker&loading=async`;
