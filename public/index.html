@@ -8,7 +8,6 @@
   <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js"></script>
   <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
   <style>
-    /* Unchanged styles from your provided index.html */
     * {
       box-sizing: border-box;
     }
@@ -35,7 +34,7 @@
       transform: translateX(-50%);
       width: 80%;
       max-width: 90vw;
-      z-index: 1;
+      z-index: 1001;
       display: flex;
       align-items: center;
       background: white;
@@ -44,10 +43,8 @@
       padding: 0.5rem;
       border: 1px solid #ccc;
     }
-    places-autocomplete { /* Added for PlaceAutocompleteElement */
+    #search-input {
       flex: 1;
-    }
-    places-autocomplete::part(input) {
       padding: 0.5rem;
       border: none;
       font-size: 1rem;
@@ -55,7 +52,7 @@
       background: transparent;
       width: 100%;
     }
-    places-autocomplete::part(input)::placeholder {
+    #search-input::placeholder {
       color: #888;
     }
     #start-button {
@@ -76,9 +73,23 @@
       display: none !important;
     }
     .pac-container {
-      z-index: 1000;
+      z-index: 1002;
       border-radius: 0.5rem;
       box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      background: white;
+      font-family: Arial, sans-serif;
+      font-size: 1rem;
+      width: 80% !important;
+      max-width: 90vw;
+      margin-top: 0.5rem;
+    }
+    .pac-item {
+      padding: 0.5rem;
+      cursor: pointer;
+      color: #333;
+    }
+    .pac-item:hover {
+      background: #f0f0f0;
     }
     #hud-container {
       position: absolute;
@@ -768,7 +779,7 @@
 <body>
   <div id="map"></div>
   <div id="search-container">
-    <places-autocomplete id="search-input" placeholder="Enter destination address"></places-autocomplete>
+    <input id="search-input" type="text" placeholder="Enter destination address">
     <button id="start-button">Start</button>
   </div>
   <div id="hud-container">
@@ -985,23 +996,23 @@
     let retryCount = 0;
     let socket;
     const REROUTE_CHECK_INTERVAL = 10000;
-    const OFF_ROUTE_TOLERANCE = 100; // meters
-    const RECALC_COOLDOWN = 30000; // milliseconds
+    const OFF_ROUTE_TOLERANCE = 100;
+    const RECALC_COOLDOWN = 30000;
     const HAZARD_CHECK_INTERVAL = 5000;
-    const MIN_REROUTE_DISTANCE = 500; // meters
-    const MIN_ALERT_DISTANCE = 152.4; // 500 feet
+    const MIN_REROUTE_DISTANCE = 500;
+    const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 5000;
     let GoogleMaps = {
       Map: null,
       AdvancedMarkerElement: null,
       PlacesService: null,
-      PlaceAutocompleteElement: null, // Updated for PlaceAutocompleteElement
+      Autocomplete: null,
       DirectionsService: null,
       DirectionsRenderer: null,
       spherical: null,
       encoding: null,
       TrafficLayer: null,
-      poly: null // Added for poly geometry module
+      poly: null
     };
     window.addEventListener('deviceorientation', (event) => {
       if (event.webkitCompassHeading) {
@@ -1055,12 +1066,12 @@
         GoogleMaps.TrafficLayer = await google.maps.importLibrary("maps").then(lib => lib.TrafficLayer);
         GoogleMaps.AdvancedMarkerElement = await google.maps.importLibrary("marker").then(lib => lib.AdvancedMarkerElement);
         GoogleMaps.PlacesService = await google.maps.importLibrary("places").then(lib => lib.PlacesService);
-        GoogleMaps.PlaceAutocompleteElement = await google.maps.importLibrary("places").then(lib => lib.PlaceAutocompleteElement); // Updated for PlaceAutocompleteElement
+        GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
         GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
         GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
         GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
         GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
-        GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly); // Added for poly module
+        GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
         console.log('Google Maps libraries loaded:', Object.keys(GoogleMaps).filter(k => GoogleMaps[k]));
       } catch (error) {
         console.error('Failed to load Google Maps libraries:', error);
@@ -1096,7 +1107,7 @@
           {
             enableHighAccuracy: true,
             timeout: 5000,
-            maximumAge: 0 // Force fresh location
+            maximumAge: 0
           }
         );
       } else {
@@ -1105,8 +1116,8 @@
       }
     }
     function initializeMap() {
-      if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement || !GoogleMaps.PlaceAutocompleteElement) {
-        console.error('Required Google Maps libraries not loaded:', { Map: !!GoogleMaps.Map, AdvancedMarkerElement: !!GoogleMaps.AdvancedMarkerElement, PlaceAutocompleteElement: !!GoogleMaps.PlaceAutocompleteElement });
+      if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement || !GoogleMaps.Autocomplete) {
+        console.error('Required Google Maps libraries not loaded:', { Map: !!GoogleMaps.Map, AdvancedMarkerElement: !!GoogleMaps.AdvancedMarkerElement, Autocomplete: !!GoogleMaps.Autocomplete });
         showToast('Map initialization failed: libraries not loaded. Check Google Cloud Console.');
         return;
       }
@@ -1168,12 +1179,11 @@
       if (showTrafficCameras) {
         const trafficCamImage = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
         const trafficCamLocations = [
-          { coords: { lat: 33.0921, lng: -83.2246 }, title: 'Traffic Camera - Baldwin High School' }, // Coordinates for Baldwin High School
-          { coords: { lat: 33.0785, lng: -83.2251 }, title: 'Traffic Camera - The Kidd Center' }, // Coordinates for The Kidd Center
-          { coords: { lat: 33.1087, lng: -83.2168 }, title: 'Traffic Camera - John Milledge Academy' } // Coordinates for John Milledge Academy
+          { coords: { lat: 33.0921, lng: -83.2246 }, title: 'Traffic Camera - Baldwin High School' },
+          { coords: { lat: 33.0785, lng: -83.2251 }, title: 'Traffic Camera - The Kidd Center' },
+          { coords: { lat: 33.1087, lng: -83.2168 }, title: 'Traffic Camera - John Milledge Academy' }
         ];
         trafficCamLocations.forEach(location => {
-          // Try geocoding address for better accuracy, fall back to coords
           fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location.title.split(' - ')[1] + ', Milledgeville, GA, USA')}&key=${API_KEY}`)
             .then(response => response.json())
             .then(data => {
@@ -1199,7 +1209,6 @@
             })
             .catch(error => {
               console.error(`Error geocoding ${location.title}:`, error);
-              // Use fallback coordinates on error
               const markerImage = document.createElement('img');
               markerImage.src = trafficCamImage;
               markerImage.className = 'traffic-cam-marker';
@@ -1216,14 +1225,15 @@
         });
       }
       const input = document.getElementById('search-input');
-      const autocomplete = new GoogleMaps.PlaceAutocompleteElement();
-      input.appendChild(autocomplete); // Append custom element
-      autocomplete.addEventListener('gmp-placeselect', (event) => {
-        const place = event.place;
-        if (place && place.location) {
+      const autocomplete = new GoogleMaps.Autocomplete(input, { fields: ['geometry', 'formatted_address'] });
+      autocomplete.bindTo('bounds', map);
+      console.log('Autocomplete initialized');
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place && place.geometry && place.geometry.location) {
           navState.destination = {
-            lat: place.location.lat(),
-            lng: place.location.lng()
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng()
           };
           console.log('Destination selected:', navState.destination);
           if (destMarker) destMarker.setMap(null);
@@ -1852,7 +1862,7 @@
         const { latitude, longitude, heading, speed } = position.coords;
         console.log('Location update received:', { lat: latitude, lng: longitude, speed, heading });
         navState.previousUserLocation = navState.userLocation;
-        navState.userLocation = { lat: latitude, lng: longitude }; // Update with raw coords first
+        navState.userLocation = { lat: latitude, lng: longitude };
         let pos = navState.userLocation;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           const path = navState.currentRoute.routes[0].overview_path;
@@ -1882,13 +1892,13 @@
           console.log('Snapped to polyline point:', pos, 'Bearing:', navState.deviceHeading);
           const userLatLng = new google.maps.LatLng(navState.userLocation);
           try {
-            checkOffRoute(userLatLng); // Try snapping, but continue updates if it fails
+            checkOffRoute(userLatLng);
           } catch (error) {
             console.error('checkOffRoute failed:', error);
             showToast('Error checking route deviation. Continuing with raw location.');
           }
         }
-        navState.userLocation = pos; // Update with snapped or raw position
+        navState.userLocation = pos;
         if (userMarker) {
           userMarker.position = pos;
           userMarker.map = map;
@@ -1932,7 +1942,7 @@
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.originalRoute = navState.currentRoute;
         map.panTo({ lat: startLocation.lat(), lng: startLocation.lng() });
-        navState.navigationZoom = 16; // Start with closer zoom
+        navState.navigationZoom = 16;
         map.setZoom(navState.navigationZoom);
         map.setTilt(45);
         console.log('Navigation started, centered on:', startLocation);
@@ -1952,12 +1962,11 @@
           },
           {
             enableHighAccuracy: true,
-            maximumAge: 0, // Force fresh location
+            maximumAge: 0,
             timeout: 5000
           }
         );
         console.log('GPS tracking started, watchId:', watchId);
-        // Force an immediate position update
         navigator.geolocation.getCurrentPosition(
           onPositionUpdate,
           (error) => {
@@ -2050,7 +2059,6 @@
             updateHUD(response, origin);
             updateBottomHUD(response);
             if (callback) callback();
-            // Force recenter and zoom after route display
             if (navState.isFollowing) {
               map.panTo(navState.userLocation);
               map.setZoom(navState.navigationZoom);
