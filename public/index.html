@@ -91,6 +91,7 @@
     .pac-item:hover {
       background: #f0f0f0;
     }
+
     #hud-container {
       position: absolute;
       top: 2vh;
@@ -107,6 +108,7 @@
       display: none;
       flex-direction: column;
       gap: 0.5vh;
+      opacity: 0.9; /* Default HUD opacity */
     }
     #hud-turn {
       font-size: 1.2rem;
@@ -133,6 +135,7 @@
       display: none;
       align-items: center;
       gap: 1vw;
+      opacity: 0.9; /* Default HUD opacity */
     }
     #bottom-hud-stop {
       background: #d32f2f;
@@ -275,7 +278,7 @@
       z-index: -1;
       display: none;
     }
-        #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before {
+    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before {
       display: block;
     }
     #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header {
@@ -857,6 +860,9 @@
             <option value="#FF0000">Red</option>
             <option value="#008000">Green</option>
             <option value="#800080">Purple</option>
+            <option value="#008080">Teal</option>
+            <option value="#C71585">Magenta</option>
+            <option value="#333333">Dark Gray</option>
           </select>
         </div>
         <div class="settings-option">
@@ -866,7 +872,24 @@
             <option value="#FFFF00">Yellow</option>
             <option value="#FF69B4">Pink</option>
             <option value="#00CED1">Cyan</option>
+            <option value="#008080">Teal</option>
+            <option value="#C71585">Magenta</option>
+            <option value="#333333">Dark Gray</option>
           </select>
+        </div>
+        <div class="settings-option">
+          <label for="polyline-thickness">Polyline Thickness (px)</label>
+          <div>
+            <input type="range" id="polyline-thickness" min="4" max="10" value="8" step="0.5">
+            <span class="slider-value" id="polyline-thickness-value">8 px</span>
+          </div>
+        </div>
+        <div class="settings-option">
+          <label for="hud-opacity">Navigation HUD Opacity</label>
+          <div>
+            <input type="range" id="hud-opacity" min="0.5" max="1.0" value="0.9" step="0.1">
+            <span class="slider-value" id="hud-opacity-value">90%</span>
+          </div>
         </div>
         <div class="settings-option">
           <label for="map-type">Map Type</label>
@@ -917,8 +940,8 @@
       <div class="alerts-tab active" data-tab="information">Information</div>
       <div class="alerts-tab" data-tab="tools">Tools</div>
     </div>
-    <div id="information" class="alerts-tab-content"></div>
-    <div id="tools" class="alerts-tab-content" style="display: none;">
+    <div id="information" class="settings-tab-content"></div>
+    <div id="tools" class="settings-tab-content" style="display: none;">
       <button id="center-alerts-btn">Center on Alerts</button>
     </div>
   </div>
@@ -985,9 +1008,11 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 18.5, // Increased for closer zoom
+      navigationZoom: 19.3, // Increased ~15% from 18.5 for closer zoom
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
+      polylineThickness: localStorage.getItem('polylineThickness') ? parseFloat(localStorage.getItem('polylineThickness')) : 8, // Default thicker
+      hudOpacity: localStorage.getItem('hudOpacity') ? parseFloat(localStorage.getItem('hudOpacity')) : 0.9, // Default HUD opacity
       mapType: localStorage.getItem('mapType') || 'roadmap',
       showTraffic: localStorage.getItem('showTraffic') === 'true',
       lastRecalculationTime: 0,
@@ -995,7 +1020,7 @@
     };
     const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
     const mapId = '2666b5bd496d9c6026f43f82';
-    const MAX_RETRIES = 5; // Increased for better mobile reliability
+    const MAX_RETRIES = 5; // For robust geolocation retries
     let retryCount = 0;
     let socket;
     const REROUTE_CHECK_INTERVAL = 10000;
@@ -1038,6 +1063,8 @@
       const settingsHudContainer = document.getElementById('settings-hud-container');
       const alertsHudContainer = document.getElementById('alerts-hud-container');
       const cameraHudContainer = document.getElementById('camera-hud-container');
+      const hudContainer = document.getElementById('hud-container');
+      const bottomHudContainer = document.getElementById('bottom-hud-container');
       const currentWidth = window.innerWidth;
       const currentHeight = window.innerHeight;
       const maxHeight = Math.min(currentHeight * 0.5, 400);
@@ -1047,7 +1074,10 @@
         element.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
         element.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
       });
-      console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
+      // Apply HUD opacity to navigation HUDs only
+      hudContainer.style.opacity = navState.hudOpacity;
+      bottomHudContainer.style.opacity = navState.hudOpacity;
+      console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight, 'HUD Opacity:', navState.hudOpacity);
     }
     async function initMap() {
       if (!window.google || !google.maps) {
@@ -1136,7 +1166,7 @@
         preserveViewport: false,
         polylineOptions: {
           strokeColor: navState.mainRouteColor,
-          strokeWeight: 6,
+          strokeWeight: navState.polylineThickness, // Use navState.polylineThickness
           strokeOpacity: 0.8,
           zIndex: 5
         }
@@ -1146,6 +1176,7 @@
         suppressMarkers: true,
         polylineOptions: {
           strokeColor: navState.altRouteColor,
+          strokeWeight: navState.polylineThickness, // Use navState.polylineThickness
           strokeOpacity: 0,
           zIndex: 10,
           icons: [{
@@ -1252,6 +1283,10 @@
       document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       document.getElementById('main-route-color').value = navState.mainRouteColor;
       document.getElementById('alt-route-color').value = navState.altRouteColor;
+      document.getElementById('polyline-thickness').value = navState.polylineThickness;
+      document.getElementById('polyline-thickness-value').textContent = `${navState.polylineThickness} px`;
+      document.getElementById('hud-opacity').value = navState.hudOpacity;
+      document.getElementById('hud-opacity-value').textContent = `${Math.round(navState.hudOpacity * 100)}%`;
       document.getElementById('map-type').value = navState.mapType;
       document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
       document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
@@ -1361,7 +1396,7 @@
         directionsRenderer.setOptions({
           polylineOptions: {
             strokeColor: navState.mainRouteColor,
-            strokeWeight: 6,
+            strokeWeight: navState.polylineThickness,
             strokeOpacity: 0.8,
             zIndex: 5
           }
@@ -1377,6 +1412,7 @@
         alternativeRenderer.setOptions({
           polylineOptions: {
             strokeColor: navState.altRouteColor,
+            strokeWeight: navState.polylineThickness,
             strokeOpacity: 0,
             zIndex: 10,
             icons: [{
@@ -1390,6 +1426,46 @@
           alternativeRenderer.setDirections(navState.alternativeRoute);
         }
         console.log('Alternate route color changed to:', navState.altRouteColor);
+      });
+      document.getElementById('polyline-thickness').addEventListener('change', (e) => {
+        navState.polylineThickness = parseFloat(e.target.value);
+        localStorage.setItem('polylineThickness', navState.polylineThickness);
+        document.getElementById('polyline-thickness-value').textContent = `${navState.polylineThickness} px`;
+        directionsRenderer.setOptions({
+          polylineOptions: {
+            strokeColor: navState.mainRouteColor,
+            strokeWeight: navState.polylineThickness,
+            strokeOpacity: 0.8,
+            zIndex: 5
+          }
+        });
+        alternativeRenderer.setOptions({
+          polylineOptions: {
+            strokeColor: navState.altRouteColor,
+            strokeWeight: navState.polylineThickness,
+            strokeOpacity: 0,
+            zIndex: 10,
+            icons: [{
+              icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
+              offset: '0',
+              repeat: '12px'
+            }]
+          }
+        });
+        if (navState.currentRoute) {
+          directionsRenderer.setDirections(navState.currentRoute);
+        }
+        if (navState.alternativeRoute) {
+          alternativeRenderer.setDirections(navState.alternativeRoute);
+        }
+        console.log('Polyline thickness changed to:', navState.polylineThickness, 'px');
+      });
+      document.getElementById('hud-opacity').addEventListener('change', (e) => {
+        navState.hudOpacity = parseFloat(e.target.value);
+        localStorage.setItem('hudOpacity', navState.hudOpacity);
+        document.getElementById('hud-opacity-value').textContent = `${Math.round(navState.hudOpacity * 100)}%`;
+        adjustHud(); // Update HUD opacity immediately
+        console.log('HUD opacity changed to:', navState.hudOpacity);
       });
       document.getElementById('map-type').addEventListener('change', (e) => {
         navState.mapType = e.target.value;
@@ -2024,7 +2100,7 @@
             directionsRenderer.setOptions({
               polylineOptions: {
                 strokeColor: navState.mainRouteColor,
-                strokeWeight: 6,
+                strokeWeight: navState.polylineThickness,
                 strokeOpacity: 0.8,
                 zIndex: 5
               }
@@ -2347,7 +2423,7 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
-        const distanceAhead = 50; // Reduced for closer focus
+        const distanceAhead = 50; // Adjusted for close focus
         const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, distanceAhead, navState.currentHeading || 0);
         map.panTo(centerPoint);
         map.setZoom(navState.navigationZoom);
@@ -2725,4 +2801,3 @@
   </script>
 </body>
 </html>
-             
