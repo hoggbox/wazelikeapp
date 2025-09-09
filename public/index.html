@@ -982,7 +982,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 17,
+      navigationZoom: 17, // Adjusted for Google Maps-like view
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -1419,7 +1419,7 @@
         cameraAlertShown.clear();
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
-      document.getElementById('hazard-alert-distance').addEventListener('input', (e) => {
+      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
@@ -1427,7 +1427,7 @@
           console.log('Hazard alert distance set to:', hazardAlertDistance, 'miles');
         }
       });
-      document.getElementById('camera-alert-distance').addEventListener('input', (e) => {
+      document.getElementById('camera-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           cameraAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
