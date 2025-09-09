@@ -275,7 +275,7 @@
       z-index: -1;
       display: none;
     }
-    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before {
+        #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before {
       display: block;
     }
     #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header {
@@ -960,6 +960,9 @@
     let hazardAlertDistance = localStorage.getItem('hazardAlertDistance') ? parseFloat(localStorage.getItem('hazardAlertDistance')) : 2;
     let cameraAlertDistance = localStorage.getItem('cameraAlertDistance') ? parseFloat(localStorage.getItem('cameraAlertDistance')) : 0.5;
     let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
+    let isInitialized = false; // Prevent duplicate initialization
+    let toastTimeout = null; // Track toast timeout
+    let lastHeading = 0; // For heading smoothing
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -982,7 +985,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 17, // Adjusted for Google Maps-like view
+      navigationZoom: 18.5, // Increased for closer zoom
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -992,7 +995,7 @@
     };
     const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
     const mapId = '2666b5bd496d9c6026f43f82';
-    const MAX_RETRIES = 3;
+    const MAX_RETRIES = 5; // Increased for better mobile reliability
     let retryCount = 0;
     let socket;
     const REROUTE_CHECK_INTERVAL = 10000;
@@ -1038,21 +1041,12 @@
       const currentWidth = window.innerWidth;
       const currentHeight = window.innerHeight;
       const maxHeight = Math.min(currentHeight * 0.5, 400);
-      reportBox.style.maxHeight = `${maxHeight}px`;
-      reportBox.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
-      reportBox.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
-      rerouteHudContainer.style.maxHeight = `${maxHeight}px`;
-      rerouteHudContainer.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
-      rerouteHudContainer.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
-      settingsHudContainer.style.maxHeight = `${maxHeight}px`;
-      settingsHudContainer.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
-      settingsHudContainer.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
-      alertsHudContainer.style.maxHeight = `${maxHeight}px`;
-      alertsHudContainer.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
-      alertsHudContainer.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
-      cameraHudContainer.style.maxHeight = `${maxHeight}px`;
-      cameraHudContainer.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
-      cameraHudContainer.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
+      const hudElements = [reportBox, rerouteHudContainer, settingsHudContainer, alertsHudContainer, cameraHudContainer];
+      hudElements.forEach(element => {
+        element.style.maxHeight = `${maxHeight}px`;
+        element.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
+        element.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
+      });
       console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
     }
     async function initMap() {
@@ -1106,7 +1100,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 5000,
+            timeout: 10000, // Increased timeout
             maximumAge: 0
           }
         );
@@ -1875,8 +1869,14 @@
                   new google.maps.LatLng(pos),
                   nextPoint
                 ));
-          navState.deviceHeading = routeHeading;
-          console.log('Snapped to polyline point:', pos, 'Bearing:', navState.deviceHeading);
+          // Smooth heading changes
+          const headingDiff = Math.abs(routeHeading - lastHeading);
+          if (headingDiff > 180) {
+            lastHeading = routeHeading + (routeHeading < lastHeading ? 360 : -360);
+          }
+          navState.currentHeading = lastHeading + (routeHeading - lastHeading) * 0.2; // Exponential smoothing
+          lastHeading = navState.currentHeading;
+          console.log('Snapped to polyline point:', pos, 'Bearing:', navState.currentHeading);
           const userLatLng = new google.maps.LatLng(navState.userLocation);
           try {
             checkOffRoute(userLatLng);
@@ -1890,8 +1890,7 @@
           userMarker.position = pos;
           userMarker.map = map;
         }
-        if (heading && !isNaN(heading) && Math.abs(heading - navState.currentHeading) > 5) {
-          navState.currentHeading = heading;
+        if (navState.currentHeading && Math.abs(navState.currentHeading - lastHeading) > 5) {
           if (userMarker && userMarker.content) {
             userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
           }
@@ -1941,7 +1940,7 @@
           {
             enableHighAccuracy: true,
             maximumAge: 0,
-            timeout: 5000
+            timeout: 10000 // Increased timeout
           }
         );
         console.log('GPS tracking started, watchId:', watchId);
@@ -1954,7 +1953,7 @@
           {
             enableHighAccuracy: true,
             maximumAge: 0,
-            timeout: 5000
+            timeout: 10000 // Increased timeout
           }
         );
       });
@@ -2348,13 +2347,13 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
-        const distanceAhead = 80; // meters ahead in direction of travel
+        const distanceAhead = 50; // Reduced for closer focus
         const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, distanceAhead, navState.currentHeading || 0);
         map.panTo(centerPoint);
         map.setZoom(navState.navigationZoom);
         map.setTilt(45);
         map.setHeading(navState.currentHeading || 0);
-        console.log('Navigation view restored: Center ahead by 80m, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
+        console.log('Navigation view restored: Center ahead by 50m, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
       }
     }
     function acceptReroute() {
@@ -2373,7 +2372,7 @@
         const rerouteHud = document.getElementById('reroute-hud');
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
-        navState.isFollowing = true; // Ensure following is enabled
+        navState.isFollowing = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
         restoreNavigationView();
         showToast('Alternative route accepted.');
@@ -2383,7 +2382,6 @@
         navState.currentHazard = null;
         navState.pendingReroute = null;
         navState.lastRecalculationTime = Date.now();
-        // Force immediate position update to ensure navigation sync
         navigator.geolocation.getCurrentPosition(
           onPositionUpdate,
           (error) => {
@@ -2393,7 +2391,7 @@
           {
             enableHighAccuracy: true,
             maximumAge: 0,
-            timeout: 5000
+            timeout: 10000 // Increased timeout
           }
         );
       }
@@ -2526,13 +2524,18 @@
     }
     function showToast(message) {
       const toast = document.getElementById('toast');
+      if (toastTimeout) {
+        clearTimeout(toastTimeout); // Clear existing toast timeout
+        toast.classList.remove('visible-toast');
+      }
       if (!toast.classList.contains('countdown-toast') || toast.textContent !== message) {
         toast.textContent = message;
         toast.classList.add('visible-toast');
         toast.classList.remove('countdown-toast');
-        setTimeout(() => {
+        toastTimeout = setTimeout(() => {
           if (!toast.classList.contains('countdown-toast')) {
             toast.classList.remove('visible-toast');
+            toastTimeout = null;
           }
         }, 3000);
       }
@@ -2544,7 +2547,7 @@
       } else if (error.code === 2) {
         message = 'Location unavailable. Ensure location services are enabled and try again.';
       } else if (error.code === 3) {
-        message = 'Location timed out. Please try again.';
+        message = 'Weak GPS signal, retrying...';
       }
       console.error(message, error);
       showToast(message);
@@ -2568,7 +2571,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 5000,
+            timeout: 10000, // Increased timeout
             maximumAge: 0
           }
         ), backoff);
@@ -2642,6 +2645,8 @@
       }
     });
     function checkAuth() {
+      if (isInitialized) return;
+      isInitialized = true;
       const token = localStorage.getItem('token');
       if (token) {
         console.log('Token found, initializing app:', token);
@@ -2720,3 +2725,4 @@
   </script>
 </body>
 </html>
+             
