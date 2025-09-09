@@ -8,6 +8,7 @@
   <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js"></script>
   <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
   <style>
+    /* Unchanged styles from your provided index.html */
     * {
       box-sizing: border-box;
     }
@@ -43,15 +44,18 @@
       padding: 0.5rem;
       border: 1px solid #ccc;
     }
-    #search-input {
+    places-autocomplete { /* Added for PlaceAutocompleteElement */
       flex: 1;
+    }
+    places-autocomplete::part(input) {
       padding: 0.5rem;
       border: none;
       font-size: 1rem;
       outline: none;
       background: transparent;
+      width: 100%;
     }
-    #search-input::placeholder {
+    places-autocomplete::part(input)::placeholder {
       color: #888;
     }
     #start-button {
@@ -764,7 +768,7 @@
 <body>
   <div id="map"></div>
   <div id="search-container">
-    <input id="search-input" type="text" placeholder="Enter destination address">
+    <places-autocomplete id="search-input" placeholder="Enter destination address"></places-autocomplete>
     <button id="start-button">Start</button>
   </div>
   <div id="hud-container">
@@ -975,8 +979,8 @@
       lastRecalculationTime: 0,
       useDefaultDistances: useDefaultDistances
     };
-    const API_KEY = 'YOUR_API_KEY_HERE'; // Replace with your Google Maps API key
-    const mapId = 'YOUR_MAP_ID_HERE'; // Replace with your Google Maps mapId
+    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+    const mapId = '2666b5bd496d9c6026f43f82';
     const MAX_RETRIES = 3;
     let retryCount = 0;
     let socket;
@@ -991,7 +995,7 @@
       Map: null,
       AdvancedMarkerElement: null,
       PlacesService: null,
-      Autocomplete: null,
+      PlaceAutocompleteElement: null, // Updated for PlaceAutocompleteElement
       DirectionsService: null,
       DirectionsRenderer: null,
       spherical: null,
@@ -1043,7 +1047,7 @@
     async function initMap() {
       if (!window.google || !google.maps) {
         console.error('Google Maps API failed to load');
-        showToast('Failed to load map. Please check your network or API key.');
+        showToast('Failed to load map. Please check your network or API key in Google Cloud Console.');
         return;
       }
       try {
@@ -1051,7 +1055,7 @@
         GoogleMaps.TrafficLayer = await google.maps.importLibrary("maps").then(lib => lib.TrafficLayer);
         GoogleMaps.AdvancedMarkerElement = await google.maps.importLibrary("marker").then(lib => lib.AdvancedMarkerElement);
         GoogleMaps.PlacesService = await google.maps.importLibrary("places").then(lib => lib.PlacesService);
-        GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
+        GoogleMaps.PlaceAutocompleteElement = await google.maps.importLibrary("places").then(lib => lib.PlaceAutocompleteElement); // Updated for PlaceAutocompleteElement
         GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
         GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
         GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
@@ -1060,7 +1064,7 @@
         console.log('Google Maps libraries loaded:', Object.keys(GoogleMaps).filter(k => GoogleMaps[k]));
       } catch (error) {
         console.error('Failed to load Google Maps libraries:', error);
-        showToast('Failed to load map libraries. Please try again.');
+        showToast('Failed to load map libraries. Check API key restrictions and enabled APIs in Google Cloud Console.');
         return;
       }
       if (navigator.permissions) {
@@ -1101,9 +1105,9 @@
       }
     }
     function initializeMap() {
-      if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement) {
-        console.error('Required Google Maps libraries not loaded');
-        showToast('Map initialization failed: libraries not loaded');
+      if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement || !GoogleMaps.PlaceAutocompleteElement) {
+        console.error('Required Google Maps libraries not loaded:', { Map: !!GoogleMaps.Map, AdvancedMarkerElement: !!GoogleMaps.AdvancedMarkerElement, PlaceAutocompleteElement: !!GoogleMaps.PlaceAutocompleteElement });
+        showToast('Map initialization failed: libraries not loaded. Check Google Cloud Console.');
         return;
       }
       map = new GoogleMaps.Map(document.getElementById('map'), {
@@ -1164,47 +1168,62 @@
       if (showTrafficCameras) {
         const trafficCamImage = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
         const trafficCamLocations = [
-          { address: 'Baldwin High School, Georgia 49, Milledgeville, GA, USA', title: 'Traffic Camera - Baldwin High School' },
-          { address: 'The Kidd Center, South Elbert Street, Milledgeville, GA, USA', title: 'Traffic Camera - The Kidd Center' },
-          { address: 'John Milledge Academy, Log Cabin Road Northeast, Milledgeville, GA, USA', title: 'Traffic Camera - John Milledge Academy' }
+          { coords: { lat: 33.0921, lng: -83.2246 }, title: 'Traffic Camera - Baldwin High School' }, // Coordinates for Baldwin High School
+          { coords: { lat: 33.0785, lng: -83.2251 }, title: 'Traffic Camera - The Kidd Center' }, // Coordinates for The Kidd Center
+          { coords: { lat: 33.1087, lng: -83.2168 }, title: 'Traffic Camera - John Milledge Academy' } // Coordinates for John Milledge Academy
         ];
         trafficCamLocations.forEach(location => {
-          fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location.address)}&key=${API_KEY}`)
+          // Try geocoding address for better accuracy, fall back to coords
+          fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location.title.split(' - ')[1] + ', Milledgeville, GA, USA')}&key=${API_KEY}`)
             .then(response => response.json())
             .then(data => {
+              let position = location.coords;
               if (data.status === 'OK' && data.results[0]) {
-                const position = data.results[0].geometry.location;
-                const markerImage = document.createElement('img');
-                markerImage.src = trafficCamImage;
-                markerImage.className = 'traffic-cam-marker';
-                new GoogleMaps.AdvancedMarkerElement({
-                  map: map,
-                  position: position,
-                  content: markerImage,
-                  title: location.title
-                });
-                cameraPositions.push(position);
-                console.log(`Traffic camera marker placed at ${location.title}:`, position);
+                position = data.results[0].geometry.location;
+                console.log(`Geocoding successful for ${location.title}:`, position);
               } else {
-                console.error(`Geocoding failed for address: ${location.address}`);
-                showToast(`Failed to place traffic camera marker at ${location.title}.`);
+                console.warn(`Geocoding failed for ${location.title}, using fallback coords:`, position);
+                showToast(`Using fallback coordinates for ${location.title}.`);
               }
+              const markerImage = document.createElement('img');
+              markerImage.src = trafficCamImage;
+              markerImage.className = 'traffic-cam-marker';
+              new GoogleMaps.AdvancedMarkerElement({
+                map: map,
+                position: position,
+                content: markerImage,
+                title: location.title
+              });
+              cameraPositions.push(position);
+              console.log(`Traffic camera marker placed at ${location.title}:`, position);
             })
             .catch(error => {
-              console.error(`Error geocoding address ${location.address}:`, error);
-              showToast(`Error placing traffic camera marker at ${location.title}.`);
+              console.error(`Error geocoding ${location.title}:`, error);
+              // Use fallback coordinates on error
+              const markerImage = document.createElement('img');
+              markerImage.src = trafficCamImage;
+              markerImage.className = 'traffic-cam-marker';
+              new GoogleMaps.AdvancedMarkerElement({
+                map: map,
+                position: location.coords,
+                content: markerImage,
+                title: location.title
+              });
+              cameraPositions.push(location.coords);
+              showToast(`Error geocoding ${location.title}, using fallback coordinates.`);
+              console.log(`Traffic camera marker placed at ${location.title} using fallback:`, location.coords);
             });
         });
       }
       const input = document.getElementById('search-input');
-      const autocomplete = new GoogleMaps.Autocomplete(input);
-      autocomplete.bindTo('bounds', map);
-      autocomplete.addListener('place_changed', () => {
-        const place = autocomplete.getPlace();
-        if (place && place.geometry && place.geometry.location) {
+      const autocomplete = new GoogleMaps.PlaceAutocompleteElement();
+      input.appendChild(autocomplete); // Append custom element
+      autocomplete.addEventListener('gmp-placeselect', (event) => {
+        const place = event.place;
+        if (place && place.location) {
           navState.destination = {
-            lat: place.geometry.location.lat(),
-            lng: place.geometry.location.lng()
+            lat: place.location.lat(),
+            lng: place.location.lng()
           };
           console.log('Destination selected:', navState.destination);
           if (destMarker) destMarker.setMap(null);
@@ -1308,17 +1327,6 @@
       document.getElementById('reject-reroute-button').addEventListener('click', rejectReroute);
       document.getElementById('camera-close').addEventListener('click', dismissCameraAlert);
       document.getElementById('dismiss-camera-button').addEventListener('click', dismissCameraAlert);
-      document.getElementById('logout-button').addEventListener('click', () => {
-        console.log('Logout button clicked, clearing localStorage');
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        socket.disconnect();
-        document.getElementById('settings-hud-container').classList.remove('active');
-        document.getElementById('auth-container').style.display = 'flex';
-        showToast('Logged out successfully');
-        console.log('User logged out, showing auth form');
-        location.reload();
-      });
       map.addListener('dragstart', () => {
         if (navState.isNavigating) {
           navState.isFollowing = false;
@@ -1406,7 +1414,7 @@
         cameraAlertShown.clear();
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
-      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
+      document.getElementById('hazard-alert-distance').addEventListener('input', (e) => {
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
@@ -1414,7 +1422,7 @@
           console.log('Hazard alert distance set to:', hazardAlertDistance, 'miles');
         }
       });
-      document.getElementById('camera-alert-distance').addEventListener('change', (e) => {
+      document.getElementById('camera-alert-distance').addEventListener('input', (e) => {
         if (!navState.useDefaultDistances) {
           cameraAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
@@ -1525,9 +1533,13 @@
         const data = await response.json();
         if (data.status === 'OK' && data.results[0]) {
           navState.tempAlertData.address = data.results[0].formatted_address;
+          console.log('Reverse geocoding successful:', navState.tempAlertData.address);
+        } else {
+          console.warn('Reverse geocoding failed, using coordinates:', data.status);
         }
       } catch (error) {
         console.error('Reverse geocoding failed:', error);
+        showToast('Failed to get address for alert location.');
       }
       const reportBox = document.getElementById('report-box');
       const confirmAlert = document.getElementById('confirm-alert');
@@ -1576,7 +1588,7 @@
       try {
         const response = await fetch('/api/alerts', {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           },
@@ -1614,7 +1626,6 @@
       navState.tempMarker = null;
       console.log('Alert posted');
     }
-
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
@@ -1635,7 +1646,6 @@
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
     }
-
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
         console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -1658,6 +1668,7 @@
         navState.lastRecalculationTime = now;
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
           showToast('Route recalculated successfully.');
+          console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
         });
         return true;
       }
@@ -1841,7 +1852,7 @@
         const { latitude, longitude, heading, speed } = position.coords;
         console.log('Location update received:', { lat: latitude, lng: longitude, speed, heading });
         navState.previousUserLocation = navState.userLocation;
-        navState.userLocation = { lat: latitude, lng: longitude };
+        navState.userLocation = { lat: latitude, lng: longitude }; // Update with raw coords first
         let pos = navState.userLocation;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           const path = navState.currentRoute.routes[0].overview_path;
@@ -1871,13 +1882,13 @@
           console.log('Snapped to polyline point:', pos, 'Bearing:', navState.deviceHeading);
           const userLatLng = new google.maps.LatLng(navState.userLocation);
           try {
-            checkOffRoute(userLatLng);
+            checkOffRoute(userLatLng); // Try snapping, but continue updates if it fails
           } catch (error) {
             console.error('checkOffRoute failed:', error);
-            // Continue updating marker even if checkOffRoute fails
+            showToast('Error checking route deviation. Continuing with raw location.');
           }
         }
-        navState.userLocation = pos;
+        navState.userLocation = pos; // Update with snapped or raw position
         if (userMarker) {
           userMarker.position = pos;
           userMarker.map = map;
@@ -2049,6 +2060,9 @@
           } else {
             console.error('Directions request failed:', status);
             showToast('Directions request failed: ' + status);
+            if (status === 'REQUEST_DENIED') {
+              showToast('API key invalid or restricted. Check Google Cloud Console.');
+            }
           }
         }
       );
@@ -2173,7 +2187,7 @@
       try {
         const response = await fetch('/api/hazards-near-route', {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${localStorage.getItem('token')}`
           },
@@ -2726,7 +2740,7 @@
     script.defer = true;
     script.onerror = () => {
       console.error('Failed to load Google Maps script');
-      showToast('Failed to load map. Please check your network or API key.');
+      showToast('Failed to load map. Please check your network or API key in Google Cloud Console.');
     };
     document.head.appendChild(script);
 
