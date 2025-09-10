@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1002,13 +1003,13 @@
     let retryCount = 0;
     let socket;
     const REROUTE_CHECK_INTERVAL = 10000;
-    const OFF_ROUTE_TOLERANCE = 50; // Reduced for quicker rerouting
+    const OFF_ROUTE_TOLERANCE = 50;
     const RECALC_COOLDOWN = 30000;
     const HAZARD_CHECK_INTERVAL = 5000;
     const MIN_REROUTE_DISTANCE = 500;
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 5000;
-    const LOOKAHEAD_DISTANCE = 100; // Meters to show ahead of user
+    const LOOKAHEAD_DISTANCE = 100;
     let GoogleMaps = {
       Map: null,
       AdvancedMarkerElement: null,
@@ -2073,15 +2074,33 @@
         navState.currentRoute.routes[0].overview_path.forEach(point => bounds.extend(point));
         bounds.extend(navState.userLocation);
         map.fitBounds(bounds);
-        map.setZoom(Math.min(map.getZoom(), 14));
+        const currentZoom = map.getZoom();
+        map.setZoom(Math.min(currentZoom, 14)); // Ensure overview is not too zoomed in
         map.setTilt(0);
         map.setHeading(0);
-        console.log('Showing full route overview:', navState.destination);
+        console.log('Showing full route overview:', { bounds, zoom: map.getZoom() });
         setTimeout(() => {
           navState.isPanningToDest = false;
           updateRoutePolylines();
-          restoreNavigationView();
-          console.log('Zoomed to user location after 3-second overview');
+          // Force an immediate position update to ensure accurate user location
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              onPositionUpdate(position);
+              restoreNavigationView();
+              console.log('Zoomed to user location after 3-second overview:', navState.userLocation);
+            },
+            (error) => {
+              console.error('Error getting position for post-overview zoom:', error);
+              showToast('Error zooming to location after overview.');
+              // Fallback to last known location
+              restoreNavigationView();
+            },
+            {
+              enableHighAccuracy: true,
+              maximumAge: 0,
+              timeout: 5000
+            }
+          );
         }, 3000);
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
@@ -2520,14 +2539,33 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating && !navState.isPanningToDest) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
-        // Offset center 50-60% ahead (approx 100 meters) to keep route in view
-        const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, LOOKAHEAD_DISTANCE * 0.6, navState.currentHeading || 0);
+        // Snap user location to the nearest point on the route polyline
+        let snappedPosition = userLatLng;
+        let heading = navState.currentHeading || 0;
+        if (navState.currentRoute && navState.routePolyline) {
+          let minDistance = Infinity;
+          let closestIndex = 0;
+          navState.routePolyline.forEach((point, index) => {
+            const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, point);
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestIndex = index;
+            }
+          });
+          snappedPosition = navState.routePolyline[closestIndex];
+          const nextPoint = closestIndex < navState.routePolyline.length - 1 
+            ? navState.routePolyline[closestIndex + 1] 
+            : navState.routePolyline[closestIndex - 1] || navState.routePolyline[closestIndex];
+          heading = GoogleMaps.spherical.computeHeading(snappedPosition, nextPoint);
+        }
+        // Center 60% ahead (60 meters) along the route direction
+        const centerPoint = GoogleMaps.spherical.computeOffset(snappedPosition, LOOKAHEAD_DISTANCE * 0.6, heading);
         smoothMapTransition(centerPoint, {
           zoom: navState.navigationZoom,
-          heading: navState.currentHeading || 0,
+          heading: heading,
           tilt: 45
         }, 500);
-        console.log('Navigation view restored: Center ahead by', LOOKAHEAD_DISTANCE * 0.6, 'm, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
+        console.log('Navigation view restored: Centered at', centerPoint.toJSON(), 'Zoom:', navState.navigationZoom, 'Heading:', heading, 'Tilt: 45');
       }
     }
 
