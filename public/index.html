@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2082,25 +2081,8 @@
         setTimeout(() => {
           navState.isPanningToDest = false;
           updateRoutePolylines();
-          // Force an immediate position update to ensure accurate user location
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              onPositionUpdate(position);
-              restoreNavigationView();
-              console.log('Zoomed to user location after 3-second overview:', navState.userLocation);
-            },
-            (error) => {
-              console.error('Error getting position for post-overview zoom:', error);
-              showToast('Error zooming to location after overview.');
-              // Fallback to last known location
-              restoreNavigationView();
-            },
-            {
-              enableHighAccuracy: true,
-              maximumAge: 0,
-              timeout: 5000
-            }
-          );
+          restoreNavigationView(); // Directly call restore using current state, as watchPosition updates it
+          console.log('Zoomed to user location after 3-second overview using current state:', navState.userLocation);
         }, 3000);
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
