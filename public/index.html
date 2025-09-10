@@ -950,6 +950,7 @@
     let directionsService;
     let directionsRenderer;
     let alternativeRenderer;
+    let traveledRenderer;
     let trafficLayer;
     let watchId;
     let currentAlerts = [];
@@ -985,7 +986,7 @@
       ignoredHazards: [],
       currentHazard: null,
       pendingReroute: null,
-      navigationZoom: 18.5,
+      navigationZoom: 18,
       mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
       altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
       mapType: localStorage.getItem('mapType') || 'roadmap',
@@ -1001,12 +1002,13 @@
     let retryCount = 0;
     let socket;
     const REROUTE_CHECK_INTERVAL = 10000;
-    const OFF_ROUTE_TOLERANCE = 100;
+    const OFF_ROUTE_TOLERANCE = 50; // Reduced for quicker rerouting
     const RECALC_COOLDOWN = 30000;
     const HAZARD_CHECK_INTERVAL = 5000;
     const MIN_REROUTE_DISTANCE = 500;
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 5000;
+    const LOOKAHEAD_DISTANCE = 100; // Meters to show ahead of user
     let GoogleMaps = {
       Map: null,
       AdvancedMarkerElement: null,
@@ -1019,7 +1021,6 @@
       TrafficLayer: null,
       poly: null
     };
-
     window.addEventListener('deviceorientation', (event) => {
       if (event.webkitCompassHeading) {
         navState.deviceHeading = event.webkitCompassHeading;
@@ -1030,13 +1031,11 @@
         console.log('Device orientation heading:', navState.deviceHeading);
       }
     });
-
     function animate() {
       requestAnimationFrame(animate);
       TWEEN.update();
     }
     animate();
-
     function adjustHud() {
       const reportBox = document.getElementById('report-box');
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
@@ -1054,7 +1053,6 @@
       });
       console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
     }
-
     async function initMap() {
       if (!window.google || !google.maps) {
         console.error('Google Maps API failed to load');
@@ -1115,7 +1113,6 @@
         handleGeolocationError({ code: 0 }, true);
       }
     }
-
     function initializeMap() {
       if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement || !GoogleMaps.Autocomplete) {
         console.error('Required Google Maps libraries not loaded:', { Map: !!GoogleMaps.Map, AdvancedMarkerElement: !!GoogleMaps.AdvancedMarkerElement, Autocomplete: !!GoogleMaps.Autocomplete });
@@ -1160,6 +1157,16 @@
             offset: '0',
             repeat: '12px'
           }]
+        }
+      });
+      traveledRenderer = new GoogleMaps.DirectionsRenderer({
+        map: null,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: navState.mainRouteColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.3,
+          zIndex: 4
         }
       });
       const markerElement = document.createElement('div');
@@ -1349,6 +1356,7 @@
           navState.isFollowing = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
           directionsRenderer.setMap(map);
+          traveledRenderer.setMap(map);
           restoreNavigationView();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
         } else {
@@ -1371,6 +1379,14 @@
             strokeWeight: 6,
             strokeOpacity: 0.8,
             zIndex: 5
+          }
+        });
+        traveledRenderer.setOptions({
+          polylineOptions: {
+            strokeColor: navState.mainRouteColor,
+            strokeWeight: 6,
+            strokeOpacity: 0.3,
+            zIndex: 4
           }
         });
         if (navState.currentRoute) {
@@ -1484,7 +1500,6 @@
       window.addEventListener('resize', adjustHud);
       window.addEventListener('load', adjustHud);
     }
-
     async function confirmAlertLocation(location, alertType) {
       try {
         const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`);
@@ -1562,7 +1577,6 @@
       reportBox.classList.add('active');
       console.log(`Confirming ${alertType} alert at`, navState.tempAlertData.location);
     }
-
     async function postAlert() {
       if (!navState.tempAlertData || !navState.tempMarker) return;
       const isTrafficCamera = navState.tempAlertData.type === 'Traffic Camera';
@@ -1634,7 +1648,6 @@
       navState.tempMarker = null;
       console.log('Alert posted');
     }
-
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
@@ -1655,7 +1668,6 @@
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
     }
-
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
         console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -1679,13 +1691,14 @@
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
           showToast('Route recalculated successfully.');
           console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
+          navState.isFollowing = true;
+          restoreNavigationView();
         });
         return true;
       }
       console.log('User on route');
       return false;
     }
-
     async function fetchAndDisplayMarkers(map, center) {
       try {
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
@@ -1863,6 +1876,7 @@
       const userLatLng = new google.maps.LatLng(navState.userLocation);
       let closestIndex = 0;
       let minDistance = Infinity;
+      let totalDistance = 0;
       navState.routePolyline.forEach((point, index) => {
         const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, point);
         if (distance < minDistance) {
@@ -1870,8 +1884,28 @@
           closestIndex = index;
         }
       });
-      const upcomingPath = navState.routePolyline.slice(closestIndex);
-      navState.traveledPath = navState.routePolyline.slice(0, closestIndex);
+
+      // Calculate upcoming path limited to LOOKAHEAD_DISTANCE
+      const upcomingPath = [];
+      totalDistance = 0;
+      for (let i = closestIndex; i < navState.routePolyline.length; i++) {
+        upcomingPath.push(navState.routePolyline[i]);
+        if (i < navState.routePolyline.length - 1) {
+          totalDistance += GoogleMaps.spherical.computeDistanceBetween(
+            navState.routePolyline[i],
+            navState.routePolyline[i + 1]
+          );
+          if (totalDistance > LOOKAHEAD_DISTANCE) {
+            upcomingPath.push(navState.routePolyline[i + 1]);
+            break;
+          }
+        }
+      }
+
+      // Update traveled path
+      navState.traveledPath = navState.routePolyline.slice(0, closestIndex + 1);
+
+      // Update main route polyline (upcoming path)
       directionsRenderer.setOptions({
         polylineOptions: {
           strokeColor: navState.mainRouteColor,
@@ -1882,6 +1916,26 @@
         }
       });
       directionsRenderer.setDirections(navState.currentRoute);
+
+      // Update traveled route polyline (faded)
+      traveledRenderer.setOptions({
+        polylineOptions: {
+          strokeColor: navState.mainRouteColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.3,
+          zIndex: 4,
+          path: navState.traveledPath
+        }
+      });
+      traveledRenderer.setDirections({
+        ...navState.currentRoute,
+        routes: [{
+          ...navState.currentRoute.routes[0],
+          overview_path: navState.traveledPath
+        }]
+      });
+      traveledRenderer.setMap(map);
+
       console.log('Updated route polylines: upcoming points:', upcomingPath.length, 'traveled points:', navState.traveledPath.length);
     }
 
@@ -1916,7 +1970,17 @@
         console.log('Location update received:', { lat: latitude, lng: longitude, speed, heading });
         navState.previousUserLocation = navState.userLocation;
         navState.userLocation = { lat: latitude, lng: longitude };
+
         let pos = navState.userLocation;
+        let isMoving = speed && speed > 0.1; // Consider moving if speed > 0.1 m/s
+        if (!isMoving && navState.previousUserLocation) {
+          const distanceMoved = GoogleMaps.spherical.computeDistanceBetween(
+            new google.maps.LatLng(navState.userLocation),
+            new google.maps.LatLng(navState.previousUserLocation)
+          );
+          isMoving = distanceMoved > 5; // Consider moving if moved > 5 meters
+        }
+
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           const path = navState.currentRoute.routes[0].overview_path;
           let minDistance = Infinity;
@@ -1948,6 +2012,7 @@
           navState.currentHeading = lastHeading + (routeHeading - lastHeading) * 0.2;
           lastHeading = navState.currentHeading;
           console.log('Snapped to polyline point:', pos, 'Bearing:', navState.currentHeading);
+
           const userLatLng = new google.maps.LatLng(navState.userLocation);
           try {
             checkOffRoute(userLatLng);
@@ -1956,6 +2021,7 @@
             showToast('Error checking route deviation. Continuing with raw location.');
           }
         }
+
         navState.userLocation = pos;
         if (userMarker) {
           userMarker.position = pos;
@@ -1966,9 +2032,14 @@
             userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
           }
         }
+
         if (navState.isNavigating && navState.isFollowing && !navState.isPanningToDest) {
           updateRoutePolylines();
-          restoreNavigationView();
+          if (isMoving || !navState.previousUserLocation) {
+            restoreNavigationView();
+          } else {
+            console.log('User stationary, map held still');
+          }
         }
         navState.lastKnownPosition = pos;
         socket.emit('locationUpdate', { location: navState.userLocation });
@@ -1986,26 +2057,31 @@
         return;
       }
       navState.isNavigating = true;
-      navState.isFollowing = localStorage.getItem('isFollowing') === 'true';
+      navState.isFollowing = true; // Force following on start
+      localStorage.setItem('isFollowing', navState.isFollowing);
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
       directionsRenderer.setMap(map);
+      traveledRenderer.setMap(map);
       calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.originalRoute = navState.currentRoute;
         navState.isPanningToDest = true;
-        // Show destination with green marker and full polyline
-        map.panTo(navState.destination);
-        map.setZoom(14);
+        // Show full route with destination marker
+        const bounds = new google.maps.LatLngBounds();
+        navState.currentRoute.routes[0].overview_path.forEach(point => bounds.extend(point));
+        bounds.extend(navState.userLocation);
+        map.fitBounds(bounds);
+        map.setZoom(Math.min(map.getZoom(), 14));
         map.setTilt(0);
         map.setHeading(0);
-        console.log('Showing destination:', navState.destination);
+        console.log('Showing full route overview:', navState.destination);
         setTimeout(() => {
           navState.isPanningToDest = false;
           updateRoutePolylines();
           restoreNavigationView();
-          console.log('Zoomed to user location after 3 seconds');
+          console.log('Zoomed to user location after 3-second overview');
         }, 3000);
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
@@ -2077,6 +2153,7 @@
       document.getElementById('hud-container').style.display = 'none';
       document.getElementById('bottom-hud-container').style.display = 'none';
       directionsRenderer.setMap(null);
+      traveledRenderer.setMap(null);
       alternativeRenderer.setMap(null);
       trafficLayer.setMap(null);
       if (destMarker) destMarker.setMap(null);
@@ -2103,7 +2180,8 @@
         {
           origin: origin,
           destination: dest,
-          travelMode: google.maps.TravelMode.DRIVING
+          travelMode: google.maps.TravelMode.DRIVING,
+          provideRouteAlternatives: true
         },
         (response, status) => {
           if (status === 'OK') {
@@ -2442,14 +2520,14 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating && !navState.isPanningToDest) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
-        const distanceAhead = 30;
-        const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, distanceAhead, navState.currentHeading || 0);
+        // Offset center 50-60% ahead (approx 100 meters) to keep route in view
+        const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, LOOKAHEAD_DISTANCE * 0.6, navState.currentHeading || 0);
         smoothMapTransition(centerPoint, {
           zoom: navState.navigationZoom,
           heading: navState.currentHeading || 0,
           tilt: 45
         }, 500);
-        console.log('Navigation view restored: Center ahead by 30m, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
+        console.log('Navigation view restored: Center ahead by', LOOKAHEAD_DISTANCE * 0.6, 'm, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
       }
     }
 
@@ -2460,8 +2538,10 @@
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         navState.originalRoute = navState.currentRoute;
         directionsRenderer.setMap(null);
+        traveledRenderer.setMap(null);
         updateRoutePolylines();
         directionsRenderer.setMap(map);
+        traveledRenderer.setMap(map);
         alternativeRenderer.setMap(null);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
@@ -2503,8 +2583,10 @@
         navState.currentRoute = navState.originalRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         directionsRenderer.setMap(null);
+        traveledRenderer.setMap(null);
         updateRoutePolylines();
         directionsRenderer.setMap(map);
+        traveledRenderer.setMap(map);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
       }
@@ -2514,6 +2596,8 @@
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.isPanningToDest = false;
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
       restoreNavigationView();
       showToast('Reroute rejected, continuing on original route.');
       console.log('Reroute rejected');
@@ -2568,6 +2652,9 @@
         showRerouteHud(hazard, timeSaved);
         navState.pendingReroute = null;
         console.log('Showing pending reroute HUD after camera alert dismissal');
+      }
+      if (navState.isNavigating && navState.isFollowing) {
+        restoreNavigationView();
       }
     }
 
