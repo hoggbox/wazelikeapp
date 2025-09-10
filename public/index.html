@@ -1873,7 +1873,7 @@
     }
 
     function updateRoutePolylines() {
-      if (!navState.currentRoute || !navState.routePolyline || !GoogleMaps.spherical) return;
+      if (!navState.currentRoute || !navState.routePolyline || !GoogleMaps.spherical || !navState.isSnappedToRoute) return;
       const userLatLng = new google.maps.LatLng(navState.userLocation);
       let closestIndex = 0;
       let minDistance = Infinity;
@@ -1937,7 +1937,7 @@
       });
       traveledRenderer.setMap(map);
 
-      console.log('Updated route polylines: upcoming points:', upcomingPath.length, 'traveled points:', navState.traveledPath.length);
+      console.log('Updated route polylines: upcoming points:', upcomingPath.length, 'traveled points:', navState.traveledPath.length, 'minDistance to polyline:', minDistance.toFixed(2), 'meters');
     }
 
     function smoothMapTransition(target, options, duration = 500) {
@@ -2001,6 +2001,7 @@
             navState.isSnappedToRoute = true;
           } else {
             navState.isSnappedToRoute = false;
+            console.log('Not snapped to route: distance to polyline =', minDistance.toFixed(2), 'meters');
           }
           const nextPoint = closestIndex < path.length - 1 ? path[closestIndex + 1] : path[closestIndex - 1] || path[closestIndex];
           const routeHeading = heading && !isNaN(heading)
@@ -2015,9 +2016,9 @@
           if (headingDiff > 180) {
             lastHeading = routeHeading + (routeHeading < lastHeading ? 360 : -360);
           }
-          navState.currentHeading = lastHeading + (routeHeading - lastHeading) * 0.2;
+          navState.currentHeading = isMoving ? lastHeading + (routeHeading - lastHeading) * 0.2 : lastHeading;
           lastHeading = navState.currentHeading;
-          console.log('Snapped to polyline point:', pos, 'Bearing:', navState.currentHeading, 'Snapped:', navState.isSnappedToRoute);
+          console.log('Position:', pos, 'Heading:', navState.currentHeading, 'Snapped:', navState.isSnappedToRoute, 'Distance to polyline:', minDistance.toFixed(2), 'meters');
 
           const userLatLng = new google.maps.LatLng(navState.userLocation);
           try {
@@ -2033,15 +2034,24 @@
           userMarker.position = pos;
           userMarker.map = map;
         }
-        if (navState.currentHeading && Math.abs(navState.currentHeading - lastHeading) > 5) {
+        if (navState.currentHeading && Math.abs(navState.currentHeading - lastHeading) > 5 && isMoving) {
           if (userMarker && userMarker.content) {
             userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
           }
         }
 
-        if (navState.isNavigating && navState.isFollowing && navState.isSnappedToRoute) {
-          updateRoutePolylines();
-          restoreNavigationView();
+        if (navState.isNavigating && navState.isFollowing) {
+          if (navState.isSnappedToRoute) {
+            updateRoutePolylines();
+            restoreNavigationView();
+          } else {
+            // Center on raw user location when not snapped
+            map.panTo(navState.userLocation);
+            map.setZoom(15);
+            map.setTilt(0);
+            map.setHeading(0);
+            console.log('Not snapped, centering on raw user location:', navState.userLocation);
+          }
         }
         navState.lastKnownPosition = pos;
         socket.emit('locationUpdate', { location: navState.userLocation });
@@ -2070,9 +2080,28 @@
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.originalRoute = navState.currentRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        // Check snapping status immediately
+        const userLatLng = new google.maps.LatLng(navState.userLocation);
+        let minDistance = Infinity;
+        navState.routePolyline.forEach((point, index) => {
+          const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, point);
+          if (distance < minDistance) {
+            minDistance = distance;
+          }
+        });
+        navState.isSnappedToRoute = minDistance <= SNAPPING_PROXIMITY;
+        console.log('Route calculated, snapping status:', navState.isSnappedToRoute, 'Distance to polyline:', minDistance.toFixed(2), 'meters');
         updateRoutePolylines();
-        restoreNavigationView();
-        console.log('Navigation started, centered on:', navState.userLocation);
+        if (navState.isSnappedToRoute) {
+          restoreNavigationView();
+        } else {
+          map.panTo(navState.userLocation);
+          map.setZoom(15);
+          map.setTilt(0);
+          map.setHeading(0);
+          showToast('Move closer to the route to start navigation.');
+          console.log('Not snapped, centered on raw user location:', navState.userLocation);
+        }
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
         if (showTrafficCameras) {
@@ -2177,14 +2206,10 @@
           if (status === 'OK') {
             navState.currentRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
-            updateRoutePolylines();
             console.log('Route calculated and polyline rendered:', response.routes[0].legs[0].distance.text);
             updateHUD(response, origin);
             updateBottomHUD(response);
             if (callback) callback();
-            if (navState.isFollowing) {
-              restoreNavigationView();
-            }
           } else {
             console.error('Directions request failed:', status);
             showToast('Directions request failed: ' + status);
@@ -2239,7 +2264,10 @@
           new google.maps.LatLng(currentPos),
           new google.maps.LatLng(nextStep.start_location)
         );
-        hudTurn.textContent = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${Math.round(distance)}m`;
+        const distanceText = distance < 1000
+          ? `${Math.round(distance)} meters`
+          : `${(distance / 1000).toFixed(1)} km`;
+        hudTurn.textContent = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
       } else {
         hudTurn.textContent = 'Follow the road';
       }
@@ -2413,7 +2441,7 @@
               const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
               let bestAlt = null;
               let bestTimeSaved = -Infinity;
-              for (let i = 1; i< response.routes.length; i++) {
+              for (let i = 1; i < response.routes.length; i++) {
                 const alt = response.routes[i];
                 const altDuration = alt.legs[0].duration.value;
                 const timeSaved = currentDuration - altDuration;
@@ -2509,14 +2537,33 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating && navState.isSnappedToRoute) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
-        const distanceAhead = 50; // Reduced for closer focus
-        const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, distanceAhead, navState.currentHeading || 0);
+        let snappedPosition = userLatLng;
+        let heading = navState.currentHeading || 0;
+        if (navState.currentRoute && navState.routePolyline) {
+          let minDistance = Infinity;
+          let closestIndex = 0;
+          navState.routePolyline.forEach((point, index) => {
+            const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, point);
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestIndex = index;
+            }
+          });
+          snappedPosition = navState.routePolyline[closestIndex];
+          const nextPoint = closestIndex < navState.routePolyline.length - 1 
+            ? navState.routePolyline[closestIndex + 1] 
+            : navState.routePolyline[closestIndex - 1] || navState.routePolyline[closestIndex];
+          heading = GoogleMaps.spherical.computeHeading(snappedPosition, nextPoint);
+        }
+        const centerPoint = GoogleMaps.spherical.computeOffset(snappedPosition, LOOKAHEAD_DISTANCE * 0.6, heading);
         smoothMapTransition(centerPoint, {
           zoom: navState.navigationZoom,
-          heading: navState.currentHeading || 0,
+          heading: heading,
           tilt: 45
         }, 500);
-        console.log('Navigation view restored: Center ahead by 50m, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 45');
+        console.log('Navigation view restored: Centered at', centerPoint.toJSON(), 'Zoom:', navState.navigationZoom, 'Heading:', heading, 'Tilt: 45');
+      } else {
+        console.log('Navigation view not restored: Snapped=', navState.isSnappedToRoute, 'Following=', navState.isFollowing, 'Navigating=', navState.isNavigating);
       }
     }
 
@@ -2540,7 +2587,26 @@
         rerouteHud.classList.remove('active');
         navState.isFollowing = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
-        restoreNavigationView();
+        // Recheck snapping status after reroute
+        const userLatLng = new google.maps.LatLng(navState.userLocation);
+        let minDistance = Infinity;
+        navState.routePolyline.forEach((point) => {
+          const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, point);
+          if (distance < minDistance) {
+            minDistance = distance;
+          }
+        });
+        navState.isSnappedToRoute = minDistance <= SNAPPING_PROXIMITY;
+        console.log('Reroute accepted, snapping status:', navState.isSnappedToRoute, 'Distance to polyline:', minDistance.toFixed(2), 'meters');
+        if (navState.isSnappedToRoute) {
+          restoreNavigationView();
+        } else {
+          map.panTo(navState.userLocation);
+          map.setZoom(15);
+          map.setTilt(0);
+          map.setHeading(0);
+          showToast('Move closer to the route to resume navigation.');
+        }
         showToast('Alternative route accepted.');
         console.log('Reroute accepted:', navState.alternativeRoute.routes[0].legs[0].distance.text);
         navState.alertState = 'IDLE';
@@ -2585,8 +2651,26 @@
       rerouteHud.classList.remove('active');
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
-      restoreNavigationView();
-      showToast('Reroute rejected, continuing on original route.');
+      // Recheck snapping status after rejecting reroute
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      let minDistance = Infinity;
+      navState.routePolyline.forEach((point) => {
+        const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+        }
+      });
+      navState.isSnappedToRoute = minDistance <= SNAPPING_PROXIMITY;
+      console.log('Reroute rejected, snapping status:', navState.isSnappedToRoute, 'Distance to polyline:', minDistance.toFixed(2), 'meters');
+      if (navState.isSnappedToRoute) {
+        restoreNavigationView();
+      } else {
+        map.panTo(navState.userLocation);
+        map.setZoom(15);
+        map.setTilt(0);
+        map.setHeading(0);
+        showToast('Move closer to the route to resume navigation.');
+      }
       console.log('Reroute rejected');
       navState.alertState = 'IDLE';
       navState.alternativeRoute = null;
@@ -2622,7 +2706,7 @@
       const clearCountdown = () => {
         clearInterval(countdownInterval);
         toast.classList.remove('visible-toast');
-        toast.classList.add('countdown-toast');
+        toast.classList.remove('countdown-toast');
       };
       document.getElementById('dismiss-camera-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('camera-close').addEventListener('click', clearCountdown, { once: true });
@@ -2640,15 +2724,15 @@
         navState.pendingReroute = null;
         console.log('Showing pending reroute HUD after camera alert dismissal');
       }
-      if (navState.isNavigating && navState.isFollowing) {
+      if (navState.isNavigating && navState.isFollowing && navState.isSnappedToRoute) {
         restoreNavigationView();
       }
     }
 
     async function checkCameraProximity() {
-      if (!navState.isNavigating || !navState.userLocation || !showTrafficCameras) return;
+      if (!navState.isNavigating || !navState.userLocation || !showTrafficCameras || !navState.isSnappedToRoute) return;
       const userLatLng = new google.maps.LatLng(navState.userLocation);
-      const upcomingPath = navState.routePolyline.slice(0, Math.min(navState.routePolyline.length, 10)); // Check next 10 points for direct route
+      const upcomingPath = navState.routePolyline.slice(0, Math.min(navState.routePolyline.length, 10)); // Check next 10 points
       cameraPositions.forEach((cameraPos, index) => {
         const cameraLatLng = new google.maps.LatLng(cameraPos);
         const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
@@ -2662,6 +2746,7 @@
         if (distance <= CAMERA_PROXIMITY && isDirectRoute && !cameraAlertShown.has(`static-${index}`)) {
           showCameraHud();
           cameraAlertShown.add(`static-${index}`);
+          console.log('Camera alert triggered: static-', index, 'Distance:', distance.toFixed(2), 'meters');
         } else if (distance > CAMERA_PROXIMITY) {
           cameraAlertShown.delete(`static-${index}`);
         }
@@ -2683,6 +2768,7 @@
           if (distance <= CAMERA_PROXIMITY && isDirectRoute && !cameraAlertShown.has(`mongo-${camera._id}`)) {
             showCameraHud();
             cameraAlertShown.add(`mongo-${camera._id}`);
+            console.log('Camera alert triggered: mongo-', camera._id, 'Distance:', distance.toFixed(2), 'meters');
           } else if (distance > CAMERA_PROXIMITY) {
             cameraAlertShown.delete(`mongo-${camera._id}`);
           }
