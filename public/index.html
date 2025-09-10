@@ -1844,6 +1844,7 @@
       }
       navState.alertState = 'IDLE';
       navState.tempAlertData = null;
+      navState.isPanningToDest = false;
       console.log('All HUDs closed');
     }
 
@@ -1994,11 +1995,9 @@
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.originalRoute = navState.currentRoute;
         navState.isPanningToDest = true;
-        const bounds = new google.maps.LatLngBounds();
-        bounds.extend(navState.userLocation);
-        bounds.extend(navState.destination);
-        map.fitBounds(bounds);
-        map.setZoom(Math.min(map.getZoom(), 14));
+        // Show destination with green marker and full polyline
+        map.panTo(navState.destination);
+        map.setZoom(14);
         map.setTilt(0);
         map.setHeading(0);
         console.log('Showing destination:', navState.destination);
