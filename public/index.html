@@ -951,7 +951,7 @@
     let alternativeRenderer;
     let upcomingPolyline;
     let traveledPolyline;
-    let fullRoutePolyline;
+    let tempRenderer;
     let trafficLayer;
     let watchId;
     let currentAlerts = [];
@@ -1995,7 +1995,7 @@
         const position = await new Promise((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
-            timeout: 15000,
+            timeout: 30000,
             maximumAge: 0
           });
         });
@@ -2018,24 +2018,22 @@
       calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
         navState.originalRoute = navState.currentRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
-        // Show overview for 3 seconds
-        const fullPath = navState.routePolyline;
-        fullRoutePolyline = new google.maps.Polyline({
-          path: fullPath,
-          strokeColor: navState.mainRouteColor,
-          strokeWeight: 6,
-          strokeOpacity: 0.8,
-          map: map
+        // Show overview for 3 seconds using DirectionsRenderer
+        tempRenderer = new GoogleMaps.DirectionsRenderer({
+          map: map,
+          suppressMarkers: true,
+          polylineOptions: {
+            strokeColor: navState.mainRouteColor,
+            strokeWeight: 6,
+            strokeOpacity: 0.8
+          }
         });
-        const bounds = new google.maps.LatLngBounds();
-        fullPath.forEach(point => bounds.extend(point));
-        bounds.extend(new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng));
-        bounds.extend(new google.maps.LatLng(navState.destination.lat, navState.destination.lng));
-        map.fitBounds(bounds);
+        tempRenderer.setDirections(navState.currentRoute);
+        map.fitBounds(navState.currentRoute.routes[0].bounds);
         setTimeout(() => {
-          if (fullRoutePolyline) {
-            fullRoutePolyline.setMap(null);
-            fullRoutePolyline = null;
+          if (tempRenderer) {
+            tempRenderer.setMap(null);
+            tempRenderer = null;
           }
           restoreNavigationView();
           updateRoutePolylines();
@@ -2060,7 +2058,7 @@
           {
             enableHighAccuracy: true,
             maximumAge: 0,
-            timeout: 15000
+            timeout: 30000
           }
         );
         console.log('GPS tracking started, watchId:', watchId);
@@ -2073,7 +2071,7 @@
           {
             enableHighAccuracy: true,
             maximumAge: 0,
-            timeout: 15000
+            timeout: 30000
           }
         );
       });
@@ -2104,9 +2102,9 @@
         traveledPolyline.setMap(null);
         traveledPolyline = null;
       }
-      if (fullRoutePolyline) {
-        fullRoutePolyline.setMap(null);
-        fullRoutePolyline = null;
+      if (tempRenderer) {
+        tempRenderer.setMap(null);
+        tempRenderer = null;
       }
       navState.isNavigating = false;
       navState.isFollowing = false;
@@ -2477,7 +2475,7 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
-        let heading = navState.currentHeading || 0;
+        let heading = 0;
         let snappedPosition = userLatLng;
         if (navState.routePolyline && navState.routePolyline.length > 1) {
           let minDistance = Infinity;
@@ -2490,14 +2488,14 @@
             }
           });
           snappedPosition = navState.routePolyline[closestIndex];
-          const nextPoint = closestIndex < navState.routePolyline.length - 1
-            ? navState.routePolyline[closestIndex + 1]
-            : navState.routePolyline[closestIndex - 1] || navState.routePolyline[closestIndex];
-          heading = GoogleMaps.spherical.computeHeading(snappedPosition, nextPoint);
-        } else {
-          heading = 0;
+          const isAtEnd = closestIndex >= navState.routePolyline.length - 1;
+          const referenceIndex = isAtEnd ? closestIndex - 1 : closestIndex + 1;
+          const pointA = isAtEnd ? navState.routePolyline[referenceIndex] : navState.routePolyline[closestIndex];
+          const pointB = isAtEnd ? navState.routePolyline[closestIndex] : navState.routePolyline[referenceIndex];
+          heading = GoogleMaps.spherical.computeHeading(pointA, pointB);
+          if (isNaN(heading)) heading = 0;
         }
-        const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, LOOKAHEAD_DISTANCE * 0.6, heading);
+        const centerPoint = GoogleMaps.spherical.computeOffset(snappedPosition, LOOKAHEAD_DISTANCE * 0.6, heading);
         smoothMapTransition(centerPoint, {
           zoom: navState.navigationZoom,
           heading: heading,
@@ -2541,7 +2539,7 @@
           {
             enableHighAccuracy: true,
             maximumAge: 0,
-            timeout: 15000
+            timeout: 30000
           }
         );
       }
