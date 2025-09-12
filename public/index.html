@@ -1985,11 +1985,29 @@
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-    function startGPS() {
+    async function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
         console.error('Geolocation not supported');
         return;
+      }
+      try {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 0
+          });
+        });
+        navState.userLocation = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        userMarker.position = navState.userLocation;
+        console.log('Fresh location obtained for navigation start:', navState.userLocation);
+      } catch (error) {
+        console.error('Failed to get fresh location for navigation start:', error);
+        showToast('Failed to get accurate location. Using last known position.');
       }
       navState.isNavigating = true;
       navState.isFollowing = true;
@@ -2011,8 +2029,8 @@
         });
         const bounds = new google.maps.LatLngBounds();
         fullPath.forEach(point => bounds.extend(point));
-        bounds.extend(navState.userLocation);
-        bounds.extend(navState.destination);
+        bounds.extend(new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng));
+        bounds.extend(new google.maps.LatLng(navState.destination.lat, navState.destination.lng));
         map.fitBounds(bounds);
         setTimeout(() => {
           if (fullRoutePolyline) {
@@ -2461,7 +2479,7 @@
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
         let heading = navState.currentHeading || 0;
         let snappedPosition = userLatLng;
-        if (navState.routePolyline) {
+        if (navState.routePolyline && navState.routePolyline.length > 1) {
           let minDistance = Infinity;
           let closestIndex = 0;
           navState.routePolyline.forEach((point, index) => {
@@ -2476,6 +2494,8 @@
             ? navState.routePolyline[closestIndex + 1]
             : navState.routePolyline[closestIndex - 1] || navState.routePolyline[closestIndex];
           heading = GoogleMaps.spherical.computeHeading(snappedPosition, nextPoint);
+        } else {
+          heading = 0;
         }
         const centerPoint = GoogleMaps.spherical.computeOffset(userLatLng, LOOKAHEAD_DISTANCE * 0.6, heading);
         smoothMapTransition(centerPoint, {
