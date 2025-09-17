@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1145,7 +1146,7 @@
       return outputArray;
     }
     function fetchUserProfile() {
-      fetch('/api/auth/profile/' + localStorage.getItem('userId'), {
+      fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       }).then(res => res.json()).then(data => {
         console.log('Profile data received:', data);
@@ -1201,7 +1202,7 @@
         navigator.share({
           title: 'My Route',
           text: 'Check out my current route!',
-          url: window.location.href + '?route=' + encodeURIComponent(JSON.stringify(navState.currentRoute))
+          url: `${window.location.href}?route=${encodeURIComponent(JSON.stringify(navState.currentRoute))}`
         }).then(() => console.log('Shared successfully')).catch(err => {
           console.error('Share failed:', err);
           showToast('Sharing not supported');
@@ -1235,7 +1236,9 @@
     }
     async function confirmAlertLocation(location, alertType) {
       try {
-        const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`);
+        const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
         if (!response.ok) {
           console.warn(`Failed to check nearby alerts (status: ${response.status}), proceeding with alert placement`);
           showToast('Server unavailable for nearby alerts check. Proceeding with placement.');
@@ -1361,7 +1364,7 @@
         }
         const result = await response.json();
         console.log('Post alert response:', { status: response.status, result });
-        if (response.ok && result.alert) {
+        if (response.status === 201 && result.alert) {
           const marker = new GoogleMaps.AdvancedMarkerElement({
             map,
             position: {
@@ -1469,7 +1472,9 @@
     async function fetchAndDisplayMarkers(map, center) {
       try {
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
-        const response = await fetch(url);
+        const response = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
         if (!response.ok) throw new Error(`Failed to fetch markers: ${response.statusText}`);
         const markers = await response.json();
         map?.data?.forEach(feature => feature.setMap(null));
@@ -1507,7 +1512,9 @@
     function fetchCurrentAlerts() {
       const center = navState.userLocation;
       const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
-      fetch(url)
+      fetch(url, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      })
         .then(response => {
           if (!response.ok) throw new Error(`Failed to fetch alerts: ${response.statusText}`);
           return response.json();
@@ -2232,7 +2239,7 @@
       return GoogleMaps.spherical.computeDistanceBetween(point, proj);
     }
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 100;
+      const BUFFER = 50;
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
@@ -2248,49 +2255,62 @@
           return;
         }
         const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
-        directionsService.route(
-          {
-            origin: navState.userLocation,
-            destination: navState.destination,
-            travelMode: google.maps.TravelMode.DRIVING,
-            provideRouteAlternatives: true
-          },
-          (response, status) => {
-            console.log('Alternative route response:', status, response?.routes?.length || 0);
-            if (status === 'OK' && response.routes && response.routes.length > 1) {
-              const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
-              let bestAlt = null;
-              let bestTimeSaved = -Infinity;
-              for (let i = 1; i < response.routes.length; i++) {
-                const alt = response.routes[i];
-                const altPath = alt.overview_path;
-                if (isHazardAvoided(hazardLatLng, altPath)) {
-                  const altDuration = alt.legs[0].duration.value;
-                  const timeSaved = currentDuration - altDuration;
-                  if (timeSaved > bestTimeSaved) {
-                    bestAlt = alt;
-                    bestTimeSaved = timeSaved;
+        const tryRoute = (options, attempt) => {
+          directionsService.route(
+            {
+              origin: navState.userLocation,
+              destination: navState.destination,
+              travelMode: google.maps.TravelMode.DRIVING,
+              provideRouteAlternatives: true,
+              ...options
+            },
+            (response, status) => {
+              console.log(`Alternative route attempt ${attempt}:`, status, response?.routes?.length || 0);
+              if (status === 'OK' && response.routes && response.routes.length > 0) {
+                const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
+                let bestAlt = null;
+                let bestTimeSaved = -Infinity;
+                for (let i = 0; i < response.routes.length; i++) {
+                  const alt = response.routes[i];
+                  const altPath = alt.overview_path;
+                  if (isHazardAvoided(hazardLatLng, altPath)) {
+                    const altDuration = alt.legs[0].duration.value;
+                    const timeSaved = currentDuration - altDuration;
+                    if (timeSaved >= bestTimeSaved) {
+                      bestAlt = alt;
+                      bestTimeSaved = timeSaved;
+                    }
                   }
                 }
-              }
-              if (bestAlt) {
-                navState.alternativeRoute = {
-                  ...response,
-                  routes: [bestAlt]
-                };
-                const timeSavedMin = Math.round(bestTimeSaved / 60);
-                console.log(`Alternative route found, time saved: ${timeSavedMin} minutes`);
-                resolve(timeSavedMin);
+                if (bestAlt) {
+                  navState.alternativeRoute = {
+                    ...response,
+                    routes: [bestAlt]
+                  };
+                  const timeSavedMin = Math.round(bestTimeSaved / 60);
+                  console.log(`Alternative route found, time saved: ${timeSavedMin} minutes`);
+                  resolve(timeSavedMin);
+                } else if (attempt < 2) {
+                  console.log('No valid alternate route found, trying with avoidHighways');
+                  tryRoute({ avoidHighways: true }, attempt + 1);
+                } else {
+                  console.log('No suitable alternative route found after all attempts.');
+                  resolve(null);
+                }
               } else {
-                console.log('No alternative route found that avoids the hazard.');
-                resolve(null);
+                console.error('Directions request failed:', status);
+                if (attempt < 2) {
+                  console.log('Retrying with avoidHighways');
+                  tryRoute({ avoidHighways: true }, attempt + 1);
+                } else {
+                  showToast('Failed to find alternate routes.');
+                  resolve(null);
+                }
               }
-            } else {
-              console.error('No alternative routes available or request failed:', status);
-              resolve(null);
             }
-          }
-        );
+          );
+        };
+        tryRoute({ avoidHighways: false, avoidTolls: false, avoidFerries: false }, 1);
       });
     }
     function showRerouteHud(hazard, timeSaved) {
@@ -2520,7 +2540,9 @@
         }
       });
       try {
-        const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${cameraAlertDistance * 1609.34}&type=Traffic%20Camera`);
+        const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${cameraAlertDistance * 1609.34}&type=Traffic%20Camera`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
         if (!response.ok) throw new Error(`Failed to fetch traffic camera alerts: ${response.statusText}`);
         const cameras = await response.json();
         cameras.forEach((camera, index) => {

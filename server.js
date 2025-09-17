@@ -73,7 +73,7 @@ alertSchema.index({ location: '2dsphere' });
 
 const Alert = mongoose.model('Alert', alertSchema);
 
-// Connect to MongoDB Atlas
+// Connect to MongoDB Atlas with reconnection logic
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -81,9 +81,20 @@ mongoose.connect(process.env.MONGODB_URI, {
   maxPoolSize: 10,
   retryWrites: true,
   retryReads: true
-})
-  .then(() => logger.info('Connected to MongoDB Atlas (pinmap database)'))
-  .catch(err => logger.error('MongoDB connection error:', err));
+}).then(() => {
+  logger.info('Connected to MongoDB Atlas (pinmap database)');
+}).catch(err => {
+  logger.error('MongoDB connection error:', err);
+  setTimeout(() => mongoose.connect(process.env.MONGODB_URI, mongoose.connectOptions), 5000);
+});
+
+mongoose.connection.on('error', err => {
+  logger.error('MongoDB error:', err);
+});
+mongoose.connection.on('disconnected', () => {
+  logger.warn('MongoDB disconnected, attempting to reconnect...');
+  setTimeout(() => mongoose.connect(process.env.MONGODB_URI, mongoose.connectOptions), 5000);
+});
 
 // Serve static files from /public
 app.use(express.static('public'));
@@ -100,13 +111,13 @@ app.get('/health', (req, res) => {
 
 // Basic route for the homepage
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '/public/index.html'));
+  res.sendFile(path.join(__dirname, 'public/index.html'));
 });
 
 // Refresh token endpoint
 app.post('/api/auth/refresh', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const user = await mongoose.model('User').findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
     res.json({ token });
