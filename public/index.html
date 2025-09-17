@@ -1236,26 +1236,24 @@
     async function confirmAlertLocation(location, alertType) {
       try {
         const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`);
-        if (!response.ok) throw new Error(`Failed to check nearby alerts: ${response.statusText}`);
-        const nearbyAlerts = await response.json();
-        if (nearbyAlerts.length > 0) {
-          showToast('Cannot place alert within 500ft of another alert. Please choose a different location.');
-          navState.alertState = 'IDLE';
-          if (navState.mapClickListener) {
-            google.maps.event.removeListener(navState.mapClickListener);
-            navState.mapClickListener = null;
+        if (!response.ok) {
+          console.warn(`Failed to check nearby alerts (status: ${response.status}), proceeding with alert placement`);
+          showToast('Server unavailable for nearby alerts check. Proceeding with placement.');
+        } else {
+          const nearbyAlerts = await response.json();
+          if (nearbyAlerts.length > 0) {
+            showToast('Cannot place alert within 500ft of another alert. Please choose a different location.');
+            navState.alertState = 'IDLE';
+            if (navState.mapClickListener) {
+              google.maps.event.removeListener(navState.mapClickListener);
+              navState.mapClickListener = null;
+            }
+            return;
           }
-          return;
         }
       } catch (error) {
         console.error('Error checking nearby alerts:', error);
-        showToast('Error checking nearby alerts. Please try again.');
-        navState.alertState = 'IDLE';
-        if (navState.mapClickListener) {
-          google.maps.event.removeListener(navState.mapClickListener);
-          navState.mapClickListener = null;
-        }
-        return;
+        showToast('Error checking nearby alerts. Proceeding with placement.');
       }
       if (!GoogleMaps.AdvancedMarkerElement) {
         console.error('AdvancedMarkerElement not defined, cannot place temp marker');
@@ -2681,7 +2679,11 @@
       }
     }
     function initApp() {
-      socket = io({ auth: { token: localStorage.getItem('token') } });
+      socket = io({
+        auth: { token: localStorage.getItem('token') },
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
       socket.on('connect', () => {
         console.log('Socket.IO connected for user:', localStorage.getItem('userId'));
       });
@@ -2692,7 +2694,12 @@
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
           location.reload();
+        } else {
+          showToast('Server connection lost. Attempting to reconnect...');
         }
+      });
+      socket.on('reconnect_attempt', () => {
+        console.log('Attempting to reconnect to Socket.IO server');
       });
       socket.on('alert', (alert) => {
         const isTrafficCamera = alert.type === 'Traffic Camera';
