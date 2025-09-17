@@ -3183,7 +3183,6 @@
               lng: position.coords.longitude
             };
             console.log('Initial location:', navState.userLocation);
-            requestDeviceOrientationPermission();
             initializeMap();
           },
           (error) => {
@@ -3300,7 +3299,7 @@
           showToast('Failed to place alert: Google Maps library not loaded');
           return;
         }
-        const marker = new GoogleMaps.AdvancedMarkerElement({
+        new GoogleMaps.AdvancedMarkerElement({
           map,
           position: {
             lat: alert.location.coordinates[1],
@@ -3317,7 +3316,6 @@
           });
         }
         if (navState.isNavigating && !isTrafficCamera) {
-          currentAlerts.push(alert);
           checkHazardsAndOfferReroute();
         }
       });
@@ -3330,7 +3328,6 @@
           );
           cameraAlertShown.delete(`mongo-${id}`);
         }
-        currentAlerts = currentAlerts.filter(a => a._id !== id);
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
       socket.on('pointsUpdate', (data) => {
