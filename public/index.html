@@ -1,0 +1,3324 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Waze-Like GPS App</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="manifest" href="/manifest.json">
+  <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js"></script>
+  <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 0;
+    }
+    #search-container {
+      position: absolute;
+      top: 2vh;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80%;
+      max-width: 90vw;
+      z-index: 1001;
+      display: flex;
+      align-items: center;
+      background: white;
+      border-radius: 0.5rem;
+      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      padding: 0.5rem;
+      border: 1px solid #ccc;
+    }
+    #search-input {
+      flex: 1;
+      padding: 0.5rem;
+      border: none;
+      font-size: 1rem;
+      outline: none;
+      background: transparent;
+      width: 100%;
+    }
+    #search-input::placeholder {
+      color: #888;
+    }
+    #start-button {
+      display: none;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      margin-left: 0.5rem;
+      font-size: 1rem;
+    }
+    #start-button:hover {
+      background: #45a049;
+    }
+    .hidden {
+      display: none !important;
+    }
+    .pac-container {
+      z-index: 1002;
+      border-radius: 0.5rem;
+      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      background: white;
+      font-family: Arial, sans-serif;
+      font-size: 1rem;
+      width: 80% !important;
+      max-width: 90vw;
+      margin-top: 0.5rem;
+    }
+    .pac-item {
+      padding: 0.5rem;
+      cursor: pointer;
+      color: #333;
+    }
+    .pac-item:hover {
+      background: #f0f0f0;
+    }
+    #hud-container {
+      position: absolute;
+      top: 2vh;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80%;
+      max-width: 90vw;
+      z-index: 1;
+      background: white;
+      border-radius: 0.5rem;
+      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      padding: 1vh;
+      border: 1px solid #ccc;
+      display: none;
+      flex-direction: column;
+      gap: 0.5vh;
+    }
+    #hud-turn {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #333;
+    }
+    #hud-street, #hud-heading {
+      font-size: 0.9rem;
+      color: #555;
+    }
+    #bottom-hud-container {
+      position: absolute;
+      bottom: 2vh;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80%;
+      max-width: 90vw;
+      z-index: 1;
+      background: white;
+      border-radius: 0.5rem;
+      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      padding: 1vh;
+      border: 1px solid #ccc;
+      display: none;
+      align-items: center;
+      gap: 1vw;
+    }
+    #bottom-hud-stop {
+      background: #d32f2f;
+      color: white;
+      border: none;
+      padding: 0.5rem 0.8rem;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: 1rem;
+      font-weight: bold;
+    }
+    #bottom-hud-stop:hover {
+      background: #b71c1c;
+    }
+    #bottom-hud-info {
+      flex: 1;
+      text-align: center;
+    }
+    #bottom-hud-time {
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #333;
+    }
+    #bottom-hud-distance {
+      font-size: 0.9rem;
+      color: #555;
+    }
+    #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+      position: fixed;
+      right: 2vw;
+      width: 5vw;
+      height: 5vw;
+      max-width: 40px;
+      max-height: 40px;
+      border: 0.1rem solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    #hazard-button {
+      bottom: 48vh;
+      background: #ff4444;
+    }
+    #hazard-button::before {
+      content: '+';
+      color: #00ff00;
+      font-size: 1.2rem;
+      font-weight: bold;
+    }
+    #hazard-button:hover {
+      background: #cc0000;
+    }
+    #recenter-button {
+      bottom: 40vh;
+      background: #4CAF50;
+    }
+    #recenter-button::before {
+      content: '↻';
+      color: #fff;
+      font-size: 1.2rem;
+      font-weight: bold;
+    }
+    #recenter-button:hover {
+      background: #45a049;
+    }
+    #voice-button {
+      bottom: 32vh;
+      background: #FF5722;
+    }
+    #voice-button::before {
+      content: '\f130';
+      font-family: 'Font Awesome 6 Free';
+      font-weight: 900;
+      color: #fff;
+      font-size: 1.2rem;
+    }
+    #voice-button:hover {
+      background: #E64A19;
+    }
+    #share-button {
+      bottom: 24vh;
+      background: #2196F3;
+    }
+    #share-button::before {
+      content: '\f1e0';
+      font-family: 'Font Awesome 6 Free';
+      font-weight: 900;
+      color: #fff;
+      font-size: 1.2rem;
+    }
+    #share-button:hover {
+      background: #1976D2;
+    }
+    #settings-button {
+      bottom: 16vh;
+      background: #2196F3;
+    }
+    #settings-button::before {
+      content: '\f013';
+      font-family: 'Font Awesome 6 Free';
+      font-weight: 900;
+      color: #fff;
+      font-size: 1.2rem;
+    }
+    #settings-button:hover {
+      background: #1976D2;
+    }
+    #current-alerts-button {
+      bottom: 8vh;
+      background: #FF9800;
+    }
+    #current-alerts-button::before {
+      content: '\f071';
+      font-family: 'Font Awesome 6 Free';
+      font-weight: 900;
+      color: #fff;
+      font-size: 1.2rem;
+    }
+    #current-alerts-button:hover {
+      background: #F57C00;
+    }
+    #leaderboard-button {
+      bottom: 0vh;
+      background: #FFC107;
+    }
+    #leaderboard-button::before {
+      content: '\f091';
+      font-family: 'Font Awesome 6 Free';
+      font-weight: 900;
+      color: #fff;
+      font-size: 1.2rem;
+    }
+    #leaderboard-button:hover {
+      background: #FFA000;
+    }
+    .report-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 15;
+    }
+    #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%) translateY(100%);
+      width: 80vw;
+      max-width: 300px;
+      background: rgba(0, 0, 0, 0.7);
+      border-radius: 0.5rem;
+      padding: 1vmin;
+      pointer-events: auto;
+      display: none;
+      flex-direction: column;
+      transition: transform 0.3s ease;
+      transform-origin: center;
+      visibility: visible;
+      overflow-y: auto;
+      max-height: 80vh;
+      color: white;
+    }
+    #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active {
+      display: flex;
+      transform: translate(-50%, -50%);
+      visibility: visible;
+    }
+    #report-box::before, #reroute-hud-container::before, #settings-hud-container::before, #alerts-hud-container::before, #camera-hud-container::before, #leaderboard-hud-container::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.3);
+      z-index: -1;
+      display: none;
+    }
+    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container::before {
+      display: block;
+    }
+    #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+      width: 100%;
+      padding: 1vmin 0;
+      position: relative;
+      margin-bottom: 1vmin;
+    }
+    #report-close, #reroute-close, #settings-close, #alerts-close, #camera-close, #leaderboard-close {
+      position: absolute;
+      top: 0.5vmin;
+      right: 0.5vmin;
+      background: #d32f2f;
+      color: white;
+      border: none;
+      padding: 0.5vmin 1vmin;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(12px, 2.5vmin, 16px);
+      font-weight: bold;
+      z-index: 1;
+    }
+    #report-close:hover, #reroute-close:hover, #settings-close:hover, #alerts-close:hover, #camera-close:hover, #leaderboard-close:hover {
+      background: #b71c1c;
+    }
+    .report-options {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1vmin;
+      padding: 0.5vmin 0;
+      padding-top: 2vmin;
+      position: relative;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    .report-button {
+      background: rgba(255, 255, 255, 0.2);
+      border: none;
+      border-radius: 0.3rem;
+      padding: 1vmin;
+      text-align: center;
+      cursor: pointer;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: background 0.2s;
+      position: relative;
+      width: 100%;
+      height: 100%;
+      vertical-align: middle;
+      grid-column: auto;
+      grid-row: auto;
+    }
+    .report-button:hover {
+      background: rgba(255, 255, 255, 0.3);
+    }
+    .report-button i {
+      font-size: clamp(12px, 2.5vmin, 16px);
+      margin-bottom: 0.5vmin;
+    }
+    #confirm-alert {
+      display: none;
+      flex-direction: column;
+      gap: 1vmin;
+      padding: 1vmin;
+      text-align: center;
+    }
+    #confirm-alert.active {
+      display: flex;
+    }
+    #confirm-alert h3 {
+      margin: 0;
+      font-size: clamp(14px, 2.5vmin, 18px);
+      color: white;
+    }
+    #confirm-alert p {
+      margin: 0.5vmin 0;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+    }
+    #post-alert-button, #cancel-alert-button {
+      margin: 0.5vmin;
+      padding: 0.8vmin 1.5vmin;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+    }
+    #post-alert-button {
+      background-color: #4CAF50;
+    }
+    #post-alert-button:hover {
+      background-color: #45a049;
+    }
+    #cancel-alert-button {
+      background-color: #d32f2f;
+    }
+    #cancel-alert-button:hover {
+      background-color: #b71c1c;
+    }
+    #reroute-hud {
+      display: none;
+      flex-direction: column;
+      gap: 1vmin;
+      padding: 1vmin;
+      text-align: center;
+    }
+    #reroute-hud.active {
+      display: flex;
+    }
+    #reroute-hud h3 {
+      margin: 0;
+      font-size: clamp(14px, 2.5vmin, 18px);
+      color: white;
+    }
+    #reroute-hud p {
+      margin: 0.5vmin 0;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+    }
+    #accept-reroute-button, #reject-reroute-button {
+      margin: 0.5vmin;
+      padding: 0.8vmin 1.5vmin;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+    }
+    #accept-reroute-button {
+      background-color: #4CAF50;
+    }
+    #accept-reroute-button:hover {
+      background-color: #45a049;
+    }
+    #reject-reroute-button {
+      background-color: #d32f2f;
+    }
+    #reject-reroute-button:hover {
+      background-color: #b71c1c;
+    }
+    #settings-tabs, #alerts-tabs, #leaderboard-tabs {
+      display: flex;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+      margin-bottom: 1.5vmin;
+    }
+    .settings-tab, .alerts-tab, .leaderboard-tab {
+      flex: 1;
+      padding: 0.5vmin;
+      text-align: center;
+      cursor: pointer;
+      font-size: clamp(12px, 2.2vmin, 16px);
+      color: rgba(255, 255, 255, 0.7);
+      transition: color 0.2s, border-bottom 0.2s;
+    }
+    .settings-tab.active, .alerts-tab.active, .leaderboard-tab.active {
+      color: white;
+      border-bottom: 2px solid #4CAF50;
+    }
+    .settings-tab:hover, .alerts-tab:hover, .leaderboard-tab:hover {
+      color: white;
+    }
+    #settings-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5vmin;
+      padding: 1.5vmin;
+    }
+    .settings-option {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: clamp(10px, 2vmin, 14px);
+      padding-bottom: 1vmin;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    .settings-option:last-child {
+      border-bottom: none;
+    }
+    .settings-option label {
+      color: white;
+      font-weight: 600;
+    }
+    .settings-option select {
+      padding: 0.5vmin;
+      border-radius: 0.3rem;
+      border: none;
+      font-size: clamp(10px, 2vmin, 14px);
+      background: #333;
+      color: white;
+      width: 50%;
+      transition: background 0.2s;
+    }
+    .settings-option select:hover {
+      background: #444;
+    }
+    .settings-option input[type="checkbox"] {
+      appearance: none;
+      width: 1.5rem;
+      height: 1.5rem;
+      background: #555;
+      border-radius: 0.3rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .settings-option input[type="checkbox"]:checked {
+      background: #333;
+      position: relative;
+    }
+    .settings-option input[type="checkbox"]:checked::before {
+      content: '\f00c';
+      font-family: 'Font Awesome 6 Free';
+      font-weight: 900;
+      color: #4CAF50;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 1rem;
+    }
+    .settings-option input[type="checkbox"]:hover {
+      background: #666;
+    }
+    .settings-option input[type="range"] {
+      width: 50%;
+      cursor: pointer;
+    }
+    .settings-option .slider-value {
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+    }
+    #logout-button {
+      margin: 0.5vmin;
+      padding: 0.8vmin 1.5vmin;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+      background-color: #d32f2f;
+    }
+    #logout-button:hover {
+      background-color: #b71c1c;
+    }
+    #toast {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 0.8vmin 1.5vmin;
+      border-radius: 0.4rem;
+      z-index: 1001;
+      transition: opacity 0.5s;
+      opacity: 0;
+      font-size: clamp(10px, 2vmin, 14px);
+      pointer-events: none;
+      max-width: 90vw;
+      text-align: center;
+    }
+    #toast.visible-toast {
+      opacity: 1;
+    }
+    .alerts-tab-content, .leaderboard-tab-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5vmin;
+      display: none;
+    }
+    .alert-item {
+      margin-bottom: 1.5vmin;
+      padding: 1vmin;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 0.3rem;
+      background: rgba(255, 255, 255, 0.1);
+    }
+    .alert-field {
+      font-size: clamp(10px, 2vmin, 14px);
+      margin-bottom: 0.5vmin;
+      color: white;
+    }
+    .alert-actions {
+      display: flex;
+      gap: 1vmin;
+      margin-top: 1vmin;
+    }
+    .center-btn, .delete-btn, #center-alerts-btn {
+      background: #4CAF50;
+      color: white;
+      border: none;
+      padding: 0.5vmin 1vmin;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(10px, 2vmin, 14px);
+    }
+    .delete-btn {
+      background: #d32f2f;
+      margin-left: 0.5vmin;
+    }
+    .center-btn:hover, #center-alerts-btn:hover {
+      background: #45a049;
+    }
+    .delete-btn:hover {
+      background: #b71c1c;
+    }
+    .traffic-cam-marker {
+      width: 40px;
+      height: 40px;
+    }
+    #camera-hud {
+      display: none;
+      flex-direction: column;
+      gap: 1vmin;
+      padding: 1vmin;
+      text-align: center;
+    }
+    #camera-hud.active {
+      display: flex;
+    }
+    #camera-hud h3 {
+      margin: 0;
+      font-size: clamp(14px, 2.5vmin, 18px);
+      color: white;
+    }
+    #camera-hud p {
+      margin: 0.5vmin 0;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+    }
+    #dismiss-camera-button {
+      margin: 0.5vmin;
+      padding: 0.8vmin 1.5vmin;
+      border: none;
+      border-radius: 0.4rem;
+      cursor: pointer;
+      font-size: clamp(10px, 2vmin, 14px);
+      color: white;
+      background-color: #d32f2f;
+    }
+    #dismiss-camera-button:hover {
+      background-color: #b71c1c;
+    }
+    #high-contrast {
+      filter: contrast(1.5);
+    }
+    @media (max-width: 414px) {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+        width: 8vw;
+        height: 8vw;
+        max-width: 32px;
+        max-height: 32px;
+        right: 3vw;
+      }
+      #hazard-button {
+        bottom: 48vh;
+      }
+      #recenter-button {
+        bottom: 40vh;
+      }
+      #voice-button {
+        bottom: 32vh;
+      }
+      #share-button {
+        bottom: 24vh;
+      }
+      #settings-button {
+        bottom: 16vh;
+      }
+      #current-alerts-button {
+        bottom: 8vh;
+      }
+      #leaderboard-button {
+        bottom: 0vh;
+      }
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+        font-size: 1rem;
+      }
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+        width: 90vw;
+        max-width: none;
+        padding: 1.5vmin;
+      }
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+        padding: 1vmin 0;
+        margin-bottom: 1vmin;
+      }
+      .report-options {
+        gap: 1.5vmin;
+        padding-top: 2.5vmin;
+      }
+      .report-button {
+        font-size: clamp(9px, 1.8vmin, 13px);
+      }
+      .report-button i {
+        font-size: clamp(11px, 2.2vmin, 14px);
+      }
+      #toast {
+        width: 90vw;
+        max-width: none;
+      }
+      .alert-field {
+        font-size: clamp(9px, 1.8vmin, 13px);
+      }
+      .center-btn, .delete-btn, #center-alerts-btn {
+        font-size: clamp(9px, 1.8vmin, 13px);
+      }
+      .traffic-cam-marker {
+        width: 32px;
+        height: 32px;
+      }
+      .settings-option .slider-value {
+        font-size: clamp(9px, 1.8vmin, 13px);
+      }
+    }
+    @media (min-width: 415px) and (max-width: 768px) {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+        width: 6vw;
+        height: 6vw;
+        max-width: 36px;
+        max-height: 36px;
+        right: 2.5vw;
+      }
+      #hazard-button {
+        bottom: 48vh;
+      }
+      #recenter-button {
+        bottom: 40vh;
+      }
+      #voice-button {
+        bottom: 32vh;
+      }
+      #share-button {
+        bottom: 24vh;
+      }
+      #settings-button {
+        bottom: 16vh;
+      }
+      #current-alerts-button {
+        bottom: 8vh;
+      }
+      #leaderboard-button {
+        bottom: 0vh;
+      }
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+        font-size: 1.1rem;
+      }
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+        width: 80vw;
+        max-width: 320px;
+        padding: 1.2vmin;
+      }
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+        padding: 1vmin 0;
+        margin-bottom: 1vmin;
+      }
+      .report-options {
+        gap: 1.2vmin;
+        padding-top: 2vmin;
+      }
+      .report-button {
+        font-size: clamp(10px, 2vmin, 14px);
+      }
+      #toast {
+        width: 80vw;
+        max-width: 320px;
+      }
+    }
+    @media (min-width: 769px) {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+        width: 5vw;
+        height: 5vw;
+        max-width: 40px;
+        max-height: 40px;
+        right: 2vw;
+      }
+      #hazard-button {
+        bottom: 48vh;
+      }
+      #recenter-button {
+        bottom: 40vh;
+      }
+      #voice-button {
+        bottom: 32vh;
+      }
+      #share-button {
+        bottom: 24vh;
+      }
+      #settings-button {
+        bottom: 16vh;
+      }
+      #current-alerts-button {
+        bottom: 8vh;
+      }
+      #leaderboard-button {
+        bottom: 0vh;
+      }
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+        font-size: 1.2rem;
+      }
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+        width: 30vw;
+        max-width: 300px;
+        padding: 1vmin;
+      }
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+        padding: 1vmin 0;
+        margin-bottom: 1vmin;
+      }
+      .report-options {
+        gap: 1vmin;
+        padding-top: 2vmin;
+      }
+      .report-button {
+        font-size: clamp(10px, 2vmin, 14px);
+      }
+      #toast {
+        width: 30vw;
+        max-width: 300px;
+      }
+    }
+    @media (orientation: landscape) {
+      #hud-container, #bottom-hud-container {
+        width: 60%;
+      }
+    }
+    @media (orientation: portrait) {
+      #hud-container, #bottom-hud-container {
+        width: 80%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="search-container">
+    <input id="search-input" type="text" placeholder="Enter destination address">
+    <button id="start-button">Start</button>
+  </div>
+  <div id="hud-container">
+    <div id="hud-turn">Follow the road</div>
+    <div id="hud-street">Current street: Unknown</div>
+    <div id="hud-heading">Heading: Unknown</div>
+  </div>
+  <div id="bottom-hud-container">
+    <button id="bottom-hud-stop">X</button>
+    <div id="bottom-hud-info">
+      <div id="bottom-hud-time">0 Mins</div>
+      <div id="bottom-hud-distance">0 miles - Unknown</div>
+    </div>
+  </div>
+  <div id="hazard-button"></div>
+  <div id="recenter-button"></div>
+  <div id="voice-button"></div>
+  <div id="share-button"></div>
+  <div id="settings-button"></div>
+  <div id="current-alerts-button"></div>
+  <div id="leaderboard-button"></div>
+  <div class="report-container">
+    <div id="report-box">
+      <header>
+        <button id="report-close">X</button>
+      </header>
+      <div class="report-options">
+        <div class="report-button" data-alert-type="Slowdown"><i class="fas fa-car"></i>Slowdown&nbsp;</div>
+        <div class="report-button" data-alert-type="Crash"><i class="fas fa-car-crash"></i>Crash&nbsp;</div>
+        <div class="report-button" data-alert-type="Construction"><i class="fas fa-tools"></i>Construction&nbsp;</div>
+        <div class="report-button" data-alert-type="Police"><i class="fas fa-user-shield"></i>Police&nbsp;</div>
+        <div class="report-button" data-alert-type="Object on Road"><i class="fas fa-road"></i>Object on Road&nbsp;</div>
+        <div class="report-button" data-alert-type="Lane Closure"><i class="fas fa-road-barrier"></i>Lane Closure&nbsp;</div>
+        <div class="report-button" data-alert-type="Manual Report"><i class="fas fa-comment"></i>Manual Report&nbsp;</div>
+        <div class="report-button" data-alert-type="Low Visibility"><i class="fas fa-eye-slash"></i>Low Visibility&nbsp;</div>
+        <div class="report-button" data-alert-type="Traffic Camera"><i class="fas fa-camera"></i>Traffic Camera&nbsp;</div>
+        <div class="report-button" data-alert-type="Manual Traffic Camera"><i class="fas fa-camera-retro"></i>Manual Traffic Camera&nbsp;</div>
+      </div>
+      <div id="confirm-alert">
+        <h3>Confirm Alert Location</h3>
+        <p>Alert Type: <span id="alert-type-display"></span></p>
+        <p>Location: <span id="location-display"></span></p>
+        <p>Timestamp: <span id="timestamp-display"></span></p>
+        <button id="post-alert-button">Post</button>
+        <button id="cancel-alert-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <div id="reroute-hud-container">
+    <header>
+      <button id="reroute-close">X</button>
+    </header>
+    <div id="reroute-hud">
+      <h3>Reroute Available</h3>
+      <p id="hazard-message"></p>
+      <button id="accept-reroute-button">Accept</button>
+      <button id="reject-reroute-button">Reject</button>
+    </div>
+  </div>
+  <div id="settings-hud-container">
+    <header>
+      <button id="settings-close">X</button>
+    </header>
+    <div id="settings-tabs">
+      <div class="settings-tab active" data-tab="map-settings">Map Settings</div>
+      <div class="settings-tab" data-tab="account">Account</div>
+    </div>
+    <div id="settings-content">
+      <div id="map-settings" class="settings-tab-content">
+        <div class="settings-option">
+          <label for="traffic-layer-toggle">Show Traffic Layer</label>
+          <input type="checkbox" id="traffic-layer-toggle">
+        </div>
+        <div class="settings-option">
+          <label for="main-route-color">Main Route Color</label>
+          <select id="main-route-color">
+            <option value="#4285F4">Blue</option>
+            <option value="#FF0000">Red</option>
+            <option value="#008000">Green</option>
+            <option value="#800080">Purple</option>
+          </select>
+        </div>
+        <div class="settings-option">
+          <label for="alt-route-color">Alternate Route Color</label>
+          <select id="alt-route-color">
+            <option value="#FFA500">Orange</option>
+            <option value="#FFFF00">Yellow</option>
+            <option value="#FF69B4">Pink</option>
+            <option value="#00CED1">Cyan</option>
+          </select>
+        </div>
+        <div class="settings-option">
+          <label for="map-type">Map Type</label>
+          <select id="map-type">
+            <option value="roadmap">Roadmap</option>
+            <option value="satellite">Satellite</option>
+            <option value="hybrid">Hybrid</option>
+            <option value="terrain">Terrain</option>
+          </select>
+        </div>
+        <div class="settings-option">
+          <label for="auto-recenter-toggle">Auto-Recenter</label>
+          <input type="checkbox" id="auto-recenter-toggle" checked>
+        </div>
+        <div class="settings-option">
+          <label for="traffic-camera-toggle">Show Traffic Camera Alerts</label>
+          <input type="checkbox" id="traffic-camera-toggle" checked>
+        </div>
+        <div class="settings-option">
+          <label for="high-contrast-toggle">High Contrast Mode</label>
+          <input type="checkbox" id="high-contrast-toggle">
+        </div>
+        <div class="settings-option">
+          <label for="hazard-alert-distance">Hazard Alert Distance (miles)</label>
+          <div>
+            <input type="range" id="hazard-alert-distance" min="1" max="5" value="2" step="0.5">
+            <span class="slider-value" id="hazard-distance-value">2 miles</span>
+          </div>
+        </div>
+        <div class="settings-option">
+          <label for="camera-alert-distance">Camera Alert Distance (miles)</label>
+          <div>
+            <input type="range" id="camera-alert-distance" min="0.5" max="2" value="0.5" step="0.5">
+            <span class="slider-value" id="camera-distance-value">0.5 miles</span>
+          </div>
+        </div>
+        <div class="settings-option">
+          <label for="use-default-distances">Use Default Distances</label>
+          <input type="checkbox" id="use-default-distances" checked>
+        </div>
+      </div>
+      <div id="account" class="settings-tab-content" style="display: none;">
+        <div id="points-display">Points: 0</div>
+        <div id="achievements-display">Achievements: None</div>
+        <button id="logout-button">Logout</button>
+      </div>
+    </div>
+  </div>
+  <div id="alerts-hud-container">
+    <header>
+      <button id="alerts-close">X</button>
+    </header>
+    <div id="alerts-tabs">
+      <div class="alerts-tab active" data-tab="information">Information</div>
+      <div class="alerts-tab" data-tab="tools">Tools</div>
+    </div>
+    <div id="information" class="alerts-tab-content"></div>
+    <div id="tools" class="alerts-tab-content" style="display: none;">
+      <button id="center-alerts-btn">Center on Alerts</button>
+    </div>
+  </div>
+  <div id="camera-hud-container">
+    <header>
+      <button id="camera-close">X</button>
+    </header>
+    <div id="camera-hud">
+      <h3>Traffic Camera Ahead</h3>
+      <p>Traffic enforcement camera in the area. Drive safely!</p>
+      <button id="dismiss-camera-button">Dismiss</button>
+    </div>
+  </div>
+  <div id="leaderboard-hud-container">
+    <header>
+      <button id="leaderboard-close">X</button>
+    </header>
+    <div id="leaderboard-content" class="leaderboard-tab-content">
+      <!-- Leaderboard will be populated here -->
+    </div>
+  </div>
+  <div id="toast"></div>
+  <div id="auth-container" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white;">
+    <h2 id="auth-title">Login</h2>
+    <form id="auth-form" style="display: flex; flex-direction: column; gap: 10px; width: 300px;">
+      <input type="text" id="username" name="username" placeholder="Username" style="display: none;">
+      <input type="email" id="email" name="email" placeholder="Email" required>
+      <input type="password" id="password" name="password" placeholder="Password" required>
+      <button type="submit">Submit</button>
+    </form>
+    <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
+  </div>
+  <script>
+    let map;
+    let userMarker;
+    let destMarker;
+    let directionsService;
+    let directionsRenderer;
+    let alternativeRenderer;
+    let trafficLayer;
+    let watchId;
+    let currentAlerts = [];
+    let cameraCheckInterval = null;
+    let cameraPositions = [];
+    let cameraAlertShown = new Set();
+    let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
+    let hazardAlertDistance = localStorage.getItem('hazardAlertDistance') ? parseFloat(localStorage.getItem('hazardAlertDistance')) : 2;
+    let cameraAlertDistance = localStorage.getItem('cameraAlertDistance') ? parseFloat(localStorage.getItem('cameraAlertDistance')) : 0.5;
+    let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
+    let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
+    let isInitialized = false;
+    let toastTimeout = null;
+    let lastHeading = 0;
+    let lastSpokenTurn = '';
+    let speechRecognition;
+    let headingHistory = [];
+    let lastLocationUpdate = 0;
+    let lastPosition = null;
+    let compassHeading = 0;
+    let navState = {
+      currentRoute: null,
+      isNavigating: false,
+      isFollowing: localStorage.getItem('isFollowing') === 'true',
+      destination: null,
+      userLocation: { lat: 33.083270, lng: -83.233040 },
+      previousUserLocation: null,
+      lastKnownPosition: null,
+      routePolyline: null,
+      rerouteCheckTimeout: null,
+      hazardCheckInterval: null,
+      currentHeading: 0,
+      alertState: 'IDLE',
+      tempMarker: null,
+      tempAlertData: null,
+      alternativeRoute: null,
+      originalRoute: null,
+      mapClickListener: null,
+      ignoredHazards: [],
+      currentHazard: null,
+      pendingReroute: null,
+      navigationZoom: 18,
+      mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
+      altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
+      mapType: localStorage.getItem('mapType') || 'roadmap',
+      showTraffic: localStorage.getItem('showTraffic') === 'true',
+      lastRecalculationTime: 0,
+      useDefaultDistances: useDefaultDistances,
+      lastValidHeading: 0
+    };
+    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+    const mapId = '2666b5bd496d9c6026f43f82';
+    const MAX_RETRIES = 5;
+    let retryCount = 0;
+    let socket;
+    const REROUTE_CHECK_INTERVAL = 30000;
+    const OFF_ROUTE_TOLERANCE = 100;
+    const RECALC_COOLDOWN = 30000;
+    const HAZARD_CHECK_INTERVAL = 10000;
+    const MIN_REROUTE_DISTANCE = 500;
+    const MIN_ALERT_DISTANCE = 152.4;
+    const CAMERA_CHECK_INTERVAL = 10000;
+    const HEADING_SMOOTHING_WINDOW = 10;
+    const MIN_ZOOM = 16;
+    const MAX_ZOOM = 19;
+    const TURN_ZOOM = 18;
+    const STRAIGHT_ZOOM = 16.5;
+    const TURN_THRESHOLD = 1609.34;
+    const LOCATION_UPDATE_THRESHOLD = 200;
+    const HEADING_CHANGE_THRESHOLD = 15;
+    const STATIONARY_SPEED_THRESHOLD = 0.5;
+    const SNAP_DISTANCE_THRESHOLD = 20;
+    let GoogleMaps = {
+      Map: null,
+      AdvancedMarkerElement: null,
+      PlacesService: null,
+      Autocomplete: null,
+      DirectionsService: null,
+      DirectionsRenderer: null,
+      spherical: null,
+      encoding: null,
+      TrafficLayer: null,
+      poly: null
+    };
+    function animate() {
+      requestAnimationFrame(animate);
+      TWEEN.update();
+    }
+    animate();
+    function adjustHud() {
+      const reportBox = document.getElementById('report-box');
+      const rerouteHudContainer = document.getElementById('reroute-hud-container');
+      const settingsHudContainer = document.getElementById('settings-hud-container');
+      const alertsHudContainer = document.getElementById('alerts-hud-container');
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
+      const currentWidth = window.innerWidth;
+      const currentHeight = window.innerHeight;
+      const maxHeight = Math.min(currentHeight * 0.5, 400);
+      const hudElements = [reportBox, rerouteHudContainer, settingsHudContainer, alertsHudContainer, cameraHudContainer, leaderboardHudContainer];
+      hudElements.forEach(element => {
+        element.style.maxHeight = `${maxHeight}px`;
+        element.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
+        element.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
+      });
+      console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
+    }
+    async function requestDeviceOrientationPermission() {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const permission = await DeviceOrientationEvent.requestPermission();
+          if (permission === 'granted') {
+            console.log('Device orientation permission granted');
+            setupDeviceOrientation();
+          } else {
+            console.warn('Device orientation permission denied');
+            showToast('Compass access denied. Using route-based heading.');
+          }
+        } catch (error) {
+          console.error('Error requesting device orientation permission:', error);
+          showToast('Failed to access compass. Using route-based heading.');
+        }
+      } else {
+        setupDeviceOrientation();
+      }
+    }
+    function setupDeviceOrientation() {
+      window.addEventListener('deviceorientation', (event) => {
+        if (event.alpha !== null) {
+          compassHeading = 360 - event.alpha; // Convert to bearing (0° is north)
+          console.log('Raw compass heading (alpha):', event.alpha, 'Adjusted:', compassHeading);
+        } else {
+          console.warn('Device orientation alpha is null');
+        }
+      });
+    }
+    function smoothCompassHeading(rawHeading) {
+      if (isNaN(rawHeading) || rawHeading === null) {
+        console.log('Using last valid heading due to invalid compass heading:', navState.lastValidHeading);
+        return navState.lastValidHeading;
+      }
+      headingHistory.push(rawHeading);
+      if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
+        headingHistory.shift();
+      }
+      // Low-pass filter: exponential moving average with alpha = 0.1
+      const alpha = 0.1;
+      let smoothedHeading = headingHistory[0];
+      for (let i = 1; i < headingHistory.length; i++) {
+        let delta = headingHistory[i] - smoothedHeading;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        smoothedHeading += alpha * delta;
+      }
+      smoothedHeading = smoothedHeading % 360;
+      if (smoothedHeading < 0) smoothedHeading += 360;
+      navState.lastValidHeading = smoothedHeading;
+      console.log('Smoothed compass heading:', { raw: rawHeading, smoothed: smoothedHeading });
+      return smoothedHeading;
+    }
+    async function initMap() {
+      if (!window.google || !google.maps) {
+        console.error('Google Maps API failed to load');
+        showToast('Failed to load map. Please check your network or API key in Google Cloud Console.');
+        return;
+      }
+      try {
+        GoogleMaps.Map = await google.maps.importLibrary("maps").then(lib => lib.Map);
+        GoogleMaps.TrafficLayer = await google.maps.importLibrary("maps").then(lib => lib.TrafficLayer);
+        GoogleMaps.AdvancedMarkerElement = await google.maps.importLibrary("marker").then(lib => lib.AdvancedMarkerElement);
+        GoogleMaps.PlacesService = await google.maps.importLibrary("places").then(lib => lib.PlacesService);
+        GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
+        GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
+        GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
+        GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
+        GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
+        GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
+        console.log('Google Maps libraries loaded:', Object.keys(GoogleMaps).filter(k => GoogleMaps[k]));
+      } catch (error) {
+        console.error('Failed to load Google Maps libraries:', error);
+        showToast('Failed to load map libraries. Check API key restrictions and enabled APIs in Google Cloud Console.');
+        return;
+      }
+      if (navigator.permissions) {
+        navigator.permissions.query({ name: 'geolocation' }).then((result) => {
+          if (result.state === 'denied') {
+            showToast('Location access denied. Please enable in browser settings.');
+          } else if (result.state === 'prompt') {
+            console.log('Geolocation permission prompt will be shown.');
+          } else {
+            console.log('Geolocation permission granted.');
+          }
+        });
+      }
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            navState.userLocation = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            console.log('Initial location:', navState.userLocation);
+            requestDeviceOrientationPermission();
+            initializeMap();
+          },
+          (error) => {
+            console.error('Initial geolocation error:', error);
+            handleGeolocationError(error, true);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
+      } else {
+        showToast('Geolocation is not supported by this browser.');
+        handleGeolocationError({ code: 0 }, true);
+      }
+    }
+    function initializeMap() {
+      if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement || !GoogleMaps.Autocomplete) {
+        console.error('Required Google Maps libraries not loaded:', { Map: !!GoogleMaps.Map, AdvancedMarkerElement: !!GoogleMaps.AdvancedMarkerElement, Autocomplete: !!GoogleMaps.Autocomplete });
+        showToast('Map initialization failed: libraries not loaded. Check Google Cloud Console.');
+        return;
+      }
+      map = new GoogleMaps.Map(document.getElementById('map'), {
+        center: navState.userLocation,
+        zoom: 15,
+        mapId: mapId,
+        tilt: 0,
+        heading: 0,
+        disableDefaultUI: true,
+        gestureHandling: 'cooperative',
+        mapTypeControl: false,
+        clickableIcons: false,
+        renderer: 'WEBGL'
+      });
+      map.setMapTypeId(navState.mapType);
+      trafficLayer = new GoogleMaps.TrafficLayer({ map: navState.showTraffic ? map : null });
+      directionsService = new GoogleMaps.DirectionsService();
+      directionsRenderer = new GoogleMaps.DirectionsRenderer({
+        map: null,
+        suppressMarkers: true,
+        preserveViewport: true,
+        polylineOptions: {
+          strokeColor: navState.mainRouteColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.8,
+          zIndex: 5
+        }
+      });
+      alternativeRenderer = new GoogleMaps.DirectionsRenderer({
+        map: null,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: navState.altRouteColor,
+          strokeOpacity: 0,
+          zIndex: 10,
+          icons: [{
+            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
+            offset: '0',
+            repeat: '12px'
+          }]
+        }
+      });
+      const markerElement = document.createElement('div');
+      markerElement.className = 'user-marker';
+      markerElement.style.width = '30px';
+      markerElement.style.height = '30px';
+      markerElement.style.backgroundColor = '#4285F4';
+      markerElement.style.borderRadius = '50%';
+      markerElement.style.border = '2px solid white';
+      markerElement.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
+      markerElement.style.transform = 'rotate(0deg)';
+      userMarker = new GoogleMaps.AdvancedMarkerElement({
+        map: map,
+        position: navState.userLocation,
+        content: markerElement,
+        title: 'Your Location'
+      });
+      if (showTrafficCameras) {
+        const trafficCamImage = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
+        const trafficCamLocations = [
+          { coords: { lat: 33.0921, lng: -83.2246 }, title: 'Traffic Camera - Baldwin High School' },
+          { coords: { lat: 33.0785, lng: -83.2251 }, title: 'Traffic Camera - The Kidd Center' },
+          { coords: { lat: 33.1087, lng: -83.2168 }, title: 'Traffic Camera - John Milledge Academy' }
+        ];
+        trafficCamLocations.forEach(location => {
+          fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location.title.split(' - ')[1] + ', Milledgeville, GA, USA')}&key=${API_KEY}`)
+            .then(response => response.json())
+            .then(data => {
+              let position = location.coords;
+              if (data.status === 'OK' && data.results[0]) {
+                position = data.results[0].geometry.location;
+                console.log(`Geocoding successful for ${location.title}:`, position);
+              } else {
+                console.warn(`Geocoding failed for ${location.title}, using fallback coords:`, position);
+                showToast(`Using fallback coordinates for ${location.title}.`);
+              }
+              const markerImage = document.createElement('img');
+              markerImage.src = trafficCamImage;
+              markerImage.className = 'traffic-cam-marker';
+              new GoogleMaps.AdvancedMarkerElement({
+                map: map,
+                position: position,
+                content: markerImage,
+                title: location.title
+              });
+              cameraPositions.push(position);
+              console.log(`Traffic camera marker placed at ${location.title}:`, position);
+            })
+            .catch(error => {
+              console.error(`Error geocoding ${location.title}:`, error);
+              const markerImage = document.createElement('img');
+              markerImage.src = trafficCamImage;
+              markerImage.className = 'traffic-cam-marker';
+              new GoogleMaps.AdvancedMarkerElement({
+                map: map,
+                position: location.coords,
+                content: markerImage,
+                title: location.title
+              });
+              cameraPositions.push(location.coords);
+              showToast(`Error geocoding ${location.title}, using fallback coordinates.`);
+              console.log(`Traffic camera marker placed at ${location.title} using fallback:`, location.coords);
+            });
+        });
+      }
+      const input = document.getElementById('search-input');
+      const autocomplete = new GoogleMaps.Autocomplete(input, { fields: ['geometry', 'formatted_address'] });
+      autocomplete.bindTo('bounds', map);
+      console.log('Autocomplete initialized');
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place && place.geometry && place.geometry.location) {
+          navState.destination = {
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng()
+          };
+          console.log('Destination selected:', navState.destination);
+          if (destMarker) destMarker.setMap(null);
+          const destMarkerElement = document.createElement('div');
+          destMarkerElement.style.width = '20px';
+          destMarkerElement.style.height = '20px';
+          destMarkerElement.style.backgroundColor = 'green';
+          destMarkerElement.style.borderRadius = '50%';
+          destMarkerElement.style.border = '2px solid white';
+          destMarker = new GoogleMaps.AdvancedMarkerElement({
+            map: map,
+            position: navState.destination,
+            content: destMarkerElement,
+            title: 'Destination'
+          });
+          document.getElementById('start-button').style.display = 'block';
+        } else {
+          console.error('No location for selected place:', place);
+          showToast('Invalid address selected. Please try again.');
+        }
+      });
+      document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
+      document.getElementById('main-route-color').value = navState.mainRouteColor;
+      document.getElementById('alt-route-color').value = navState.altRouteColor;
+      document.getElementById('map-type').value = navState.mapType;
+      document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
+      document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
+      document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
+      document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
+      document.getElementById('camera-alert-distance').value = cameraAlertDistance;
+      document.getElementById('camera-distance-value').textContent = `${cameraAlertDistance} miles`;
+      document.getElementById('use-default-distances').checked = navState.useDefaultDistances;
+      document.getElementById('high-contrast-toggle').checked = highContrastMode;
+      if (highContrastMode) document.body.classList.add('high-contrast');
+      fetchAndDisplayMarkers(map, navState.userLocation);
+      fetchUserProfile();
+      document.getElementById('start-button').addEventListener('click', startGPS);
+      document.getElementById('bottom-hud-stop').addEventListener('click', stopGPS);
+      document.getElementById('hazard-button').addEventListener('click', () => {
+        if (navState.alertState === 'OFFERING_REROUTE') return;
+        closeAllHuds();
+        const reportBox = document.getElementById('report-box');
+        const reportOptions = document.querySelector('.report-options');
+        const confirmAlert = document.getElementById('confirm-alert');
+        reportBox.classList.add('active');
+        reportOptions.style.display = 'grid';
+        confirmAlert.classList.remove('active');
+        navState.alertState = 'IDLE';
+        if (navState.isNavigating) {
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          console.log('Map unlocked for manual report');
+        }
+        console.log('Hazard button clicked, report box opened in IDLE state');
+      });
+      document.getElementById('report-close').addEventListener('click', () => {
+        cancelAlert();
+        console.log('Report box closed');
+      });
+      document.getElementById('settings-button').addEventListener('click', () => {
+        closeAllHuds();
+        const settingsHudContainer = document.getElementById('settings-hud-container');
+        settingsHudContainer.classList.add('active');
+        console.log('Settings button clicked, settings HUD opened');
+      });
+      document.getElementById('settings-close').addEventListener('click', () => {
+        const settingsHudContainer = document.getElementById('settings-hud-container');
+        settingsHudContainer.classList.remove('active');
+        console.log('Settings HUD closed');
+        if (navState.isNavigating) {
+          navState.isFollowing = true;
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          restoreNavigationView();
+          console.log('Navigation view re-locked after closing settings HUD');
+        }
+      });
+      document.getElementById('current-alerts-button').addEventListener('click', () => {
+        closeAllHuds();
+        fetchCurrentAlerts();
+        const alertsHudContainer = document.getElementById('alerts-hud-container');
+        alertsHudContainer.classList.add('active');
+        document.getElementById('information').style.display = 'block';
+        console.log('Current alerts button clicked, alerts HUD opened');
+      });
+      document.getElementById('alerts-close').addEventListener('click', () => {
+        const alertsHudContainer = document.getElementById('alerts-hud-container');
+        alertsHudContainer.classList.remove('active');
+        console.log('Alerts HUD closed');
+        if (navState.isNavigating) {
+          navState.isFollowing = true;
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          restoreNavigationView();
+          console.log('Navigation view re-locked after closing alerts HUD');
+        }
+      });
+      document.getElementById('leaderboard-button').addEventListener('click', () => {
+        closeAllHuds();
+        fetchLeaderboard();
+        const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
+        leaderboardHudContainer.classList.add('active');
+        console.log('Leaderboard button clicked, leaderboard HUD opened');
+      });
+      document.getElementById('leaderboard-close').addEventListener('click', () => {
+        const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
+        leaderboardHudContainer.classList.remove('active');
+        console.log('Leaderboard HUD closed');
+        if (navState.isNavigating) {
+          navState.isFollowing = true;
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          restoreNavigationView();
+          console.log('Navigation view re-locked after closing leaderboard HUD');
+        }
+      });
+      document.getElementById('voice-button').addEventListener('click', startVoiceRecognition);
+      document.getElementById('share-button').addEventListener('click', shareRoute);
+      document.querySelectorAll('.report-button').forEach(button => {
+        button.addEventListener('click', async () => {
+          if (navState.alertState === 'IDLE') {
+            const alertType = button.getAttribute('data-alert-type');
+            if (alertType === 'Manual Report' || alertType === 'Manual Traffic Camera') {
+              const reportBox = document.getElementById('report-box');
+              reportBox.classList.remove('active');
+              navState.alertState = alertType === 'Manual Report' ? 'PLACING_ALERT' : 'PLACING_TRAFFIC_CAMERA';
+              showToast(`Press a location on the map to place a ${alertType === 'Manual Report' ? 'hazard' : 'traffic camera'} alert.`);
+              navState.mapClickListener = map.addListener('click', (event) => {
+                if (navState.alertState === 'PLACING_ALERT' || navState.alertState === 'PLACING_TRAFFIC_CAMERA') {
+                  confirmAlertLocation(event.latLng, alertType === 'Manual Report' ? 'Manual Report' : 'Traffic Camera');
+                }
+              });
+            } else {
+              const location = new google.maps.LatLng(navState.userLocation);
+              confirmAlertLocation(location, alertType);
+            }
+          }
+        });
+      });
+      document.getElementById('post-alert-button').addEventListener('click', postAlert);
+      document.getElementById('cancel-alert-button').addEventListener('click', cancelAlert);
+      document.getElementById('reroute-close').addEventListener('click', rejectReroute);
+      document.getElementById('accept-reroute-button').addEventListener('click', acceptReroute);
+      document.getElementById('reject-reroute-button').addEventListener('click', rejectReroute);
+      document.getElementById('camera-close').addEventListener('click', dismissCameraAlert);
+      document.getElementById('dismiss-camera-button').addEventListener('click', dismissCameraAlert);
+      map.addListener('dragstart', () => {
+        if (navState.isNavigating) {
+          navState.isFollowing = false;
+          console.log('User started dragging map, unlocked navigation, camera auto-follow stopped');
+        }
+      });
+      document.getElementById('recenter-button').addEventListener('click', () => {
+        if (navState.isNavigating) {
+          navState.isFollowing = true;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          directionsRenderer.setMap(map);
+          restoreNavigationView();
+          console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
+        } else {
+          recenterNonNavigation();
+          console.log('Recenter button clicked, re-centered to user location (non-navigation)');
+        }
+      });
+      document.getElementById('traffic-layer-toggle').addEventListener('change', (e) => {
+        navState.showTraffic = e.target.checked;
+        localStorage.setItem('showTraffic', navState.showTraffic);
+        trafficLayer.setMap(navState.showTraffic ? map : null);
+        console.log('Traffic layer toggled:', navState.showTraffic);
+      });
+      document.getElementById('main-route-color').addEventListener('change', (e) => {
+        navState.mainRouteColor = e.target.value;
+        localStorage.setItem('mainRouteColor', navState.mainRouteColor);
+        directionsRenderer.setOptions({
+          polylineOptions: {
+            strokeColor: navState.mainRouteColor,
+            strokeWeight: 6,
+            strokeOpacity: 0.8,
+            zIndex: 5
+          }
+        });
+        if (navState.currentRoute) {
+          directionsRenderer.setDirections(navState.currentRoute);
+        }
+        console.log('Main route color changed to:', navState.mainRouteColor);
+      });
+      document.getElementById('alt-route-color').addEventListener('change', (e) => {
+        navState.altRouteColor = e.target.value;
+        localStorage.setItem('altRouteColor', navState.altRouteColor);
+        alternativeRenderer.setOptions({
+          polylineOptions: {
+            strokeColor: navState.altRouteColor,
+            strokeOpacity: 0,
+            zIndex: 10,
+            icons: [{
+              icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
+              offset: '0',
+              repeat: '12px'
+            }]
+          }
+        });
+        if (navState.alternativeRoute) {
+          alternativeRenderer.setDirections(navState.alternativeRoute);
+        }
+        console.log('Alternate route color changed to:', navState.altRouteColor);
+      });
+      document.getElementById('map-type').addEventListener('change', (e) => {
+        navState.mapType = e.target.value;
+        localStorage.setItem('mapType', navState.mapType);
+        map.setMapTypeId(navState.mapType);
+        console.log('Map type changed to:', navState.mapType);
+      });
+      document.getElementById('auto-recenter-toggle').addEventListener('change', (e) => {
+        navState.isFollowing = e.target.checked;
+        localStorage.setItem('isFollowing', navState.isFollowing);
+        console.log('Auto-recenter toggled:', navState.isFollowing);
+        if (navState.isFollowing && navState.isNavigating) {
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          restoreNavigationView();
+        }
+      });
+      document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
+        showTrafficCameras = e.target.checked;
+        localStorage.setItem('showTrafficCameras', showTrafficCameras);
+        console.log('Traffic camera alerts toggled:', showTrafficCameras);
+        cameraPositions = [];
+        cameraAlertShown.clear();
+        fetchAndDisplayMarkers(map, navState.userLocation);
+      });
+      document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
+        highContrastMode = e.target.checked;
+        localStorage.setItem('highContrastMode', highContrastMode);
+        if (highContrastMode) {
+          document.body.classList.add('high-contrast');
+        } else {
+          document.body.classList.remove('high-contrast');
+        }
+        console.log('High contrast mode toggled:', highContrastMode);
+      });
+      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
+        if (!navState.useDefaultDistances) {
+          hazardAlertDistance = parseFloat(e.target.value);
+          localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
+          document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
+          console.log('Hazard alert distance set to:', hazardAlertDistance, 'miles');
+        }
+      });
+      document.getElementById('camera-alert-distance').addEventListener('change', (e) => {
+        if (!navState.useDefaultDistances) {
+          cameraAlertDistance = parseFloat(e.target.value);
+          localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
+          document.getElementById('camera-distance-value').textContent = `${cameraAlertDistance} miles`;
+          console.log('Camera alert distance set to:', cameraAlertDistance, 'miles');
+        }
+      });
+      document.getElementById('use-default-distances').addEventListener('change', (e) => {
+        navState.useDefaultDistances = e.target.checked;
+        localStorage.setItem('useDefaultDistances', navState.useDefaultDistances);
+        if (navState.useDefaultDistances) {
+          hazardAlertDistance = 2;
+          cameraAlertDistance = 0.5;
+          localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
+          localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
+          document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
+          document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
+          document.getElementById('camera-alert-distance').value = cameraAlertDistance;
+          document.getElementById('camera-distance-value').textContent = `${cameraAlertDistance} miles`;
+          console.log('Restored default distances: hazard=2 miles, camera=0.5 miles');
+        }
+      });
+      document.querySelectorAll('.settings-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.settings-tab-content').forEach(c => c.style.display = 'none');
+          tab.classList.add('active');
+          document.getElementById(tab.getAttribute('data-tab')).style.display = 'block';
+          if (tab.getAttribute('data-tab') === 'account') {
+            fetchUserProfile();
+          }
+          console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
+        });
+      });
+      document.querySelectorAll('.alerts-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.alerts-tab').forEach(t => t.classList.remove('active'));
+          document.querySelectorAll('.alerts-tab-content').forEach(c => c.style.display = 'none');
+          tab.classList.add('active');
+          document.getElementById(tab.getAttribute('data-tab')).style.display = 'block';
+          console.log('Switched to alerts tab:', tab.getAttribute('data-tab'));
+        });
+      });
+      document.getElementById('logout-button').addEventListener('click', () => {
+        console.log('Logout button clicked, clearing localStorage');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        socket.disconnect();
+        document.getElementById('settings-hud-container').classList.remove('active');
+        document.getElementById('auth-container').style.display = 'flex';
+        showToast('Logged out successfully');
+        console.log('User logged out, showing auth form');
+        location.reload();
+      });
+      adjustHud();
+      window.addEventListener('resize', adjustHud);
+      window.addEventListener('load', adjustHud);
+      window.addEventListener('orientationchange', adjustHud);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then(reg => console.log('SW registered', reg)).catch(err => console.error('SW registration failed', err));
+      }
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({type: 'INIT'});
+      }
+      requestPushPermission();
+    }
+    function requestPushPermission() {
+      if ('PushManager' in window) {
+        Notification.requestPermission().then(permission => {
+          if (permission === 'granted') {
+            subscribeToPush();
+          }
+        });
+      }
+    }
+    function subscribeToPush() {
+      navigator.serviceWorker.ready.then(reg => {
+        reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(process.env.VAPID_PUBLIC_KEY) }).then(sub => {
+          fetch('/api/auth/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            body: JSON.stringify(sub)
+          });
+        });
+      });
+    }
+    function urlB64ToUint8Array(base64String) {
+      const padding = '='.repeat((4 - base64String.length % 4) % 4);
+      const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const outputArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+      }
+      return outputArray;
+    }
+    function fetchUserProfile() {
+      fetch('/api/auth/profile/' + localStorage.getItem('userId'), {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      }).then(res => res.json()).then(data => {
+        document.getElementById('points-display').textContent = `Points: ${data.points}`;
+        document.getElementById('achievements-display').textContent = `Achievements: ${data.achievements.join(', ') || 'None'}`;
+      }).catch(err => console.error('Failed to fetch profile', err));
+    }
+    function fetchLeaderboard() {
+      fetch('/api/leaderboard', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      }).then(res => res.json()).then(users => {
+        const content = document.getElementById('leaderboard-content');
+        content.innerHTML = '';
+        users.forEach((user, index) => {
+          const item = document.createElement('div');
+          item.className = 'alert-item';
+          item.innerHTML = `
+            <div class="alert-field"><strong>#${index + 1} ${user.username}</strong> - Points: ${user.points}</div>
+            <div class="alert-field">Achievements: ${user.achievements.join(', ') || 'None'}</div>
+          `;
+          content.appendChild(item);
+        });
+      }).catch(err => console.error('Failed to fetch leaderboard', err));
+    }
+    function startVoiceRecognition() {
+      if (!speechRecognition) {
+        speechRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        speechRecognition.lang = 'en-US';
+        speechRecognition.interimResults = false;
+        speechRecognition.maxAlternatives = 1;
+        speechRecognition.onresult = (event) => {
+          const command = event.results[0][0].transcript.toLowerCase();
+          if (command.includes('report hazard')) {
+            document.getElementById('hazard-button').click();
+          } else if (command.includes('start navigation')) {
+            document.getElementById('start-button').click();
+          } else if (command.includes('stop navigation')) {
+            document.getElementById('bottom-hud-stop').click();
+          }
+        };
+        speechRecognition.onerror = (event) => console.error('Speech recognition error', event.error);
+      }
+      speechRecognition.start();
+    }
+    function shareRoute() {
+      if (navigator.share && navState.currentRoute) {
+        navigator.share({
+          title: 'My Route',
+          text: 'Check out my current route!',
+          url: window.location.href + '?route=' + encodeURIComponent(JSON.stringify(navState.currentRoute))
+        }).then(() => console.log('Shared successfully')).catch(err => console.error('Share failed', err));
+      } else {
+        showToast('Sharing not supported');
+      }
+    }
+    async function refreshToken() {
+      try {
+        const response = await fetch('/api/auth/refresh', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        const data = await response.json();
+        if (response.ok) {
+          localStorage.setItem('token', data.token);
+          return true;
+        } else {
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          showToast('Session expired. Please log in again.');
+          return false;
+        }
+      } catch (error) {
+        console.error('Token refresh failed:', error);
+        showToast('Error refreshing session. Please log in again.');
+        return false;
+      }
+    }
+    async function confirmAlertLocation(location, alertType) {
+      try {
+        const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`);
+        if (!response.ok) throw new Error('Failed to check nearby alerts');
+        const nearbyAlerts = await response.json();
+        if (nearbyAlerts.length > 0) {
+          showToast('Cannot place alert within 500ft of another alert. Please choose a different location.');
+          navState.alertState = 'IDLE';
+          if (navState.mapClickListener) {
+            google.maps.event.removeListener(navState.mapClickListener);
+            navState.mapClickListener = null;
+          }
+          return;
+        }
+      } catch (error) {
+        console.error('Error checking nearby alerts:', error);
+        showToast('Error checking nearby alerts. Please try again.');
+        navState.alertState = 'IDLE';
+        if (navState.mapClickListener) {
+          google.maps.event.removeListener(navState.mapClickListener);
+          navState.mapClickListener = null;
+        }
+        return;
+      }
+      if (!GoogleMaps.AdvancedMarkerElement) {
+        console.error('AdvancedMarkerElement not defined, cannot place temp marker');
+        showToast('Failed to place alert: Google Maps library not loaded');
+        navState.alertState = 'IDLE';
+        return;
+      }
+      navState.alertState = 'CONFIRMING_ALERT';
+      if (navState.mapClickListener) {
+        google.maps.event.removeListener(navState.mapClickListener);
+        navState.mapClickListener = null;
+      }
+      navState.tempMarker = new GoogleMaps.AdvancedMarkerElement({
+        map: map,
+        position: location,
+        content: alertType === 'Traffic Camera' && showTrafficCameras ? createTrafficCameraContent() : createAlertContent(),
+        title: `Temporary ${alertType} Alert`,
+        gmpDraggable: false
+      });
+      navState.tempAlertData = {
+        type: alertType,
+        location: {
+          type: 'Point',
+          coordinates: [location.lng(), location.lat()]
+        },
+        timestamp: new Date()
+      };
+      try {
+        const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.lat()},${location.lng()}&key=${API_KEY}`);
+        const data = await response.json();
+        if (data.status === 'OK' && data.results[0]) {
+          navState.tempAlertData.address = data.results[0].formatted_address;
+          console.log('Reverse geocoding successful:', navState.tempAlertData.address);
+        } else {
+          console.warn('Reverse geocoding failed, using coordinates:', data.status);
+        }
+      } catch (error) {
+        console.error('Reverse geocoding failed:', error);
+        showToast('Failed to get address for alert location.');
+      }
+      const reportBox = document.getElementById('report-box');
+      const confirmAlert = document.getElementById('confirm-alert');
+      const reportOptions = document.querySelector('.report-options');
+      reportOptions.style.display = 'none';
+      confirmAlert.classList.add('active');
+      const alertTypeDisplay = document.getElementById('alert-type-display');
+      const locationDisplay = document.getElementById('location-display');
+      const timestampDisplay = document.getElementById('timestamp-display');
+      alertTypeDisplay.textContent = alertType;
+      locationDisplay.textContent = navState.tempAlertData.address || `${location.lat().toFixed(4)}, ${location.lng().toFixed(4)}`;
+      timestampDisplay.textContent = navState.tempAlertData.timestamp.toLocaleString();
+      reportBox.classList.add('active');
+      console.log(`Confirming ${alertType} alert at`, navState.tempAlertData.location);
+    }
+    async function postAlert() {
+      if (!navState.tempAlertData || !navState.tempMarker) return;
+      const isTrafficCamera = navState.tempAlertData.type === 'Traffic Camera';
+      if (isTrafficCamera && !showTrafficCameras) {
+        console.log('Traffic camera alert not posted: traffic cameras disabled');
+        navState.tempMarker.map = null;
+        navState.tempMarker = null;
+        navState.tempAlertData = null;
+        navState.alertState = 'IDLE';
+        showToast('Traffic camera alert not posted: cameras disabled in settings.');
+        return;
+      }
+      if (!GoogleMaps.AdvancedMarkerElement) {
+        console.error('AdvancedMarkerElement not defined, cannot place alert marker');
+        showToast('Failed to place alert: Google Maps library not loaded');
+        navState.tempMarker.map = null;
+        navState.tempMarker = null;
+        navState.tempAlertData = null;
+        navState.alertState = 'IDLE';
+        return;
+      }
+      try {
+        let response = await fetch('/api/alerts', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify(navState.tempAlertData)
+        });
+        if (response.status === 401) {
+          const refreshed = await refreshToken();
+          if (refreshed) {
+            response = await fetch('/api/alerts', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${localStorage.getItem('token')}`
+              },
+              body: JSON.stringify(navState.tempAlertData)
+            });
+          } else {
+            throw new Error('Authentication failed');
+          }
+        }
+        const result = await response.json();
+        if (response.ok) {
+          new GoogleMaps.AdvancedMarkerElement({
+            map,
+            position: {
+              lat: navState.tempAlertData.location.coordinates[1],
+              lng: navState.tempAlertData.location.coordinates[0]
+            },
+            content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+            title: `${navState.tempAlertData.type} Alert`
+          });
+          console.log('Alert saved to MongoDB:', result.alert);
+          showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
+          if (isTrafficCamera) {
+            cameraPositions.push({
+              lat: navState.tempAlertData.location.coordinates[1],
+              lng: navState.tempAlertData.location.coordinates[0]
+            });
+          } else if (navState.isNavigating) {
+            checkHazardsAndOfferReroute();
+          }
+          console.log('Alert posted');
+        } else {
+          console.error('Failed to save alert:', result.error);
+          showToast(`Failed to save alert: ${result.error || 'Unknown error'}`);
+          navState.tempMarker.map = null;
+        }
+      } catch (error) {
+        console.error('Error posting alert:', error);
+        showToast(`Error posting alert: ${error.message}`);
+        navState.tempMarker.map = null;
+      }
+      navState.tempMarker.map = null;
+      const reportBox = document.getElementById('report-box');
+      const confirmAlert = document.getElementById('confirm-alert');
+      const reportOptions = document.querySelector('.report-options');
+      reportBox.classList.remove('active');
+      confirmAlert.classList.remove('active');
+      reportOptions.style.display = 'grid';
+      navState.alertState = 'IDLE';
+      navState.tempAlertData = null;
+      navState.tempMarker = null;
+      if (navState.isNavigating) {
+        navState.isFollowing = true;
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        restoreNavigationView();
+        console.log('Navigation view re-locked after manual report');
+      }
+    }
+    function cancelAlert() {
+      if (navState.tempMarker) {
+        navState.tempMarker.map = null;
+      }
+      if (navState.mapClickListener) {
+        google.maps.event.removeListener(navState.mapClickListener);
+        navState.mapClickListener = null;
+      }
+      const reportBox = document.getElementById('report-box');
+      const reportOptions = document.querySelector('.report-options');
+      const confirmAlert = document.getElementById('confirm-alert');
+      reportBox.classList.remove('active');
+      reportOptions.style.display = 'grid';
+      confirmAlert.classList.remove('active');
+      navState.alertState = 'IDLE';
+      navState.tempAlertData = null;
+      navState.tempMarker = null;
+      showToast('Alert placement cancelled.');
+      console.log('Alert placement cancelled');
+      if (navState.isNavigating) {
+        navState.isFollowing = true;
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        restoreNavigationView();
+        console.log('Navigation view re-locked after cancelling manual report');
+      }
+    }
+    function checkOffRoute(userLatLng) {
+      if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
+        console.log('checkOffRoute skipped: Not navigating or no route data');
+        return false;
+      }
+      const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
+      const now = Date.now();
+      if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
+        console.log('Recalculation skipped due to cooldown');
+        return false;
+      }
+      if (!GoogleMaps.poly) {
+        console.error('GoogleMaps.poly not defined, cannot check route deviation');
+        showToast('Navigation error: Geometry library not loaded');
+        return false;
+      }
+      if (!GoogleMaps.poly.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) {
+        console.log('User off-route detected, recalculating...');
+        showToast('You are off-route. Recalculating route...');
+        navState.lastRecalculationTime = now;
+        calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
+          showToast('Route recalculated successfully.');
+          console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
+          restoreNavigationView(); // Ensure view is correct after recalculation
+        });
+        return true;
+      }
+      console.log('User on route');
+      return false;
+    }
+    async function fetchAndDisplayMarkers(map, center) {
+      try {
+        const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('Failed to fetch markers');
+        const markers = await response.json();
+        map?.data?.forEach(feature => feature.setMap(null));
+        cameraPositions = [];
+        if (!GoogleMaps.AdvancedMarkerElement) {
+          console.error('AdvancedMarkerElement not defined, cannot display markers');
+          showToast('Failed to load alerts: Google Maps library not loaded');
+          return;
+        }
+        markers.forEach(markerData => {
+          const isTrafficCamera = markerData.type === 'Traffic Camera';
+          if (isTrafficCamera && !showTrafficCameras) return;
+          new GoogleMaps.AdvancedMarkerElement({
+            map,
+            position: {
+              lat: markerData.location.coordinates[1],
+              lng: markerData.location.coordinates[0]
+            },
+            content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+            title: `${markerData.type} Alert`
+          });
+          if (isTrafficCamera) {
+            cameraPositions.push({
+              lat: markerData.location.coordinates[1],
+              lng: markerData.location.coordinates[0]
+            });
+          }
+        });
+        console.log('Fetched and displayed markers:', markers.length);
+      } catch (error) {
+        console.error('Error fetching markers:', error);
+        showToast('Failed to load alerts.');
+      }
+    }
+    function fetchCurrentAlerts() {
+      const center = navState.userLocation;
+      const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
+      fetch(url)
+        .then(response => {
+          if (!response.ok) throw new Error('Failed to fetch alerts');
+          return response.json();
+        })
+        .then(alerts => {
+          currentAlerts = alerts.filter(alert => showTrafficCameras || alert.type !== 'Traffic Camera');
+          displayAlertsInHud(currentAlerts);
+        })
+        .catch(error => {
+          console.error('Error fetching alerts:', error);
+          showToast('Failed to load current alerts.');
+        });
+    }
+    function formatDuration(ms) {
+      const seconds = Math.floor(ms / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+      if (days > 0) return `${days} days`;
+      if (hours > 0) return `${hours} hours`;
+      if (minutes > 0) return `${minutes} minutes`;
+      return `${seconds} seconds`;
+    }
+    function displayAlertsInHud(alerts) {
+      const content = document.getElementById('information');
+      content.innerHTML = '';
+      if (alerts.length === 0) {
+        content.innerHTML = '<p>No current alerts nearby.</p>';
+        return;
+      }
+      alerts.forEach(alert => {
+        const dateObj = new Date(alert.timestamp);
+        const now = new Date();
+        const durationMs = now - dateObj;
+        const item = document.createElement('div');
+        item.className = 'alert-item';
+        item.innerHTML = `
+          <div class="alert-field"><strong>Exact Location:</strong> ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`}</div>
+          <div class="alert-field"><strong>Date:</strong> ${dateObj.toLocaleDateString()}</div>
+          <div class="alert-field"><strong>Timestamp:</strong> ${dateObj.toLocaleTimeString()}</div>
+          <div class="alert-field"><strong>How long active:</strong> ${formatDuration(durationMs)}</div>
+          <div class="alert-field"><strong>User who posted:</strong> ${alert.userId ? alert.userId.username : 'Anonymous'}</div>
+          <div class="alert-actions">
+            <button class="center-btn" data-lat="${alert.location.coordinates[1]}" data-lng="${alert.location.coordinates[0]}">Center</button>
+            ${alert.userId && alert.userId._id === localStorage.getItem('userId') ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
+          </div>
+        `;
+        content.appendChild(item);
+      });
+      content.querySelectorAll('.center-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const lat = parseFloat(btn.dataset.lat);
+          const lng = parseFloat(btn.dataset.lng);
+          map.moveCamera({
+            center: { lat, lng },
+            zoom: 15
+          });
+          console.log('Centered map on alert:', { lat, lng });
+        });
+      });
+      content.querySelectorAll('.delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.id;
+          const item = btn.closest('.alert-item');
+          deleteAlert(id, item);
+        });
+      });
+    }
+    async function deleteAlert(id, item) {
+      try {
+        const response = await fetch(`/api/alerts/${id}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+        if (response.ok) {
+          item.remove();
+          showToast('Alert deleted successfully.');
+          console.log('Alert deleted:', id);
+          const alert = currentAlerts.find(a => a._id === id);
+          if (alert && alert.type === 'Traffic Camera') {
+            cameraPositions = cameraPositions.filter(pos =>
+              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+            );
+            cameraAlertShown.delete(`mongo-${id}`);
+          }
+          currentAlerts = currentAlerts.filter(a => a._id !== id);
+          fetchAndDisplayMarkers(map, navState.userLocation);
+        } else {
+          throw new Error('Failed to delete alert');
+        }
+      } catch (error) {
+        console.error('Error deleting alert:', error);
+        showToast('Failed to delete alert. Please try again.');
+      }
+    }
+    function closeAllHuds() {
+      document.getElementById('report-box').classList.remove('active');
+      document.getElementById('reroute-hud-container').classList.remove('active');
+      document.getElementById('settings-hud-container').classList.remove('active');
+      document.getElementById('alerts-hud-container').classList.remove('active');
+      document.getElementById('camera-hud-container').classList.remove('active');
+      document.getElementById('leaderboard-hud-container').classList.remove('active');
+      if (navState.tempMarker) {
+        navState.tempMarker.map = null;
+        navState.tempMarker = null;
+      }
+      if (navState.mapClickListener) {
+        google.maps.event.removeListener(navState.mapClickListener);
+        navState.mapClickListener = null;
+      }
+      navState.alertState = 'IDLE';
+      navState.tempAlertData = null;
+      console.log('All HUDs closed');
+      if (navState.isNavigating) {
+        navState.isFollowing = true;
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        restoreNavigationView();
+        console.log('Navigation view re-locked after closing HUDs');
+      }
+    }
+    function recenterNonNavigation() {
+      if (map) {
+        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
+          .to({ zoom: 15, center: navState.userLocation, heading: compassHeading }, 500)
+          .easing(TWEEN.Easing.Quadratic.Out)
+          .onUpdate(obj => {
+            map.moveCamera({
+              center: obj.center,
+              zoom: obj.zoom,
+              heading: obj.heading
+            });
+          })
+          .start();
+        map.setTilt(0);
+        console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', compassHeading);
+      }
+    }
+    function getPolylineBearing(path, closestIndex) {
+      if (!path || closestIndex >= path.length - 1) {
+        console.log('Using last valid heading due to invalid path or index:', navState.lastValidHeading);
+        return navState.lastValidHeading;
+      }
+      const currentPoint = path[closestIndex];
+      const nextPoint = path[closestIndex + 1];
+      const bearing = GoogleMaps.spherical.computeHeading(currentPoint, nextPoint);
+      const normalizedBearing = bearing < 0 ? bearing + 360 : bearing;
+      console.log('Calculated polyline bearing:', { currentIndex: closestIndex, bearing: normalizedBearing });
+      return normalizedBearing;
+    }
+    function smoothCompassHeading(rawHeading) {
+      if (isNaN(rawHeading) || rawHeading === null) {
+        console.log('Using last valid heading due to invalid compass heading:', navState.lastValidHeading);
+        return navState.lastValidHeading;
+      }
+      headingHistory.push(rawHeading);
+      if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
+        headingHistory.shift();
+      }
+      // Low-pass filter: exponential moving average with alpha = 0.1
+      const alpha = 0.1;
+      let smoothedHeading = headingHistory[0];
+      for (let i = 1; i < headingHistory.length; i++) {
+        let delta = headingHistory[i] - smoothedHeading;
+        if (delta > 180) delta -= 360;
+        if (delta < -180) delta += 360;
+        smoothedHeading += alpha * delta;
+      }
+      smoothedHeading = smoothedHeading % 360;
+      if (smoothedHeading < 0) smoothedHeading += 360;
+      navState.lastValidHeading = smoothedHeading;
+      console.log('Smoothed compass heading:', { raw: rawHeading, smoothed: smoothedHeading });
+      return smoothedHeading;
+    }
+    function shouldRotateMap(currentPos, speed, gpsHeading) {
+      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
+        console.log('No rotation: Not navigating or no route data, using compass');
+        return { shouldRotate: false, bearing: smoothCompassHeading(compassHeading) };
+      }
+      const path = navState.currentRoute.routes[0].overview_path;
+      let closestPoint = null;
+      let minDistance = Infinity;
+      let closestIndex = 0;
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      path.forEach((point, index) => {
+        const distance = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestPoint = point;
+          closestIndex = index;
+        }
+      });
+      const polylineBearing = getPolylineBearing(path, closestIndex);
+      if (speed < STATIONARY_SPEED_THRESHOLD || gpsHeading === null || isNaN(gpsHeading)) {
+        console.log('Using compass heading: Stationary or invalid GPS heading', { speed, gpsHeading });
+        return { shouldRotate: false, bearing: smoothCompassHeading(compassHeading) };
+      }
+      let currentStep = null;
+      let nextStep = null;
+      const legs = navState.currentRoute.routes[0].legs[0];
+      for (let i = 0; i < legs.steps.length; i++) {
+        const stepPath = legs.steps[i].path;
+        if (stepPath.some(pt => GoogleMaps.spherical.computeDistanceBetween(pt, closestPoint) < 20)) {
+          currentStep = legs.steps[i];
+          nextStep = legs.steps[i + 1] || null;
+          break;
+        }
+      }
+      if (nextStep && nextStep.maneuver) {
+        const distanceToTurn = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
+        if (distanceToTurn < TURN_THRESHOLD) {
+          const currentBearing = polylineBearing;
+          const nextBearing = getPolylineBearing(nextStep.path, 0);
+          const bearingDiff = Math.abs(currentBearing - nextBearing);
+          if (bearingDiff > HEADING_CHANGE_THRESHOLD || bearingDiff > 360 - HEADING_CHANGE_THRESHOLD) {
+            console.log('Rotation allowed: Approaching turn, blending with compass', { distanceToTurn, currentBearing, nextBearing });
+            const blendFactor = distanceToTurn / TURN_THRESHOLD; // Closer to turn, more weight to polyline
+            const blendedBearing = (1 - blendFactor) * smoothCompassHeading(compassHeading) + blendFactor * nextBearing;
+            return { shouldRotate: true, bearing: blendedBearing % 360 };
+          }
+        }
+      }
+      console.log('Using blended heading: Moving, no significant turn', { gpsHeading, polylineBearing });
+      const blendedBearing = 0.7 * gpsHeading + 0.3 * polylineBearing; // Blend GPS and polyline when moving
+      return { shouldRotate: true, bearing: blendedBearing % 360 };
+    }
+    function getDynamicZoom(currentPos) {
+      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
+        return navState.navigationZoom;
+      }
+      const path = navState.currentRoute.routes[0].overview_path;
+      let closestPoint = null;
+      let minDistance = Infinity;
+      let closestIndex = 0;
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      path.forEach((point, index) => {
+        const distance = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestPoint = point;
+          closestIndex = index;
+        }
+      });
+      let currentStep = null;
+      let nextStep = null;
+      const legs = navState.currentRoute.routes[0].legs[0];
+      for (let i = 0; i < legs.steps.length; i++) {
+        const stepPath = legs.steps[i].path;
+        if (stepPath.some(pt => GoogleMaps.spherical.computeDistanceBetween(pt, closestPoint) < 20)) {
+          currentStep = legs.steps[i];
+          nextStep = legs.steps[i + 1] || null;
+          break;
+        }
+      }
+      if (nextStep && nextStep.maneuver) {
+        const distanceToTurn = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
+        if (distanceToTurn < TURN_THRESHOLD) {
+          const zoom = TURN_ZOOM - ((distanceToTurn / TURN_THRESHOLD) * (TURN_ZOOM - STRAIGHT_ZOOM));
+          return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+        }
+      }
+      return STRAIGHT_ZOOM;
+    }
+    function onPositionUpdate(position) {
+      try {
+        const { latitude, longitude, speed = 0, heading = null } = position.coords;
+        console.log('Location update received:', { lat: latitude, lng: longitude, speed, gpsHeading: heading });
+        const now = Date.now();
+        if (now - lastLocationUpdate < LOCATION_UPDATE_THRESHOLD) {
+          console.log('Skipping location update due to throttle');
+          return;
+        }
+        lastLocationUpdate = now;
+        navState.previousUserLocation = navState.userLocation;
+        navState.userLocation = { lat: latitude, lng: longitude };
+        let pos = navState.userLocation;
+        let snapped = false;
+        if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
+          const path = navState.currentRoute.routes[0].overview_path;
+          let minDistance = Infinity;
+          let closestIndex = 0;
+          const currentLatLng = new google.maps.LatLng(pos);
+          path.forEach((point, index) => {
+            const distance = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, point);
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestIndex = index;
+            }
+          });
+          if (minDistance < SNAP_DISTANCE_THRESHOLD) {
+            pos = { lat: path[closestIndex].lat(), lng: path[closestIndex].lng() };
+            snapped = true;
+            console.log('Snapped to polyline:', pos, 'Distance:', minDistance);
+          }
+          const { shouldRotate, bearing } = shouldRotateMap(pos, speed, heading);
+          navState.currentHeading = shouldRotate ? smoothCompassHeading(bearing) : bearing;
+          console.log('Heading updated:', { shouldRotate, bearing, currentHeading: navState.currentHeading });
+          const userLatLng = new google.maps.LatLng(navState.userLocation);
+          try {
+            checkOffRoute(userLatLng);
+          } catch (error) {
+            console.error('checkOffRoute failed:', error);
+            showToast('Error checking route deviation. Continuing with raw location.');
+          }
+        }
+        navState.userLocation = pos;
+        if (userMarker) {
+          if (lastPosition && !snapped) {
+            new TWEEN.Tween(lastPosition)
+              .to(pos, 300)
+              .easing(TWEEN.Easing.Linear.None)
+              .onUpdate(obj => {
+                userMarker.position = obj;
+              })
+              .start();
+          } else {
+            userMarker.position = pos;
+          }
+          userMarker.map = map;
+          if (Math.abs(navState.currentHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
+            new TWEEN.Tween({ rotation: parseFloat(userMarker.content.style.transform.replace('rotate(', '').replace('deg)', '')) || 0 })
+              .to({ rotation: navState.currentHeading }, 300)
+              .easing(TWEEN.Easing.Quadratic.Out)
+              .onUpdate(obj => {
+                userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
+              })
+              .start();
+          }
+        }
+        lastPosition = pos;
+        if (navState.isNavigating && navState.isFollowing) {
+          navState.navigationZoom = getDynamicZoom(navState.userLocation);
+          restoreNavigationView();
+        }
+        navState.lastKnownPosition = pos;
+        socket.emit('locationUpdate', { location: navState.userLocation });
+        updateHUD(navState.currentRoute, navState.userLocation);
+      } catch (error) {
+        console.error('Error in position update:', error);
+        showToast('Error updating location. Please ensure GPS is enabled.');
+      }
+    }
+    function startGPS() {
+      if (!navigator.geolocation) {
+        showToast('Geolocation is not supported by this browser.');
+        console.error('Geolocation not supported');
+        return;
+      }
+      navState.isNavigating = true;
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
+      document.getElementById('search-container').classList.add('hidden');
+      document.getElementById('hud-container').style.display = 'flex';
+      document.getElementById('bottom-hud-container').style.display = 'flex';
+      directionsRenderer.setMap(map);
+      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+      calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
+        const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
+        navState.originalRoute = navState.currentRoute;
+        const path = navState.currentRoute.routes[0].overview_path;
+        navState.currentHeading = smoothCompassHeading(compassHeading); // Start with compass heading
+        navState.lastValidHeading = navState.currentHeading;
+        lastHeading = navState.currentHeading;
+        headingHistory = [navState.currentHeading];
+        navState.navigationZoom = getDynamicZoom(navState.userLocation);
+        restoreNavigationView();
+        console.log('Navigation started, centered on user location:', startLocation, 'Initial heading:', navState.currentHeading);
+        startRerouteCheck();
+        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
+        if (showTrafficCameras) {
+          cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
+        }
+        if (watchId) {
+          navigator.geolocation.clearWatch(watchId);
+        }
+        watchId = navigator.geolocation.watchPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Geolocation watch error:', error);
+            showToast('Error getting location: ' + error.message);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+          }
+        );
+        console.log('GPS tracking started, watchId:', watchId);
+        navigator.geolocation.getCurrentPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Immediate position update error:', error);
+            showToast('Error getting initial navigation position.');
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+          }
+        );
+      });
+    }
+    function stopGPS() {
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+        console.log('GPS tracking stopped.');
+      }
+      if (navState.rerouteCheckTimeout) {
+        clearTimeout(navState.rerouteCheckTimeout);
+        navState.rerouteCheckTimeout = null;
+      }
+      if (navState.hazardCheckInterval) {
+        clearInterval(navState.hazardCheckInterval);
+        navState.hazardCheckInterval = null;
+      }
+      if (cameraCheckInterval) {
+        clearInterval(cameraCheckInterval);
+        cameraCheckInterval = null;
+      }
+      navState.isNavigating = false;
+      navState.isFollowing = false;
+      navState.currentRoute = null;
+      navState.originalRoute = null;
+      navState.routePolyline = null;
+      navState.ignoredHazards = [];
+      navState.currentHazard = null;
+      navState.alternativeRoute = null;
+      navState.lastRecalculationTime = 0;
+      navState.currentHeading = 0;
+      navState.lastValidHeading = 0;
+      headingHistory = [];
+      lastLocationUpdate = 0;
+      lastPosition = null;
+      document.getElementById('search-container').classList.remove('hidden');
+      document.getElementById('search-container').style.display = 'flex';
+      document.getElementById('hud-container').style.display = 'none';
+      document.getElementById('bottom-hud-container').style.display = 'none';
+      directionsRenderer.setMap(null);
+      alternativeRenderer.setMap(null);
+      trafficLayer.setMap(null);
+      if (destMarker) destMarker.setMap(null);
+      document.getElementById('start-button').style.display = 'none';
+      map.setOptions({
+        zoom: 15,
+        tilt: 0,
+        heading: compassHeading,
+        disableDefaultUI: false,
+        gestureHandling: 'cooperative',
+        mapTypeControl: true
+      });
+      map.panTo(navState.userLocation);
+      console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: compassHeading, tilt: 0 });
+    }
+    function calculateAndDisplayRoute(origin, dest, callback) {
+      if (!origin || !dest) {
+        console.error('Invalid origin or destination:', origin, dest);
+        showToast('Invalid route. Please select a destination.');
+        return;
+      }
+      directionsService.route(
+        {
+          origin: origin,
+          destination: dest,
+          travelMode: google.maps.TravelMode.DRIVING
+        },
+        (response, status) => {
+          if (status === 'OK') {
+            navState.currentRoute = response;
+            navState.routePolyline = response.routes[0].overview_path;
+            directionsRenderer.setOptions({
+              polylineOptions: {
+                strokeColor: navState.mainRouteColor,
+                strokeWeight: 6,
+                strokeOpacity: 0.8,
+                zIndex: 5
+              }
+            });
+            directionsRenderer.setDirections(response);
+            console.log('Route calculated and polyline rendered:', response.routes[0].legs[0].distance.text);
+            updateHUD(response, origin);
+            updateBottomHUD(response);
+            const path = response.routes[0].overview_path;
+            navState.currentHeading = smoothCompassHeading(compassHeading); // Initialize with compass heading
+            navState.lastValidHeading = navState.currentHeading;
+            lastHeading = navState.currentHeading;
+            headingHistory = [navState.currentHeading];
+            if (callback) callback();
+            if (navState.isFollowing) {
+              navState.navigationZoom = getDynamicZoom(navState.userLocation);
+              restoreNavigationView();
+            }
+          } else {
+            console.error('Directions request failed:', status);
+            showToast('Directions request failed: ' + status);
+            if (status === 'REQUEST_DENIED') {
+              showToast('API key invalid or restricted. Check Google Cloud Console.');
+            }
+          }
+        }
+      );
+    }
+    function updateHUD(route, currentPos) {
+      const hudTurn = document.getElementById('hud-turn');
+      const hudStreet = document.getElementById('hud-street');
+      const hudHeading = document.getElementById('hud-heading');
+      if (!route || !route.routes[0]) {
+        hudTurn.textContent = 'Follow the road';
+        hudStreet.textContent = 'Current street: Unknown';
+        hudHeading.textContent = 'Heading: Unknown';
+        return;
+      }
+      const path = route.routes[0].overview_path;
+      let closestPoint = null;
+      let minDistance = Infinity;
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      path.forEach(point => {
+        const distance = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestPoint = point;
+        }
+      });
+      let currentStep = null;
+      let nextStep = null;
+      const legs = route.routes[0].legs[0];
+      for (let i = 0; i < legs.steps.length; i++) {
+        const stepPath = legs.steps[i].path;
+        if (stepPath.some(pt => GoogleMaps.spherical.computeDistanceBetween(pt, closestPoint) < 20)) {
+          currentStep = legs.steps[i];
+          nextStep = legs.steps[i + 1] || null;
+          break;
+        }
+      }
+      hudStreet.textContent = currentStep && currentStep.instructions
+        ? `Current street: ${stripHtml(currentStep.instructions)}`
+        : 'Current street: Unknown';
+      hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
+      if (nextStep && nextStep.maneuver) {
+        const distanceM = GoogleMaps.spherical.computeDistanceBetween(
+          currentLatLng,
+          new google.maps.LatLng(nextStep.start_location)
+        );
+        let distanceText;
+        if (distanceM < 1609.34) {
+          const distanceFt = Math.round(distanceM * 3.28084);
+          distanceText = `${distanceFt} ft`;
+        } else {
+          const distanceMi = (distanceM / 1609.34).toFixed(1);
+          distanceText = `${distanceMi} mi`;
+        }
+        const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
+        hudTurn.textContent = turnText;
+        if (turnText !== lastSpokenTurn && 'speechSynthesis' in window) {
+          const utterance = new SpeechSynthesisUtterance(turnText);
+          speechSynthesis.speak(utterance);
+          lastSpokenTurn = turnText;
+        }
+      } else {
+        hudTurn.textContent = 'Follow the road';
+      }
+    }
+    function updateBottomHUD(route) {
+      const hudTime = document.getElementById('bottom-hud-time');
+      const hudDistance = document.getElementById('bottom-hud-distance');
+      if (!route || !route.routes[0]) {
+        hudTime.textContent = '0 Mins';
+        hudDistance.textContent = '0 miles - Unknown';
+        return;
+      }
+      const leg = route.routes[0].legs[0];
+      const duration = leg.duration.value;
+      const distanceM = leg.distance.value;
+      const distanceMi = (distanceM / 1609.34).toFixed(1);
+      const minutes = Math.round(duration / 60);
+      const currentTime = new Date();
+      const arrivalTime = new Date(currentTime.getTime() + duration * 1000);
+      const formattedTime = arrivalTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      hudTime.textContent = `${minutes} Mins`;
+      hudDistance.textContent = `${distanceMi} miles - ${formattedTime}`;
+    }
+    function stripHtml(html) {
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      return div.textContent || div.innerText || 'Unknown';
+    }
+    function startRerouteCheck() {
+      if (navState.rerouteCheckTimeout) {
+        clearTimeout(navState.rerouteCheckTimeout);
+      }
+      navState.rerouteCheckTimeout = setTimeout(() => {
+        if (navState.isNavigating && navState.currentRoute && navState.userLocation && navState.routePolyline) {
+          const userLatLng = new google.maps.LatLng(navState.userLocation);
+          checkOffRoute(userLatLng);
+        }
+        startRerouteCheck();
+      }, REROUTE_CHECK_INTERVAL);
+    }
+    async function checkHazardsAndOfferReroute() {
+      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') {
+        console.log('checkHazardsAndOfferReroute skipped:', {
+          isNavigating: navState.isNavigating,
+          hasCurrentRoute: !!navState.currentRoute,
+          hasRoutes: !!(navState.currentRoute && navState.currentRoute.routes),
+          alertState: navState.alertState
+        });
+        return;
+      }
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      if (cameraHudContainer.classList.contains('active')) {
+        console.log('Camera HUD active, queuing reroute HUD');
+        navState.pendingReroute = true;
+        return;
+      }
+      const path = navState.currentRoute.routes[0].overview_path;
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      let closestIndex = 0;
+      let minDistance = Infinity;
+      path.forEach((point, index) => {
+        const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestIndex = index;
+        }
+      });
+      let segmentDistance = 0;
+      const segmentPath = [];
+      for (let i = closestIndex; i < path.length; i += 5) {
+        segmentPath.push(path[i]);
+        if (i < path.length - 1) {
+          segmentDistance += GoogleMaps.spherical.computeDistanceBetween(path[i], path[i + 1]);
+          if (segmentDistance > hazardAlertDistance * 1609.34) break;
+        }
+      }
+      const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
+      console.log('Checking hazards for polyline:', polyline.length, 'points, maxDistance:', hazardAlertDistance * 1609.34);
+      try {
+        const response = await fetch('/api/hazards-near-route', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({ polyline, maxDistance: hazardAlertDistance * 1609.34 })
+        });
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error ${response.status}: ${errorText}`);
+        }
+        const hazards = await response.json();
+        console.log('Hazard check response:', hazards);
+        if (hazards.length > 0) {
+          const validHazards = hazards.filter(hazard => {
+            if (navState.ignoredHazards.includes(hazard._id)) {
+              console.log('Ignoring previously handled hazard:', hazard._id);
+              return false;
+            }
+            const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+            const distanceToHazard = GoogleMaps.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
+            console.log('Hazard distance:', distanceToHazard, 'min:', MIN_REROUTE_DISTANCE, 'max:', hazardAlertDistance * 1609.34);
+            return distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= hazardAlertDistance * 1609.34;
+          });
+          if (validHazards.length > 0) {
+            const hazard = validHazards[0];
+            console.log('Valid hazards detected near route:', hazard);
+            navState.currentHazard = hazard;
+            navState.originalRoute = navState.currentRoute;
+            const timeSaved = await checkAlternativeRoute(hazard);
+            if (timeSaved !== null) {
+              showRerouteHud(hazard, timeSaved);
+            } else {
+              console.log('No suitable alternative route found that avoids the hazard.');
+              showToast('Hazard detected, but no alternative route available that avoids it.');
+              navState.ignoredHazards.push(hazard._id);
+            }
+          } else {
+            console.log('No valid hazards ahead after filtering.');
+          }
+        } else {
+          console.log('No hazards detected near route.');
+        }
+      } catch (error) {
+        console.error('Error checking hazards:', error);
+        showToast('Unable to check for hazards. Please try again.');
+      }
+    }
+    function projectPointToLine(p, a, b) {
+      const lat1 = a.lat();
+      const lng1 = a.lng();
+      const lat2 = b.lat();
+      const lng2 = b.lng();
+      const lat3 = p.lat();
+      const lng3 = p.lng();
+      const dx = lng2 - lng1;
+      const dy = lat2 - lat1;
+      if (dx === 0 && dy === 0) return a;
+      const t = ((lat3 - lat1) * dy + (lng3 - lng1) * dx) / (dx * dx + dy * dy);
+      if (t < 0) return a;
+      if (t > 1) return b;
+      return new google.maps.LatLng(lat1 + t * dy, lng1 + t * dx);
+    }
+    function distanceToSegment(point, a, b) {
+      const proj = projectPointToLine(point, a, b);
+      return GoogleMaps.spherical.computeDistanceBetween(point, proj);
+    }
+    function isHazardAvoided(hazardPoint, path) {
+      const BUFFER = 50;
+      let minDist = Infinity;
+      for (let i = 0; i < path.length - 1; i++) {
+        const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
+        minDist = Math.min(minDist, distToSegment);
+      }
+      return minDist > BUFFER;
+    }
+    async function checkAlternativeRoute(hazard) {
+      return new Promise((resolve) => {
+        if (!navState.userLocation || !navState.destination) {
+          console.error('Missing userLocation or destination for route calculation');
+          resolve(null);
+          return;
+        }
+        directionsService.route(
+          {
+            origin: navState.userLocation,
+            destination: navState.destination,
+            travelMode: google.maps.TravelMode.DRIVING,
+            provideRouteAlternatives: true
+          },
+          (response, status) => {
+            console.log('Alternative route response:', status, response?.routes?.length);
+            if (status === 'OK' && response.routes && response.routes.length > 1) {
+              const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
+              const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+              let bestAlt = null;
+              let bestTimeSaved = -Infinity;
+              for (let i = 1; i < response.routes.length; i++) {
+                const alt = response.routes[i];
+                const altDuration = alt.legs[0].duration.value;
+                const timeSaved = currentDuration - altDuration;
+                const altPath = alt.overview_path;
+                if (isHazardAvoided(hazardLatLng, altPath)) {
+                  if (timeSaved > bestTimeSaved) {
+                    bestAlt = alt;
+                    bestTimeSaved = timeSaved;
+                  }
+                }
+              }
+              if (bestAlt) {
+                navState.alternativeRoute = {
+                  ...response,
+                  routes: [bestAlt]
+                };
+                const timeSavedMin = Math.round(bestTimeSaved / 60);
+                console.log(`Alternative route found that avoids hazard and changes time by ${timeSavedMin} minutes`);
+                resolve(timeSavedMin);
+              } else {
+                console.log('No alternative route that avoids the hazard.');
+                resolve(null);
+              }
+            } else {
+              console.error('No alternative routes available or request failed:', status);
+              resolve(null);
+            }
+          }
+        );
+      });
+    }
+    function showRerouteHud(hazard, timeSaved) {
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      if (cameraHudContainer.classList.contains('active')) {
+        console.log('Camera HUD active, queuing reroute HUD');
+        navState.pendingReroute = { hazard, timeSaved };
+        return;
+      }
+      const rerouteHudContainer = document.getElementById('reroute-hud-container');
+      const rerouteHud = document.getElementById('reroute-hud');
+      const hazardMessage = document.getElementById('hazard-message');
+      let timeText = '';
+      if (timeSaved > 0) {
+        timeText = `saves ${timeSaved} minutes`;
+      } else if (timeSaved === 0) {
+        timeText = `takes the same time`;
+      } else {
+        timeText = `adds ${Math.abs(timeSaved)} minutes`;
+      }
+      hazardMessage.textContent = `${hazard.type} detected ahead. Alternative route ${timeText} and avoids the hazard. Reroute?`;
+      rerouteHud.classList.add('active');
+      rerouteHudContainer.classList.add('active');
+      alternativeRenderer.setMap(map);
+      alternativeRenderer.setDirections(navState.alternativeRoute);
+      new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
+        .to({ zoom: 14, center: map.getCenter().toJSON(), heading: 0 }, 500)
+        .easing(TWEEN.Easing.Quadratic.Out)
+        .onUpdate(obj => {
+          map.moveCamera({
+            center: obj.center,
+            zoom: obj.zoom,
+            heading: obj.heading
+          });
+        })
+        .start();
+      map.setTilt(0);
+      showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available.`);
+      console.log(`Offering reroute for ${hazard.type} at`, hazard.location);
+      navState.alertState = 'OFFERING_REROUTE';
+      let countdown = 15;
+      const toast = document.getElementById('toast');
+      toast.textContent = `Auto closing HUD in ${countdown} seconds...`;
+      toast.classList.add('visible-toast');
+      toast.classList.add('countdown-toast');
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          toast.classList.remove('visible-toast');
+          toast.classList.remove('countdown-toast');
+          if (navState.alertState === 'OFFERING_REROUTE') {
+            rejectReroute();
+            console.log('Reroute HUD auto-closed after 15 seconds');
+          }
+        } else {
+          toast.textContent = `Auto closing HUD in ${countdown} seconds...`;
+        }
+      }, 1000);
+      const clearCountdown = () => {
+        clearInterval(countdownInterval);
+        toast.classList.remove('visible-toast');
+        toast.classList.remove('countdown-toast');
+      };
+      document.getElementById('accept-reroute-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
+    }
+    function restoreNavigationView() {
+      if (navState.isFollowing && navState.isNavigating) {
+        const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
+        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
+          .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: navState.currentHeading }, 400)
+          .easing(TWEEN.Easing.Quadratic.Out)
+          .onUpdate(obj => {
+            map.moveCamera({
+              center: obj.center,
+              zoom: obj.zoom,
+              heading: obj.heading,
+              tilt: 30
+            });
+          })
+          .start();
+        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 30');
+      }
+    }
+    function acceptReroute() {
+      if (navState.alternativeRoute && navState.currentHazard) {
+        navState.ignoredHazards.push(navState.currentHazard._id);
+        navState.currentRoute = navState.alternativeRoute;
+        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        navState.originalRoute = navState.currentRoute;
+        directionsRenderer.setMap(null);
+        directionsRenderer.setMap(map);
+        directionsRenderer.setDirections(navState.currentRoute);
+        alternativeRenderer.setMap(null);
+        updateBottomHUD(navState.currentRoute);
+        updateHUD(navState.currentRoute, navState.userLocation);
+        const rerouteHudContainer = document.getElementById('reroute-hud-container');
+        const rerouteHud = document.getElementById('reroute-hud');
+        rerouteHudContainer.classList.remove('active');
+        rerouteHud.classList.remove('active');
+        navState.isFollowing = true;
+        localStorage.setItem('isFollowing', navState.isFollowing);
+        navState.navigationZoom = getDynamicZoom(navState.userLocation);
+        navState.currentHeading = smoothCompassHeading(compassHeading); // Reset to compass heading
+        navState.lastValidHeading = navState.currentHeading;
+        lastHeading = navState.currentHeading;
+        headingHistory = [navState.currentHeading];
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        restoreNavigationView();
+        showToast('Alternative route accepted.');
+        console.log('Reroute accepted:', navState.alternativeRoute.routes[0].legs[0].distance.text);
+        navState.alertState = 'IDLE';
+        navState.alternativeRoute = null;
+        navState.currentHazard = null;
+        navState.pendingReroute = null;
+        navState.lastRecalculationTime = Date.now();
+        navigator.geolocation.getCurrentPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Immediate position update after reroute failed:', error);
+            showToast('Error syncing navigation after reroute.');
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+          }
+        );
+      }
+    }
+    function rejectReroute() {
+      if (navState.currentHazard) {
+        navState.ignoredHazards.push(navState.currentHazard._id);
+      }
+      if (navState.originalRoute) {
+        navState.currentRoute = navState.originalRoute;
+        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        directionsRenderer.setMap(null);
+        directionsRenderer.setMap(map);
+        directionsRenderer.setDirections(navState.currentRoute);
+        updateBottomHUD(navState.currentRoute);
+        updateHUD(navState.currentRoute, navState.userLocation);
+      }
+      alternativeRenderer.setMap(null);
+      const rerouteHudContainer = document.getElementById('reroute-hud-container');
+      const rerouteHud = document.getElementById('reroute-hud');
+      rerouteHudContainer.classList.remove('active');
+      rerouteHud.classList.remove('active');
+      navState.navigationZoom = getDynamicZoom(navState.userLocation);
+      navState.currentHeading = smoothCompassHeading(compassHeading); // Reset to compass heading
+      navState.lastValidHeading = navState.currentHeading;
+      lastHeading = navState.currentHeading;
+      headingHistory = [navState.currentHeading];
+      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+      restoreNavigationView();
+      showToast('Reroute rejected, continuing on original route.');
+      console.log('Reroute rejected');
+      navState.alertState = 'IDLE';
+      navState.alternativeRoute = null;
+      navState.currentHazard = null;
+      navState.pendingReroute = null;
+    }
+    function showCameraHud() {
+      if (!showTrafficCameras) return;
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      const cameraHud = document.getElementById('camera-hud');
+      cameraHud.classList.add('active');
+      cameraHudContainer.classList.add('active');
+      showToast('Traffic camera alert shown');
+      console.log('Traffic camera alert HUD shown');
+      let countdown = 15;
+      const toast = document.getElementById('toast');
+      toast.textContent = `Auto closing camera HUD in ${countdown} seconds...`;
+      toast.classList.add('visible-toast');
+      toast.classList.add('countdown-toast');
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          toast.classList.remove('visible-toast');
+          toast.classList.remove('countdown-toast');
+          dismissCameraAlert();
+          console.log('Camera HUD auto-closed after 15 seconds');
+        } else {
+          toast.textContent = `Auto closing camera HUD in ${countdown} seconds...`;
+        }
+      }, 1000);
+      const clearCountdown = () => {
+        clearInterval(countdownInterval);
+        toast.classList.remove('visible-toast');
+        toast.classList.remove('countdown-toast');
+      };
+      document.getElementById('dismiss-camera-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('camera-close').addEventListener('click', clearCountdown, { once: true });
+    }
+    function dismissCameraAlert() {
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      const cameraHud = document.getElementById('camera-hud');
+      cameraHudContainer.classList.remove('active');
+      cameraHud.classList.remove('active');
+      console.log('Camera alert dismissed');
+      if (navState.pendingReroute) {
+        const { hazard, timeSaved } = navState.pendingReroute;
+        showRerouteHud(hazard, timeSaved);
+        navState.pendingReroute = null;
+        console.log('Showing pending reroute HUD after camera alert dismissal');
+      }
+      if (navState.isNavigating) {
+        navState.isFollowing = true;
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        restoreNavigationView();
+        console.log('Navigation view re-locked after dismissing camera alert');
+      }
+    }
+    async function checkCameraProximity() {
+      if (!navState.isNavigating || !navState.userLocation || !showTrafficCameras) return;
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      cameraPositions.forEach((cameraPos, index) => {
+        const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, new google.maps.LatLng(cameraPos));
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(`static-${index}`)) {
+          showCameraHud();
+          cameraAlertShown.add(`static-${index}`);
+        } else if (distance > cameraAlertDistance * 1609.34) {
+          cameraAlertShown.delete(`static-${index}`);
+        }
+      });
+      try {
+        const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${cameraAlertDistance * 1609.34}&type=Traffic%20Camera`);
+        if (!response.ok) throw new Error('Failed to fetch traffic camera alerts');
+        const cameras = await response.json();
+        cameras.forEach((camera, index) => {
+          const cameraLatLng = new google.maps.LatLng(camera.location.coordinates[1], camera.location.coordinates[0]);
+          const distance = GoogleMaps.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
+          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(`mongo-${camera._id}`)) {
+            showCameraHud();
+            cameraAlertShown.add(`mongo-${camera._id}`);
+          } else if (distance > cameraAlertDistance * 1609.34) {
+            cameraAlertShown.delete(`mongo-${camera._id}`);
+          }
+        });
+      } catch (error) {
+        console.error('Error fetching traffic camera alerts:', error);
+        showToast('Failed to check for traffic cameras.');
+      }
+    }
+    function createAlertContent() {
+      const alertContent = document.createElement('div');
+      alertContent.style.cssText = `
+        color: white;
+        background-color: red;
+        border-radius: 50%;
+        width: 25px;
+        height: 25px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: bold;
+        font-family: sans-serif;
+      `;
+      alertContent.textContent = '!';
+      return alertContent;
+    }
+    function createTrafficCameraContent() {
+      const cameraContent = document.createElement('img');
+      cameraContent.src = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
+      cameraContent.className = 'traffic-cam-marker';
+      return cameraContent;
+    }
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      if (toastTimeout) {
+        clearTimeout(toastTimeout);
+        toast.classList.remove('visible-toast');
+      }
+      if (!toast.classList.contains('countdown-toast') || toast.textContent !== message) {
+        toast.textContent = message;
+        toast.classList.add('visible-toast');
+        toast.classList.remove('countdown-toast');
+        toastTimeout = setTimeout(() => {
+          if (!toast.classList.contains('countdown-toast')) {
+            toast.classList.remove('visible-toast');
+            toastTimeout = null;
+          }
+        }, 3000);
+      }
+    }
+    function handleGeolocationError(error, isInitial = false) {
+      let message = 'Failed to get location. Please try again later.';
+      if (error.code === 1) {
+        message = 'Location access denied. Please enable location permissions in your browser settings.';
+      } else if (error.code === 2) {
+        message = 'Location unavailable. Ensure location services are enabled and try again.';
+      } else if (error.code === 3) {
+        message = 'Weak GPS signal, retrying...';
+      }
+      console.error(message, error);
+      showToast(message);
+      if (isInitial && retryCount < MAX_RETRIES) {
+        retryCount++;
+        const backoff = 5000 * Math.pow(2, retryCount);
+        console.log(`Retrying geolocation (attempt ${retryCount}/${MAX_RETRIES}, backoff: ${backoff}ms)`);
+        setTimeout(() => navigator.geolocation.getCurrentPosition(
+          (position) => {
+            navState.userLocation = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            console.log('Initial location:', navState.userLocation);
+            requestDeviceOrientationPermission();
+            initializeMap();
+          },
+          (error) => {
+            console.error('Retry geolocation error:', error);
+            handleGeolocationError(error, true);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        ), backoff);
+      } else if (isInitial) {
+        navState.userLocation = { lat: 33.083270, lng: -83.233040 };
+        initializeMap();
+      }
+    }
+    document.getElementById('center-alerts-btn').addEventListener('click', () => {
+      if (currentAlerts.length > 0) {
+        const bounds = new google.maps.LatLngBounds();
+        currentAlerts.forEach(alert => {
+          if (showTrafficCameras || alert.type !== 'Traffic Camera') {
+            bounds.extend({ lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] });
+          }
+        });
+        map.fitBounds(bounds);
+        setTimeout(() => {
+          const currentZoom = map.getZoom();
+          map.setZoom(Math.min(currentZoom, 15));
+        }, 100);
+        console.log('Centered on all alerts with slight zoom out');
+      } else {
+        showToast('No alerts to center on.');
+      }
+    });
+    let isRegister = false;
+    function switchAuthMode() {
+      isRegister = !isRegister;
+      const usernameInput = document.getElementById('username');
+      document.getElementById('auth-title').textContent = isRegister ? 'Register' : 'Login';
+      usernameInput.style.display = isRegister ? 'block' : 'none';
+      usernameInput.required = isRegister;
+      document.getElementById('auth-switch').innerHTML = isRegister
+        ? 'Already have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Login</a>'
+        : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
+      console.log('Switched auth mode, isRegister:', isRegister, 'Username required:', usernameInput.required);
+    }
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      console.log('Form submitted, isRegister:', isRegister);
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const username = document.getElementById('username').value;
+      console.log('Form data:', { email, password, username });
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const body = isRegister ? { username, email, password } : { email, password };
+      console.log('Sending to endpoint:', endpoint, 'Body:', body);
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        console.log('Response status:', response.status);
+        const data = await response.json();
+        console.log('Response data:', data);
+        if (response.ok) {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('userId', data.user.id);
+          document.getElementById('auth-container').style.display = 'none';
+          console.log('Authentication successful, token:', data.token, 'userId:', data.user.id);
+          initApp();
+        } else {
+          console.error('Server error response:', data.error);
+          showToast(data.error || 'Authentication failed');
+        }
+      } catch (error) {
+        console.error('Fetch error:', error.message);
+        showToast('Error: ' + error.message);
+      }
+    });
+    function checkAuth() {
+      if (isInitialized) return;
+      isInitialized = true;
+      const token = localStorage.getItem('token');
+      if (token) {
+        console.log('Token found, initializing app:', token);
+        document.getElementById('auth-container').style.display = 'none';
+        initApp();
+      } else {
+        console.log('No token found, showing auth form');
+        document.getElementById('auth-container').style.display = 'flex';
+      }
+    }
+    function initApp() {
+      socket = io({ auth: { token: localStorage.getItem('token') } });
+      socket.on('connect', () => {
+        console.log('Socket.IO connected for user:', localStorage.getItem('userId'));
+      });
+      socket.on('connect_error', (err) => {
+        console.error('Socket connection error:', err.message);
+        if (err.message.includes('Authentication')) {
+          console.log('Invalid token, clearing localStorage and reloading');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          location.reload();
+        }
+      });
+      socket.on('alert', (alert) => {
+        const isTrafficCamera = alert.type === 'Traffic Camera';
+        if (isTrafficCamera && !showTrafficCameras) return;
+        if (!GoogleMaps.AdvancedMarkerElement) {
+          console.error('AdvancedMarkerElement not defined, cannot place alert marker');
+          showToast('Failed to place alert: Google Maps library not loaded');
+          return;
+        }
+        new GoogleMaps.AdvancedMarkerElement({
+          map,
+          position: {
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          },
+          content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+          title: `${alert.type} Alert`
+        });
+        console.log('Received real-time alert:', alert);
+        if (isTrafficCamera) {
+          cameraPositions.push({
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          });
+        }
+        if (navState.isNavigating && !isTrafficCamera) {
+          checkHazardsAndOfferReroute();
+        }
+      });
+      socket.on('alertDeleted', (id) => {
+        console.log('Alert deleted via socket:', id);
+        const alert = currentAlerts.find(a => a._id === id);
+        if (alert && alert.type === 'Traffic Camera') {
+          cameraPositions = cameraPositions.filter(pos =>
+            pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+          );
+          cameraAlertShown.delete(`mongo-${id}`);
+        }
+        fetchAndDisplayMarkers(map, navState.userLocation);
+      });
+      socket.on('pointsUpdate', (data) => {
+        if (data.userId === localStorage.getItem('userId')) {
+          fetchUserProfile();
+        }
+      });
+      initMap();
+    }
+    const script = document.createElement('script');
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker&loading=async`;
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => {
+      console.error('Failed to load Google Maps script');
+      showToast('Failed to load map. Please check your network or API key in Google Cloud Console.');
+    };
+    document.head.appendChild(script);
+    window.addEventListener('load', checkAuth);
+  </script>
+</body>
+</html>
