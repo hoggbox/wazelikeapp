@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2120,11 +2121,10 @@
       const duration = leg.duration.value;
       const distanceM = leg.distance.value;
       const distanceMi = (distanceM / 1609.34).toFixed(1);
-      const minutes = Math.round(duration / 60);
       const currentTime = new Date();
       const arrivalTime = new Date(currentTime.getTime() + duration * 1000);
       const formattedTime = arrivalTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      hudTime.textContent = `${minutes} Mins`;
+      hudTime.textContent = `${Math.round(duration / 60)} Mins`;
       hudDistance.textContent = `${distanceMi} miles - ${formattedTime}`;
     }
     function stripHtml(html) {
@@ -2244,13 +2244,13 @@
       return GoogleMaps.spherical.computeDistanceBetween(point, proj);
     }
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 50; // Reduced buffer to 50 meters for more flexibility
+      const BUFFER = 30; // Reduced to 30 meters for short routes
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
         minDist = Math.min(minDist, distToSegment);
       }
-      console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
+      console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER, pathLength: path.length });
       return minDist > BUFFER;
     }
     async function checkAlternativeRoute(hazard) {
@@ -2280,16 +2280,21 @@
                 for (let i = 0; i < response.routes.length; i++) {
                   const alt = response.routes[i];
                   const altPath = alt.overview_path;
+                  const minDistToHazard = altPath.reduce((min, pt, idx) => {
+                    const dist = GoogleMaps.spherical.computeDistanceBetween(hazardLatLng, pt);
+                    console.log(`Route ${i}, point ${idx}: distance to hazard ${dist} meters`);
+                    return Math.min(min, dist);
+                  }, Infinity);
                   if (isHazardAvoided(hazardLatLng, altPath)) {
                     const altDuration = alt.legs[0].duration.value;
                     const timeSaved = currentDuration - altDuration;
-                    console.log(`Route ${i}:`, { duration: altDuration, timeSaved, avoidsHazard: true });
+                    console.log(`Route ${i}:`, { duration: altDuration, timeSaved, avoidsHazard: true, minDistToHazard });
                     if (timeSaved >= bestTimeSaved) {
                       bestAlt = alt;
                       bestTimeSaved = timeSaved;
                     }
                   } else {
-                    console.log(`Route ${i}: does not avoid hazard`);
+                    console.log(`Route ${i}: does not avoid hazard, min distance: ${minDistToHazard} meters`);
                   }
                 }
                 if (bestAlt) {
@@ -2300,12 +2305,13 @@
                   const timeSavedMin = Math.round(bestTimeSaved / 60);
                   console.log(`Best alternate route found, time saved: ${timeSavedMin} minutes`);
                   resolve(timeSavedMin);
-                } else if (attempt < 3) {
+                } else if (attempt < 4) {
                   console.log(`No valid alternate route found, retrying with new options, attempt ${attempt + 1}`);
                   const newOptions = [
-                    { avoidHighways: true, avoidTolls: false },
-                    { avoidHighways: false, avoidTolls: true },
-                    { avoidHighways: true, avoidTolls: true }
+                    { avoidHighways: true, avoidTolls: false, avoidFerries: false },
+                    { avoidHighways: false, avoidTolls: true, avoidFerries: false },
+                    { avoidHighways: true, avoidTolls: true, avoidFerries: false },
+                    { avoidHighways: false, avoidTolls: false, avoidFerries: true }
                   ][attempt];
                   tryRoute(newOptions, attempt + 1);
                 } else {
@@ -2314,12 +2320,13 @@
                 }
               } else {
                 console.error(`Directions request failed, attempt ${attempt}:`, status);
-                if (attempt < 3) {
+                if (attempt < 4) {
                   console.log(`Retrying with new options, attempt ${attempt + 1}`);
                   const newOptions = [
-                    { avoidHighways: true, avoidTolls: false },
-                    { avoidHighways: false, avoidTolls: true },
-                    { avoidHighways: true, avoidTolls: true }
+                    { avoidHighways: true, avoidTolls: false, avoidFerries: false },
+                    { avoidHighways: false, avoidTolls: true, avoidFerries: false },
+                    { avoidHighways: true, avoidTolls: true, avoidFerries: false },
+                    { avoidHighways: false, avoidTolls: false, avoidFerries: true }
                   ][attempt];
                   tryRoute(newOptions, attempt + 1);
                 } else {
@@ -2793,7 +2800,7 @@
         }
       });
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(reg =>         console.log('SW registered', reg)).catch(err => console.error('SW registration failed', err));
+        navigator.serviceWorker.register('/sw.js').then(reg => console.log('SW registered', reg)).catch(err => console.error('SW registration failed', err));
       }
       if (navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
@@ -2827,6 +2834,7 @@
     window.addEventListener('load', () => {
       loadGoogleMaps();
       checkAuth();
+      requestPushPermission();
     });
   </script>
 </body>
