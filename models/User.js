@@ -5,10 +5,10 @@ const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-  avatar: { type: String, default: null }, // URL to avatar
+  avatar: { type: String, default: null },
   bio: { type: String, default: '' },
   points: { type: Number, default: 0 },
-  achievements: [{ type: String }], // e.g., ['First Alert', 'Top Contributor']
+  achievements: [{ type: String }],
   contributions: [{
     type: { type: String, enum: ['alert', 'comment', 'like'] },
     points: Number,
@@ -16,7 +16,7 @@ const userSchema = new mongoose.Schema({
   }],
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   pendingRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  pushSubscription: { type: Object }, // For push notifications
+  pushSubscription: { type: Object },
   createdAt: { type: Date, default: Date.now }
 });
 

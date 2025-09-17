@@ -6,7 +6,6 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const turf = require('@turf/turf');
 const winston = require('winston');
-const rateLimit = require('express-rate-limit');
 const jwt = require('jsonwebtoken');
 const authRoutes = require('./routes/auth');
 const friendsRoutes = require('./routes/friends');
@@ -15,7 +14,6 @@ const authMiddleware = require('./middleware/auth');
 const webpush = require('web-push');
 const fs = require('fs');
 const path = require('path');
-const User = require('./models/User');
 
 // Create uploads directory if it doesn't exist
 fs.mkdirSync(path.join(__dirname, 'public/uploads'), { recursive: true });
@@ -102,7 +100,7 @@ app.get('/health', (req, res) => {
 
 // Basic route for the homepage
 app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/public/index.html');
+  res.sendFile(path.join(__dirname, '/public/index.html'));
 });
 
 // Refresh token endpoint
@@ -113,8 +111,8 @@ app.post('/api/auth/refresh', authMiddleware, async (req, res) => {
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
     res.json({ token });
   } catch (error) {
-    logger.error('Token refresh error:', error);
-    res.status(500).json({ error: 'Failed to refresh token' });
+    logger.error('Token refresh error:', error.message);
+    res.status(500).json({ error: 'Failed to refresh token: ' + error.message });
   }
 });
 
@@ -144,7 +142,7 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
     });
     await alert.save();
     logger.info('Alert saved:', { type, userId: req.user._id, location });
-    io.emit('alert', alert); // Broadcast to all connected clients
+    io.emit('alert', { ...alert._doc, userId: { _id: req.user._id, username: req.user.username } });
     res.status(201).json({ alert });
   } catch (error) {
     logger.error('Error saving alert:', error.message);
@@ -152,7 +150,7 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete alerts
+// Delete alert
 app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   try {
     const alert = await Alert.findById(req.params.id);
@@ -162,30 +160,27 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     if (alert.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Unauthorized to delete this alert' });
     }
-    await Alert.deleteOne({ _id: req.params.id });
+    await alert.remove();
     logger.info('Alert deleted:', req.params.id);
     io.emit('alertDeleted', req.params.id);
     res.status(200).json({ message: 'Alert deleted' });
   } catch (error) {
-    logger.error('Error deleting alert:', error);
-    res.status(500).json({ error: 'Failed to delete alert' });
+    logger.error('Error deleting alert:', error.message);
+    res.status(500).json({ error: 'Failed to delete alert: ' + error.message });
   }
 });
 
-// Fetch nearby markers
+// Fetch markers near a location
 app.get('/api/markers', async (req, res) => {
   try {
     const { lat, lng, maxDistance, type } = req.query;
     if (!lat || !lng || !maxDistance) {
-      return res.status(400).json({ error: 'Missing required query parameters: lat, lng, maxDistance' });
+      return res.status(400).json({ error: 'Missing required parameters: lat, lng, maxDistance' });
     }
     const query = {
       location: {
         $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)]
-          },
+          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
           $maxDistance: parseFloat(maxDistance)
         }
       }
@@ -197,12 +192,12 @@ app.get('/api/markers', async (req, res) => {
     logger.info(`Fetched ${markers.length} markers for lat:${lat}, lng:${lng}, maxDistance:${maxDistance}, type:${type || 'all'}`);
     res.json(markers);
   } catch (error) {
-    logger.error('Error fetching markers:', error);
-    res.status(500).json({ error: 'Failed to fetch markers' });
+    logger.error('Error fetching markers:', error.message);
+    res.status(500).json({ error: 'Failed to fetch markers: ' + error.message });
   }
 });
 
-// Fetch hazards near route
+// Fetch hazards near a route
 app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
   try {
     const { polyline, maxDistance } = req.body;
@@ -219,7 +214,7 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
         }
       }
     }).populate('userId', 'username');
-    logger.info(`Fetched ${hazards.length} hazards near route:`, { polylineLength: polyline.length });
+    logger.info(`Fetched ${hazards.length} hazards near route, polylineLength:${polyline.length}`);
     res.json(hazards);
   } catch (error) {
     logger.error('Error fetching hazards near route:', error.message);
@@ -227,7 +222,7 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
   }
 });
 
-// Create HTTP server and Socket.IO
+// Socket.IO setup
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -246,7 +241,7 @@ io.use((socket, next) => {
   }
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    socket.userId = decoded.id;
+    socket.user = decoded;
     next();
   } catch (error) {
     next(new Error('Authentication error: Invalid token'));
@@ -254,25 +249,20 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  logger.info('User connected via Socket.IO:', socket.userId);
+  logger.info(`User connected via Socket.IO: ${socket.user.id}`);
   socket.on('locationUpdate', async (data) => {
-    try {
-      const user = await User.findById(socket.userId);
-      if (!user) {
-        logger.warn('User not found for location update:', socket.userId);
-        return;
-      }
-      socket.broadcast.emit('locationUpdate', { userId: socket.userId, username: user.username, location: data.location });
-    } catch (error) {
-      logger.error('Error processing location update:', error);
+    if (data.location) {
+      socket.broadcast.emit('userLocation', {
+        userId: socket.user.id,
+        location: data.location
+      });
     }
   });
   socket.on('disconnect', () => {
-    logger.info('User disconnected:', socket.userId);
+    logger.info(`User disconnected: ${socket.user.id}`);
   });
 });
 
-// Start server
 server.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
 });

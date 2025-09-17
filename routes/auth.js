@@ -39,7 +39,7 @@ router.post('/register', async (req, res) => {
     res.status(201).json({ token, user: { id: user._id, username: user.username, avatar: gravatar.url(email) } });
   } catch (error) {
     console.error('Register error:', error);
-    res.status(500).json({ error: 'Failed to register user' });
+    res.status(500).json({ error: 'Failed to register user: ' + error.message });
   }
 });
 
@@ -58,7 +58,7 @@ router.post('/login', async (req, res) => {
     res.json({ token, user: { id: user._id, username: user.username, avatar: user.avatar || gravatar.url(email) } });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Failed to login' });
+    res.status(500).json({ error: 'Failed to login: ' + error.message });
   }
 });
 
@@ -70,7 +70,7 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
     res.json(user);
   } catch (error) {
     console.error('Profile fetch error:', error);
-    res.status(500).json({ error: 'Failed to fetch profile' });
+    res.status(500).json({ error: 'Failed to fetch profile: ' + error.message });
   }
 });
 
@@ -78,12 +78,13 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
 router.post('/upload-avatar', authMiddleware, upload.single('avatar'), async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
     user.avatar = `/uploads/${req.file.filename}`;
     await user.save();
     res.json({ avatar: user.avatar });
   } catch (error) {
     console.error('Avatar upload error:', error);
-    res.status(500).json({ error: 'Failed to upload avatar' });
+    res.status(500).json({ error: 'Failed to upload avatar: ' + error.message });
   }
 });
 
@@ -91,12 +92,13 @@ router.post('/upload-avatar', authMiddleware, upload.single('avatar'), async (re
 router.post('/subscribe', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
     user.pushSubscription = req.body;
     await user.save();
     res.status(201).json({ message: 'Subscribed successfully' });
   } catch (error) {
     console.error('Push subscription error:', error);
-    res.status(500).json({ error: 'Failed to subscribe' });
+    res.status(500).json({ error: 'Failed to subscribe: ' + error.message });
   }
 });
 
