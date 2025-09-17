@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,854 +9,306 @@
   <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js"></script>
   <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
   <style>
-    * {
-      box-sizing: border-box;
-    }
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
-      overflow: hidden;
-      font-family: Arial, sans-serif;
-    }
-    #map {
-      height: 100%;
-      width: 100%;
-      position: absolute;
-      top: 0;
-      left: 0;
-      z-index: 0;
-    }
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
+    #map { height: 100%; width: 100%; position: absolute; top: 0; left: 0; z-index: 0; }
     #search-container {
-      position: absolute;
-      top: 2vh;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 80%;
-      max-width: 90vw;
-      z-index: 1001;
-      display: flex;
-      align-items: center;
-      background: white;
-      border-radius: 0.5rem;
-      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
-      padding: 0.5rem;
-      border: 1px solid #ccc;
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
+      display: flex; align-items: center; background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      padding: 0.5rem; border: 1px solid #ccc;
     }
     #search-input {
-      flex: 1;
-      padding: 0.5rem;
-      border: none;
-      font-size: 1rem;
-      outline: none;
-      background: transparent;
-      width: 100%;
+      flex: 1; padding: 0.5rem; border: none; font-size: 1rem; outline: none; background: transparent; width: 100%;
     }
-    #search-input::placeholder {
-      color: #888;
-    }
+    #search-input::placeholder { color: #888; }
     #start-button {
-      display: none;
-      background: #4CAF50;
-      color: white;
-      border: none;
-      padding: 0.5rem 1rem;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      margin-left: 0.5rem;
-      font-size: 1rem;
+      display: none; background: #4CAF50; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.4rem;
+      cursor: pointer; margin-left: 0.5rem; font-size: 1rem;
     }
-    #start-button:hover {
-      background: #45a049;
-    }
-    .hidden {
-      display: none !important;
-    }
+    #start-button:hover { background: #45a049; }
+    .hidden { display: none !important; }
     .pac-container {
-      z-index: 1002;
-      border-radius: 0.5rem;
-      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
-      background: white;
-      font-family: Arial, sans-serif;
-      font-size: 1rem;
-      width: 80% !important;
-      max-width: 90vw;
-      margin-top: 0.5rem;
+      z-index: 1002; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); background: white;
+      font-family: Arial, sans-serif; font-size: 1rem; width: 80% !important; max-width: 90vw; margin-top: 0.5rem;
     }
-    .pac-item {
-      padding: 0.5rem;
-      cursor: pointer;
-      color: #333;
-    }
-    .pac-item:hover {
-      background: #f0f0f0;
-    }
+    .pac-item { padding: 0.5rem; cursor: pointer; color: #333; }
+    .pac-item:hover { background: #f0f0f0; }
     #hud-container {
-      position: absolute;
-      top: 2vh;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 80%;
-      max-width: 90vw;
-      z-index: 1;
-      background: white;
-      border-radius: 0.5rem;
-      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
-      padding: 1vh;
-      border: 1px solid #ccc;
-      display: none;
-      flex-direction: column;
-      gap: 0.5vh;
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1;
+      background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
+      border: 1px solid #ccc; display: none; flex-direction: column; gap: 0.5vh;
     }
-    #hud-turn {
-      font-size: 1.2rem;
-      font-weight: bold;
-      color: #333;
-    }
-    #hud-street, #hud-heading {
-      font-size: 0.9rem;
-      color: #555;
-    }
+    #hud-turn { font-size: 1.2rem; font-weight: bold; color: #333; }
+    #hud-street, #hud-heading { font-size: 0.9rem; color: #555; }
     #bottom-hud-container {
-      position: absolute;
-      bottom: 2vh;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 80%;
-      max-width: 90vw;
-      z-index: 1;
-      background: white;
-      border-radius: 0.5rem;
-      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
-      padding: 1vh;
-      border: 1px solid #ccc;
-      display: none;
-      align-items: center;
-      gap: 1vw;
+      position: absolute; bottom: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1;
+      background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
+      border: 1px solid #ccc; display: none; align-items: center; gap: 1vw;
     }
     #bottom-hud-stop {
-      background: #d32f2f;
-      color: white;
-      border: none;
-      padding: 0.5rem 0.8rem;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: 1rem;
-      font-weight: bold;
+      background: #d32f2f; color: white; border: none; padding: 0.5rem 0.8rem; border-radius: 0.4rem;
+      cursor: pointer; font-size: 1rem; font-weight: bold;
     }
-    #bottom-hud-stop:hover {
-      background: #b71c1c;
-    }
-    #bottom-hud-info {
-      flex: 1;
-      text-align: center;
-    }
-    #bottom-hud-time {
-      font-size: 1.2rem;
-      font-weight: bold;
-      color: #333;
-    }
-    #bottom-hud-distance {
-      font-size: 0.9rem;
-      color: #555;
-    }
+    #bottom-hud-stop:hover { background: #b71c1c; }
+    #bottom-hud-info { flex: 1; text-align: center; }
+    #bottom-hud-time { font-size: 1.2rem; font-weight: bold; color: #333; }
+    #bottom-hud-distance { font-size: 0.9rem; color: #555; }
     #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-      position: fixed;
-      right: 2vw;
-      width: 5vw;
-      height: 5vw;
-      max-width: 40px;
-      max-height: 40px;
-      border: 0.1rem solid #fff;
-      border-radius: 50%;
-      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
-      z-index: 20;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
+      position: fixed; right: 2vw; width: 5vw; height: 5vw; max-width: 40px; max-height: 40px;
+      border: 0.1rem solid #fff; border-radius: 50%; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      z-index: 20; display: flex; align-items: center; justify-content: center; cursor: pointer;
     }
-    #hazard-button {
-      bottom: 48vh;
-      background: #ff4444;
-    }
-    #hazard-button::before {
-      content: '+';
-      color: #00ff00;
-      font-size: 1.2rem;
-      font-weight: bold;
-    }
-    #hazard-button:hover {
-      background: #cc0000;
-    }
-    #recenter-button {
-      bottom: 40vh;
-      background: #4CAF50;
-    }
-    #recenter-button::before {
-      content: '↻';
-      color: #fff;
-      font-size: 1.2rem;
-      font-weight: bold;
-    }
-    #recenter-button:hover {
-      background: #45a049;
-    }
-    #voice-button {
-      bottom: 32vh;
-      background: #FF5722;
-    }
-    #voice-button::before {
-      content: '\f130';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #fff;
-      font-size: 1.2rem;
-    }
-    #voice-button:hover {
-      background: #E64A19;
-    }
-    #share-button {
-      bottom: 24vh;
-      background: #2196F3;
-    }
-    #share-button::before {
-      content: '\f1e0';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #fff;
-      font-size: 1.2rem;
-    }
-    #share-button:hover {
-      background: #1976D2;
-    }
-    #settings-button {
-      bottom: 16vh;
-      background: #2196F3;
-    }
-    #settings-button::before {
-      content: '\f013';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #fff;
-      font-size: 1.2rem;
-    }
-    #settings-button:hover {
-      background: #1976D2;
-    }
-    #current-alerts-button {
-      bottom: 8vh;
-      background: #FF9800;
-    }
-    #current-alerts-button::before {
-      content: '\f071';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #fff;
-      font-size: 1.2rem;
-    }
-    #current-alerts-button:hover {
-      background: #F57C00;
-    }
-    #leaderboard-button {
-      bottom: 0vh;
-      background: #FFC107;
-    }
-    #leaderboard-button::before {
-      content: '\f091';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #fff;
-      font-size: 1.2rem;
-    }
-    #leaderboard-button:hover {
-      background: #FFA000;
-    }
+    #hazard-button { bottom: 48vh; background: #ff4444; }
+    #hazard-button::before { content: '+'; color: #00ff00; font-size: 1.2rem; font-weight: bold; }
+    #hazard-button:hover { background: #cc0000; }
+    #recenter-button { bottom: 40vh; background: #4CAF50; }
+    #recenter-button::before { content: '↻'; color: #fff; font-size: 1.2rem; font-weight: bold; }
+    #recenter-button:hover { background: #45a049; }
+    #voice-button { bottom: 32vh; background: #FF5722; }
+    #voice-button::before { content: '\f130'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #voice-button:hover { background: #E64A19; }
+    #share-button { bottom: 24vh; background: #2196F3; }
+    #share-button::before { content: '\f1e0'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #share-button:hover { background: #1976D2; }
+    #settings-button { bottom: 16vh; background: #2196F3; }
+    #settings-button::before { content: '\f013'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #settings-button:hover { background: #1976D2; }
+    #current-alerts-button { bottom: 8vh; background: #FF9800; }
+    #current-alerts-button::before { content: '\f071'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #current-alerts-button:hover { background: #F57C00; }
+    #leaderboard-button { bottom: 0vh; background: #FFC107; }
+    #leaderboard-button::before { content: '\f091'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #leaderboard-button:hover { background: #FFA000; }
     .report-container {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      pointer-events: none;
-      z-index: 15;
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 15;
     }
     #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%) translateY(100%);
-      width: 80vw;
-      max-width: 300px;
-      background: rgba(0, 0, 0, 0.7);
-      border-radius: 0.5rem;
-      padding: 1vmin;
-      pointer-events: auto;
-      display: none;
-      flex-direction: column;
-      transition: transform 0.3s ease;
-      transform-origin: center;
-      visibility: visible;
-      overflow-y: auto;
-      max-height: 80vh;
-      color: white;
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translateY(100%); width: 80vw;
+      max-width: 300px; background: rgba(0, 0, 0, 0.7); border-radius: 0.5rem; padding: 1vmin; pointer-events: auto;
+      display: none; flex-direction: column; transition: transform 0.3s ease; transform-origin: center; visibility: visible;
+      overflow-y: auto; max-height: 80vh; color: white;
     }
     #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active {
-      display: flex;
-      transform: translate(-50%, -50%);
-      visibility: visible;
+      display: flex; transform: translate(-50%, -50%); visibility: visible;
     }
     #report-box::before, #reroute-hud-container::before, #settings-hud-container::before, #alerts-hud-container::before, #camera-hud-container::before, #leaderboard-hud-container::before {
-      content: '';
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100vw;
-      height: 100vh;
-      background: rgba(0, 0, 0, 0.3);
-      z-index: -1;
-      display: none;
+      content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.3);
+      z-index: -1; display: none;
     }
-    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container::before {
+    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container.active::before {
       display: block;
     }
     #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
-      width: 100%;
-      padding: 1vmin 0;
-      position: relative;
-      margin-bottom: 1vmin;
+      width: 100%; padding: 1vmin 0; position: relative; margin-bottom: 1vmin;
     }
     #report-close, #reroute-close, #settings-close, #alerts-close, #camera-close, #leaderboard-close {
-      position: absolute;
-      top: 0.5vmin;
-      right: 0.5vmin;
-      background: #d32f2f;
-      color: white;
-      border: none;
-      padding: 0.5vmin 1vmin;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: clamp(12px, 2.5vmin, 16px);
-      font-weight: bold;
-      z-index: 1;
+      position: absolute; top: 0.5vmin; right: 0.5vmin; background: #d32f2f; color: white; border: none;
+      padding: 0.5vmin 1vmin; border-radius: 0.4rem; cursor: pointer; font-size: clamp(12px, 2.5vmin, 16px);
+      font-weight: bold; z-index: 1;
     }
     #report-close:hover, #reroute-close:hover, #settings-close:hover, #alerts-close:hover, #camera-close:hover, #leaderboard-close:hover {
       background: #b71c1c;
     }
     .report-options {
-      flex: 1;
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 1vmin;
-      padding: 0.5vmin 0;
-      padding-top: 2vmin;
-      position: relative;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
+      flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1vmin; padding: 0.5vmin 0;
+      padding-top: 2vmin; position: relative; width: 100%; height: 100%; overflow: hidden;
     }
     .report-button {
-      background: rgba(255, 255, 255, 0.2);
-      border: none;
-      border-radius: 0.3rem;
-      padding: 1vmin;
-      text-align: center;
-      cursor: pointer;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      transition: background 0.2s;
-      position: relative;
-      width: 100%;
-      height: 100%;
-      vertical-align: middle;
-      grid-column: auto;
-      grid-row: auto;
+      background: rgba(255, 255, 255, 0.2); border: none; border-radius: 0.3rem; padding: 1vmin;
+      text-align: center; cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white;
+      display: flex; flex-direction: column; align-items: center; transition: background 0.2s;
+      position: relative; width: 100%; height: 100%; vertical-align: middle; grid-column: auto; grid-row: auto;
     }
-    .report-button:hover {
-      background: rgba(255, 255, 255, 0.3);
-    }
-    .report-button i {
-      font-size: clamp(12px, 2.5vmin, 16px);
-      margin-bottom: 0.5vmin;
-    }
+    .report-button:hover { background: rgba(255, 255, 255, 0.3); }
+    .report-button i { font-size: clamp(12px, 2.5vmin, 16px); margin-bottom: 0.5vmin; }
     #confirm-alert {
-      display: none;
-      flex-direction: column;
-      gap: 1vmin;
-      padding: 1vmin;
-      text-align: center;
+      display: none; flex-direction: column; gap: 1vmin; padding: 1vmin; text-align: center;
     }
-    #confirm-alert.active {
-      display: flex;
-    }
-    #confirm-alert h3 {
-      margin: 0;
-      font-size: clamp(14px, 2.5vmin, 18px);
-      color: white;
-    }
-    #confirm-alert p {
-      margin: 0.5vmin 0;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
-    }
+    #confirm-alert.active { display: flex; }
+    #confirm-alert h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
+    #confirm-alert p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
     #post-alert-button, #cancel-alert-button {
-      margin: 0.5vmin;
-      padding: 0.8vmin 1.5vmin;
-      border: none;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white;
     }
-    #post-alert-button {
-      background-color: #4CAF50;
-    }
-    #post-alert-button:hover {
-      background-color: #45a049;
-    }
-    #cancel-alert-button {
-      background-color: #d32f2f;
-    }
-    #cancel-alert-button:hover {
-      background-color: #b71c1c;
-    }
+    #post-alert-button { background-color: #4CAF50; }
+    #post-alert-button:hover { background-color: #45a049; }
+    #cancel-alert-button { background-color: #d32f2f; }
+    #cancel-alert-button:hover { background-color: #b71c1c; }
     #reroute-hud {
-      display: none;
-      flex-direction: column;
-      gap: 1vmin;
-      padding: 1vmin;
-      text-align: center;
+      display: none; flex-direction: column; gap: 1vmin; padding: 1vmin; text-align: center;
     }
-    #reroute-hud.active {
-      display: flex;
-    }
-    #reroute-hud h3 {
-      margin: 0;
-      font-size: clamp(14px, 2.5vmin, 18px);
-      color: white;
-    }
-    #reroute-hud p {
-      margin: 0.5vmin 0;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
-    }
+    #reroute-hud.active { display: flex; }
+    #reroute-hud h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
+    #reroute-hud p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
     #accept-reroute-button, #reject-reroute-button {
-      margin: 0.5vmin;
-      padding: 0.8vmin 1.5vmin;
-      border: none;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white;
     }
-    #accept-reroute-button {
-      background-color: #4CAF50;
-    }
-    #accept-reroute-button:hover {
-      background-color: #45a049;
-    }
-    #reject-reroute-button {
-      background-color: #d32f2f;
-    }
-    #reject-reroute-button:hover {
-      background-color: #b71c1c;
-    }
+    #accept-reroute-button { background-color: #4CAF50; }
+    #accept-reroute-button:hover { background-color: #45a049; }
+    #reject-reroute-button { background-color: #d32f2f; }
+    #reject-reroute-button:hover { background-color: #b71c1c; }
     #settings-tabs, #alerts-tabs, #leaderboard-tabs {
-      display: flex;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.3);
-      margin-bottom: 1.5vmin;
+      display: flex; border-bottom: 1px solid rgba(255, 255, 255, 0.3); margin-bottom: 1.5vmin;
     }
     .settings-tab, .alerts-tab, .leaderboard-tab {
-      flex: 1;
-      padding: 0.5vmin;
-      text-align: center;
-      cursor: pointer;
-      font-size: clamp(12px, 2.2vmin, 16px);
-      color: rgba(255, 255, 255, 0.7);
-      transition: color 0.2s, border-bottom 0.2s;
+      flex: 1; padding: 0.5vmin; text-align: center; cursor: pointer; font-size: clamp(12px, 2.2vmin, 16px);
+      color: rgba(255, 255, 255, 0.7); transition: color 0.2s, border-bottom 0.2s;
     }
     .settings-tab.active, .alerts-tab.active, .leaderboard-tab.active {
-      color: white;
-      border-bottom: 2px solid #4CAF50;
+      color: white; border-bottom: 2px solid #4CAF50;
     }
-    .settings-tab:hover, .alerts-tab:hover, .leaderboard-tab:hover {
-      color: white;
-    }
+    .settings-tab:hover, .alerts-tab:hover, .leaderboard-tab:hover { color: white; }
     #settings-content {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 1.5vmin;
-      padding: 1.5vmin;
+      flex: 1; display: flex; flex-direction: column; gap: 1.5vmin; padding: 1.5vmin;
     }
     .settings-option {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: clamp(10px, 2vmin, 14px);
-      padding-bottom: 1vmin;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+      display: flex; justify-content: space-between; align-items: center; font-size: clamp(10px, 2vmin, 14px);
+      padding-bottom: 1vmin; border-bottom: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
     }
-    .settings-option:last-child {
-      border-bottom: none;
-    }
-    .settings-option label {
-      color: white;
-      font-weight: 600;
-    }
+    .settings-option:last-child { border-bottom: none; }
+    .settings-option label { color: white; font-weight: 600; }
     .settings-option select {
-      padding: 0.5vmin;
-      border-radius: 0.3rem;
-      border: none;
-      font-size: clamp(10px, 2vmin, 14px);
-      background: #333;
-      color: white;
-      width: 50%;
-      transition: background 0.2s;
+      padding: 0.5vmin; border-radius: 0.3rem; border: none; font-size: clamp(10px, 2vmin, 14px);
+      background: #333; color: white; width: 50%; transition: background 0.2s;
     }
-    .settings-option select:hover {
-      background: #444;
-    }
+    .settings-option select:hover { background: #444; }
     .settings-option input[type="checkbox"] {
-      appearance: none;
-      width: 1.5rem;
-      height: 1.5rem;
-      background: #555;
-      border-radius: 0.3rem;
-      cursor: pointer;
-      transition: background 0.2s;
+      appearance: none; width: 1.5rem; height: 1.5rem; background: #555; border-radius: 0.3rem;
+      cursor: pointer; transition: background 0.2s;
     }
     .settings-option input[type="checkbox"]:checked {
-      background: #333;
-      position: relative;
+      background: #333; position: relative;
     }
     .settings-option input[type="checkbox"]:checked::before {
-      content: '\f00c';
-      font-family: 'Font Awesome 6 Free';
-      font-weight: 900;
-      color: #4CAF50;
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      font-size: 1rem;
+      content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #4CAF50;
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1rem;
     }
-    .settings-option input[type="checkbox"]:hover {
-      background: #666;
-    }
-    .settings-option input[type="range"] {
-      width: 50%;
-      cursor: pointer;
-    }
-    .settings-option .slider-value {
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
-    }
+    .settings-option input[type="checkbox"]:hover { background: #666; }
+    .settings-option input[type="range"] { width: 50%; cursor: pointer; }
+    .settings-option .slider-value { font-size: clamp(10px, 2vmin, 14px); color: white; }
     #logout-button {
-      margin: 0.5vmin;
-      padding: 0.8vmin 1.5vmin;
-      border: none;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
-      background-color: #d32f2f;
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #d32f2f;
     }
-    #logout-button:hover {
-      background-color: #b71c1c;
-    }
+    #logout-button:hover { background-color: #b71c1c; }
     #toast {
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background-color: rgba(0, 0, 0, 0.7);
-      color: white;
-      padding: 0.8vmin 1.5vmin;
-      border-radius: 0.4rem;
-      z-index: 1001;
-      transition: opacity 0.5s;
-      opacity: 0;
-      font-size: clamp(10px, 2vmin, 14px);
-      pointer-events: none;
-      max-width: 90vw;
-      text-align: center;
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.7);
+      color: white; padding: 0.8vmin 1.5vmin; border-radius: 0.4rem; z-index: 1001; transition: opacity 0.5s;
+      opacity: 0; font-size: clamp(10px, 2vmin, 14px); pointer-events: none; max-width: 90vw; text-align: center;
     }
-    #toast.visible-toast {
-      opacity: 1;
-    }
+    #toast.visible-toast { opacity: 1; }
     .alerts-tab-content, .leaderboard-tab-content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 1.5vmin;
-      display: none;
+      flex: 1; overflow-y: auto; padding: 1.5vmin; display: none;
     }
     .alert-item {
-      margin-bottom: 1.5vmin;
-      padding: 1vmin;
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 0.3rem;
-      background: rgba(255, 255, 255, 0.1);
+      margin-bottom: 1.5vmin; padding: 1vmin; border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 0.3rem; background: rgba(255, 255, 255, 0.1);
     }
     .alert-field {
-      font-size: clamp(10px, 2vmin, 14px);
-      margin-bottom: 0.5vmin;
-      color: white;
+      font-size: clamp(10px, 2vmin, 14px); margin-bottom: 0.5vmin; color: white;
     }
-    .alert-actions {
-      display: flex;
-      gap: 1vmin;
-      margin-top: 1vmin;
-    }
+    .alert-actions { display: flex; gap: 1vmin; margin-top: 1vmin; }
     .center-btn, .delete-btn, #center-alerts-btn {
-      background: #4CAF50;
-      color: white;
-      border: none;
-      padding: 0.5vmin 1vmin;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: clamp(10px, 2vmin, 14px);
+      background: #4CAF50; color: white; border: none; padding: 0.5vmin 1vmin; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px);
     }
-    .delete-btn {
-      background: #d32f2f;
-      margin-left: 0.5vmin;
-    }
-    .center-btn:hover, #center-alerts-btn:hover {
-      background: #45a049;
-    }
-    .delete-btn:hover {
-      background: #b71c1c;
-    }
-    .traffic-cam-marker {
-      width: 40px;
-      height: 40px;
-    }
+    .delete-btn { background: #d32f2f; margin-left: 0.5vmin; }
+    .center-btn:hover, #center-alerts-btn:hover { background: #45a049; }
+    .delete-btn:hover { background: #b71c1c; }
+    .traffic-cam-marker { width: 40px; height: 40px; }
     #camera-hud {
-      display: none;
-      flex-direction: column;
-      gap: 1vmin;
-      padding: 1vmin;
-      text-align: center;
+      display: none; flex-direction: column; gap: 1vmin; padding: 1vmin; text-align: center;
     }
-    #camera-hud.active {
-      display: flex;
-    }
-    #camera-hud h3 {
-      margin: 0;
-      font-size: clamp(14px, 2.5vmin, 18px);
-      color: white;
-    }
-    #camera-hud p {
-      margin: 0.5vmin 0;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
-    }
+    #camera-hud.active { display: flex; }
+    #camera-hud h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
+    #camera-hud p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
     #dismiss-camera-button {
-      margin: 0.5vmin;
-      padding: 0.8vmin 1.5vmin;
-      border: none;
-      border-radius: 0.4rem;
-      cursor: pointer;
-      font-size: clamp(10px, 2vmin, 14px);
-      color: white;
-      background-color: #d32f2f;
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #d32f2f;
     }
-    #dismiss-camera-button:hover {
-      background-color: #b71c1c;
-    }
-    #high-contrast {
-      filter: contrast(1.5);
-    }
+    #dismiss-camera-button:hover { background-color: #b71c1c; }
+    #high-contrast { filter: contrast(1.5); }
     @media (max-width: 414px) {
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-        width: 8vw;
-        height: 8vw;
-        max-width: 32px;
-        max-height: 32px;
-        right: 3vw;
+        width: 8vw; height: 8vw; max-width: 32px; max-height: 32px; right: 3vw;
       }
-      #hazard-button {
-        bottom: 48vh;
-      }
-      #recenter-button {
-        bottom: 40vh;
-      }
-      #voice-button {
-        bottom: 32vh;
-      }
-      #share-button {
-        bottom: 24vh;
-      }
-      #settings-button {
-        bottom: 16vh;
-      }
-      #current-alerts-button {
-        bottom: 8vh;
-      }
-      #leaderboard-button {
-        bottom: 0vh;
-      }
+      #hazard-button { bottom: 48vh; }
+      #recenter-button { bottom: 40vh; }
+      #voice-button { bottom: 32vh; }
+      #share-button { bottom: 24vh; }
+      #settings-button { bottom: 16vh; }
+      #current-alerts-button { bottom: 8vh; }
+      #leaderboard-button { bottom: 0vh; }
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1rem;
       }
       #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
-        width: 90vw;
-        max-width: none;
-        padding: 1.5vmin;
+        width: 90vw; max-width: none; padding: 1.5vmin;
       }
       #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
-        padding: 1vmin 0;
-        margin-bottom: 1vmin;
+        padding: 1vmin 0; margin-bottom: 1vmin;
       }
-      .report-options {
-        gap: 1.5vmin;
-        padding-top: 2.5vmin;
-      }
-      .report-button {
-        font-size: clamp(9px, 1.8vmin, 13px);
-      }
-      .report-button i {
-        font-size: clamp(11px, 2.2vmin, 14px);
-      }
-      #toast {
-        width: 90vw;
-        max-width: none;
-      }
-      .alert-field {
-        font-size: clamp(9px, 1.8vmin, 13px);
-      }
-      .center-btn, .delete-btn, #center-alerts-btn {
-        font-size: clamp(9px, 1.8vmin, 13px);
-      }
-      .traffic-cam-marker {
-        width: 32px;
-        height: 32px;
-      }
-      .settings-option .slider-value {
-        font-size: clamp(9px, 1.8vmin, 13px);
-      }
+      .report-options { gap: 1.5vmin; padding-top: 2.5vmin; }
+      .report-button { font-size: clamp(9px, 1.8vmin, 13px); }
+      .report-button i { font-size: clamp(11px, 2.2vmin, 14px); }
+      #toast { width: 90vw; max-width: none; }
+      .alert-field { font-size: clamp(9px, 1.8vmin, 13px); }
+      .center-btn, .delete-btn, #center-alerts-btn { font-size: clamp(9px, 1.8vmin, 13px); }
+      .traffic-cam-marker { width: 32px; height: 32px; }
+      .settings-option .slider-value { font-size: clamp(9px, 1.8vmin, 13px); }
     }
     @media (min-width: 415px) and (max-width: 768px) {
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-        width: 6vw;
-        height: 6vw;
-        max-width: 36px;
-        max-height: 36px;
-        right: 2.5vw;
+        width: 6vw; height: 6vw; max-width: 36px; max-height: 36px; right: 2.5vw;
       }
-      #hazard-button {
-        bottom: 48vh;
-      }
-      #recenter-button {
-        bottom: 40vh;
-      }
-      #voice-button {
-        bottom: 32vh;
-      }
-      #share-button {
-        bottom: 24vh;
-      }
-      #settings-button {
-        bottom: 16vh;
-      }
-      #current-alerts-button {
-        bottom: 8vh;
-      }
-      #leaderboard-button {
-        bottom: 0vh;
-      }
+      #hazard-button { bottom: 48vh; }
+      #recenter-button { bottom: 40vh; }
+      #voice-button { bottom: 32vh; }
+      #share-button { bottom: 24vh; }
+      #settings-button { bottom: 16vh; }
+      #current-alerts-button { bottom: 8vh; }
+      #leaderboard-button { bottom: 0vh; }
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1.1rem;
       }
       #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
-        width: 80vw;
-        max-width: 320px;
-        padding: 1.2vmin;
+        width: 80vw; max-width: 320px; padding: 1.2vmin;
       }
       #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
-        padding: 1vmin 0;
-        margin-bottom: 1vmin;
+        padding: 1vmin 0; margin-bottom: 1vmin;
       }
-      .report-options {
-        gap: 1.2vmin;
-        padding-top: 2vmin;
-      }
-      .report-button {
-        font-size: clamp(10px, 2vmin, 14px);
-      }
-      #toast {
-        width: 80vw;
-        max-width: 320px;
-      }
+      .report-options { gap: 1.2vmin; padding-top: 2vmin; }
+      .report-button { font-size: clamp(10px, 2vmin, 14px); }
+      #toast { width: 80vw; max-width: 320px; }
     }
     @media (min-width: 769px) {
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-        width: 5vw;
-        height: 5vw;
-        max-width: 40px;
-        max-height: 40px;
-        right: 2vw;
+        width: 5vw; height: 5vw; max-width: 40px; max-height: 40px; right: 2vw;
       }
-      #hazard-button {
-        bottom: 48vh;
-      }
-      #recenter-button {
-        bottom: 40vh;
-      }
-      #voice-button {
-        bottom: 32vh;
-      }
-      #share-button {
-        bottom: 24vh;
-      }
-      #settings-button {
-        bottom: 16vh;
-      }
-      #current-alerts-button {
-        bottom: 8vh;
-      }
-      #leaderboard-button {
-        bottom: 0vh;
-      }
+      #hazard-button { bottom: 48vh; }
+      #recenter-button { bottom: 40vh; }
+      #voice-button { bottom: 32vh; }
+      #share-button { bottom: 24vh; }
+      #settings-button { bottom: 16vh; }
+      #current-alerts-button { bottom: 8vh; }
+      #leaderboard-button { bottom: 0vh; }
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1.2rem;
       }
       #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
-        width: 30vw;
-        max-width: 300px;
-        padding: 1vmin;
+        width: 30vw; max-width: 300px; padding: 1vmin;
       }
       #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
-        padding: 1vmin 0;
-        margin-bottom: 1vmin;
+        padding: 1vmin 0; margin-bottom: 1vmin;
       }
-      .report-options {
-        gap: 1vmin;
-        padding-top: 2vmin;
-      }
-      .report-button {
-        font-size: clamp(10px, 2vmin, 14px);
-      }
-      #toast {
-        width: 30vw;
-        max-width: 300px;
-      }
+      .report-options { gap: 1vmin; padding-top: 2vmin; }
+      .report-button { font-size: clamp(10px, 2vmin, 14px); }
+      #toast { width: 30vw; max-width: 300px; }
     }
-    @media (orientation: landscape) {
-      #hud-container, #bottom-hud-container {
-        width: 60%;
-      }
-    }
-    @media (orientation: portrait) {
-      #hud-container, #bottom-hud-container {
-        width: 80%;
-      }
-    }
+    @media (orientation: landscape) { #hud-container, #bottom-hud-container { width: 60%; } }
+    @media (orientation: portrait) { #hud-container, #bottom-hud-container { width: 80%; } }
   </style>
 </head>
 <body>
@@ -1029,9 +480,7 @@
     <header>
       <button id="leaderboard-close">X</button>
     </header>
-    <div id="leaderboard-content" class="leaderboard-tab-content">
-      <!-- Leaderboard will be populated here -->
-    </div>
+    <div id="leaderboard-content" class="leaderboard-tab-content"></div>
   </div>
   <div id="toast"></div>
   <div id="auth-container" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white;">
@@ -1045,33 +494,49 @@
     <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
   </div>
   <script>
-    let map;
-    let userMarker;
-    let destMarker;
-    let directionsService;
-    let directionsRenderer;
-    let alternativeRenderer;
-    let trafficLayer;
-    let watchId;
+    const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
+    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+    const mapId = '2666b5bd496d9c6026f43f82';
+    let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition;
     let currentAlerts = [];
     let cameraCheckInterval = null;
     let cameraPositions = [];
     let cameraAlertShown = new Set();
     let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
-    let hazardAlertDistance = localStorage.getItem('hazardAlertDistance') ? parseFloat(localStorage.getItem('hazardAlertDistance')) : 2;
-    let cameraAlertDistance = localStorage.getItem('cameraAlertDistance') ? parseFloat(localStorage.getItem('cameraAlertDistance')) : 0.5;
+    let hazardAlertDistance = parseFloat(localStorage.getItem('hazardAlertDistance')) || 2;
+    let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
     let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
     let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
     let isInitialized = false;
     let toastTimeout = null;
     let lastHeading = 0;
     let lastSpokenTurn = '';
-    let speechRecognition;
     let headingHistory = [];
     let lastLocationUpdate = 0;
     let lastAnnouncementTime = 0;
     let lastPosition = null;
     let compassHeading = 0;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const REROUTE_CHECK_INTERVAL = 30000;
+    const OFF_ROUTE_TOLERANCE = 100;
+    const RECALC_COOLDOWN = 30000;
+    const HAZARD_CHECK_INTERVAL = 10000;
+    const MIN_REROUTE_DISTANCE = 500;
+    const MIN_ALERT_DISTANCE = 152.4;
+    const CAMERA_CHECK_INTERVAL = 10000;
+    const HEADING_SMOOTHING_WINDOW = 10;
+    const MIN_ZOOM = 16;
+    const MAX_ZOOM = 19;
+    const TURN_ZOOM = 18;
+    const STRAIGHT_ZOOM = 16.5;
+    const TURN_THRESHOLD = 1609.34;
+    const LOCATION_UPDATE_THRESHOLD = 200;
+    const HEADING_CHANGE_THRESHOLD = 15;
+    const STATIONARY_SPEED_THRESHOLD = 0.5;
+    const ARRIVAL_RADIUS = 50;
+    const ANNOUNCEMENT_COOLDOWN = 10000;
+    const DESTINATION_ZOOM_TIME = 15000;
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -1102,31 +567,6 @@
       useDefaultDistances: useDefaultDistances,
       lastValidHeading: 0
     };
-    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
-    const mapId = '2666b5bd496d9c6026f43f82';
-    const MAX_RETRIES = 5;
-    let retryCount = 0;
-    let socket;
-    const REROUTE_CHECK_INTERVAL = 30000;
-    const OFF_ROUTE_TOLERANCE = 100;
-    const RECALC_COOLDOWN = 30000;
-    const HAZARD_CHECK_INTERVAL = 10000;
-    const MIN_REROUTE_DISTANCE = 500;
-    const MIN_ALERT_DISTANCE = 152.4;
-    const CAMERA_CHECK_INTERVAL = 10000;
-    const HEADING_SMOOTHING_WINDOW = 10;
-    const MIN_ZOOM = 16;
-    const MAX_ZOOM = 19;
-    const TURN_ZOOM = 18;
-    const STRAIGHT_ZOOM = 16.5;
-    const TURN_THRESHOLD = 1609.34;
-    const LOCATION_UPDATE_THRESHOLD = 200;
-    const HEADING_CHANGE_THRESHOLD = 15;
-    const STATIONARY_SPEED_THRESHOLD = 0.5;
-    const ARRIVAL_RADIUS = 50;
-    const ANNOUNCEMENT_COOLDOWN = 10000;
-    const DESTINATION_ZOOM_TIME = 15000;
-    const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
     let GoogleMaps = {
       Map: null,
       AdvancedMarkerElement: null,
@@ -1139,6 +579,36 @@
       TrafficLayer: null,
       poly: null
     };
+    async function loadGoogleMaps() {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker&loading=async`;
+      script.async = true;
+      script.defer = true;
+      script.onerror = () => {
+        console.error('Failed to load Google Maps script');
+        showToast('Failed to load map. Please check your network or API key.');
+      };
+      document.head.appendChild(script);
+    }
+    async function initMap() {
+      try {
+        GoogleMaps.Map = await google.maps.importLibrary("maps").then(lib => lib.Map);
+        GoogleMaps.TrafficLayer = await google.maps.importLibrary("maps").then(lib => lib.TrafficLayer);
+        GoogleMaps.AdvancedMarkerElement = await google.maps.importLibrary("marker").then(lib => lib.AdvancedMarkerElement);
+        GoogleMaps.PlacesService = await google.maps.importLibrary("places").then(lib => lib.PlacesService);
+        GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
+        GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
+        GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
+        GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
+        GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
+        GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
+        console.log('Google Maps libraries loaded:', Object.keys(GoogleMaps).filter(k => GoogleMaps[k]));
+        initializeMap();
+      } catch (error) {
+        console.error('Failed to load Google Maps libraries:', error);
+        showToast('Failed to load map libraries. Check API key restrictions.');
+      }
+    }
     function animate() {
       requestAnimationFrame(animate);
       TWEEN.update();
@@ -1193,7 +663,7 @@
     }
     function smoothHeading(newHeading) {
       if (isNaN(newHeading) || newHeading === null) {
-        console.log('Using last valid heading due to invalid compass heading:', navState.lastValidHeading);
+        console.log('Using last valid heading due to invalid input:', navState.lastValidHeading);
         return navState.lastValidHeading;
       }
       headingHistory.push(newHeading);
@@ -1214,70 +684,10 @@
       console.log('Smoothed heading:', { newHeading, smoothed: smoothedHeading });
       return smoothedHeading;
     }
-    async function initMap() {
-      if (!window.google || !google.maps) {
-        console.error('Google Maps API failed to load');
-        showToast('Failed to load map. Please check your network or API key.');
-        return;
-      }
-      try {
-        GoogleMaps.Map = await google.maps.importLibrary("maps").then(lib => lib.Map);
-        GoogleMaps.TrafficLayer = await google.maps.importLibrary("maps").then(lib => lib.TrafficLayer);
-        GoogleMaps.AdvancedMarkerElement = await google.maps.importLibrary("marker").then(lib => lib.AdvancedMarkerElement);
-        GoogleMaps.PlacesService = await google.maps.importLibrary("places").then(lib => lib.PlacesService);
-        GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
-        GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
-        GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
-        GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
-        GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
-        GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
-        console.log('Google Maps libraries loaded:', Object.keys(GoogleMaps).filter(k => GoogleMaps[k]));
-      } catch (error) {
-        console.error('Failed to load Google Maps libraries:', error);
-        showToast('Failed to load map libraries. Check API key restrictions.');
-        return;
-      }
-      if (navigator.permissions) {
-        navigator.permissions.query({ name: 'geolocation' }).then((result) => {
-          if (result.state === 'denied') {
-            showToast('Location access denied. Please enable in browser settings.');
-          } else if (result.state === 'prompt') {
-            console.log('Geolocation permission prompt will be shown.');
-          } else {
-            console.log('Geolocation permission granted.');
-          }
-        });
-      }
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            navState.userLocation = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude
-            };
-            console.log('Initial location:', navState.userLocation);
-            requestDeviceOrientationPermission();
-            initializeMap();
-          },
-          (error) => {
-            console.error('Initial geolocation error:', error);
-            handleGeolocationError(error, true);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0
-          }
-        );
-      } else {
-        showToast('Geolocation is not supported by this browser.');
-        handleGeolocationError({ code: 0 }, true);
-      }
-    }
     function initializeMap() {
       if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement || !GoogleMaps.Autocomplete) {
         console.error('Required Google Maps libraries not loaded:', { Map: !!GoogleMaps.Map, AdvancedMarkerElement: !!GoogleMaps.AdvancedMarkerElement, Autocomplete: !!GoogleMaps.Autocomplete });
-        showToast('Map initialization failed: libraries not loaded.');
+        showToast('Map initialization failed: libraries not loaded. Check Google Cloud Console.');
         return;
       }
       map = new GoogleMaps.Map(document.getElementById('map'), {
@@ -1313,11 +723,7 @@
           strokeColor: navState.altRouteColor,
           strokeOpacity: 0,
           zIndex: 10,
-          icons: [{
-            icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
-            offset: '0',
-            repeat: '12px'
-          }]
+          icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '12px' }]
         }
       });
       const markerElement = document.createElement('div');
@@ -1429,6 +835,9 @@
       if (highContrastMode) document.body.classList.add('high-contrast');
       fetchAndDisplayMarkers(map, navState.userLocation);
       fetchUserProfile();
+      setupEventListeners();
+    }
+    function setupEventListeners() {
       document.getElementById('start-button').addEventListener('click', startGPS);
       document.getElementById('bottom-hud-stop').addEventListener('click', stopGPS);
       document.getElementById('hazard-button').addEventListener('click', () => {
@@ -1563,12 +972,7 @@
         navState.mainRouteColor = e.target.value;
         localStorage.setItem('mainRouteColor', navState.mainRouteColor);
         directionsRenderer.setOptions({
-          polylineOptions: {
-            strokeColor: navState.mainRouteColor,
-            strokeWeight: 6,
-            strokeOpacity: 0.8,
-            zIndex: 5
-          }
+          polylineOptions: { strokeColor: navState.mainRouteColor, strokeWeight: 6, strokeOpacity: 0.8, zIndex: 5 }
         });
         if (navState.currentRoute) {
           directionsRenderer.setDirections(navState.currentRoute);
@@ -1583,11 +987,7 @@
             strokeColor: navState.altRouteColor,
             strokeOpacity: 0,
             zIndex: 10,
-            icons: [{
-              icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 },
-              offset: '0',
-              repeat: '12px'
-            }]
+            icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '12px' }]
           }
         });
         if (navState.alternativeRoute) {
@@ -1691,17 +1091,24 @@
         console.log('User logged out, showing auth form');
         location.reload();
       });
-      adjustHud();
-      window.addEventListener('resize', adjustHud);
-      window.addEventListener('load', adjustHud);
-      window.addEventListener('orientationchange', adjustHud);
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(reg => console.log('SW registered', reg)).catch(err => console.error('SW registration failed', err));
-      }
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({type: 'INIT'});
-      }
-      requestPushPermission();
+      document.getElementById('center-alerts-btn').addEventListener('click', () => {
+        if (currentAlerts.length > 0) {
+          const bounds = new google.maps.LatLngBounds();
+          currentAlerts.forEach(alert => {
+            if (showTrafficCameras || alert.type !== 'Traffic Camera') {
+              bounds.extend({ lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] });
+            }
+          });
+          map.fitBounds(bounds);
+          setTimeout(() => {
+            const currentZoom = map.getZoom();
+            map.setZoom(Math.min(currentZoom, 15));
+          }, 100);
+          console.log('Centered on all alerts with slight zoom out');
+        } else {
+          showToast('No alerts to center on.');
+        }
+      });
     }
     function requestPushPermission() {
       if ('PushManager' in window) {
@@ -2225,6 +1632,7 @@
         navState.isFollowing = true;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
         restoreNavigationView();
+        console.log('Navigation view re-locked after closing HUDs');
         if (navState.pendingReroute) {
           const { hazard, timeSaved } = navState.pendingReroute;
           showRerouteHud(hazard, timeSaved);
@@ -2587,7 +1995,8 @@
         {
           origin: origin,
           destination: dest,
-          travelMode: google.maps.TravelMode.DRIVING
+          travelMode: google.maps.TravelMode.DRIVING,
+          provideRouteAlternatives: true
         },
         (response, status) => {
           if (status === 'OK') {
@@ -2825,7 +2234,7 @@
       return GoogleMaps.spherical.computeDistanceBetween(point, proj);
     }
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 50;
+      const BUFFER = 100;
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
@@ -2840,6 +2249,7 @@
           resolve(null);
           return;
         }
+        const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
         directionsService.route(
           {
             origin: navState.userLocation,
@@ -2848,18 +2258,17 @@
             provideRouteAlternatives: true
           },
           (response, status) => {
-            console.log('Alternative route response:', status, response?.routes?.length);
+            console.log('Alternative route response:', status, response?.routes?.length || 0);
             if (status === 'OK' && response.routes && response.routes.length > 1) {
               const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
-              const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
               let bestAlt = null;
               let bestTimeSaved = -Infinity;
               for (let i = 1; i < response.routes.length; i++) {
                 const alt = response.routes[i];
-                const altDuration = alt.legs[0].duration.value;
-                const timeSaved = currentDuration - altDuration;
                 const altPath = alt.overview_path;
                 if (isHazardAvoided(hazardLatLng, altPath)) {
+                  const altDuration = alt.legs[0].duration.value;
+                  const timeSaved = currentDuration - altDuration;
                   if (timeSaved > bestTimeSaved) {
                     bestAlt = alt;
                     bestTimeSaved = timeSaved;
@@ -2872,10 +2281,10 @@
                   routes: [bestAlt]
                 };
                 const timeSavedMin = Math.round(bestTimeSaved / 60);
-                console.log(`Alternative route found that avoids hazard and changes time by ${timeSavedMin} minutes`);
+                console.log(`Alternative route found, time saved: ${timeSavedMin} minutes`);
                 resolve(timeSavedMin);
               } else {
-                console.log('No alternative route that avoids the hazard.');
+                console.log('No alternative route found that avoids the hazard.');
                 resolve(null);
               }
             } else {
@@ -3212,24 +2621,6 @@
         initializeMap();
       }
     }
-    document.getElementById('center-alerts-btn').addEventListener('click', () => {
-      if (currentAlerts.length > 0) {
-        const bounds = new google.maps.LatLngBounds();
-        currentAlerts.forEach(alert => {
-          if (showTrafficCameras || alert.type !== 'Traffic Camera') {
-            bounds.extend({ lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] });
-          }
-        });
-        map.fitBounds(bounds);
-        setTimeout(() => {
-          const currentZoom = map.getZoom();
-          map.setZoom(Math.min(currentZoom, 15));
-        }, 100);
-        console.log('Centered on all alerts with slight zoom out');
-      } else {
-        showToast('No alerts to center on.');
-      }
-    });
     let isRegister = false;
     function switchAuthMode() {
       isRegister = !isRegister;
@@ -3349,18 +2740,42 @@
           fetchUserProfile();
         }
       });
-      initMap();
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then(reg => console.log('SW registered', reg)).catch(err => console.error('SW registration failed', err));
+      }
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
+      }
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            navState.userLocation = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            console.log('Initial location:', navState.userLocation);
+            requestDeviceOrientationPermission();
+            initializeMap();
+          },
+          (error) => {
+            console.error('Initial geolocation error:', error);
+            handleGeolocationError(error, true);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
+      } else {
+        showToast('Geolocation is not supported by this browser.');
+        handleGeolocationError({ code: 0 }, true);
+      }
     }
-    const script = document.createElement('script');
-    script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker&loading=async`;
-    script.async = true;
-    script.defer = true;
-    script.onerror = () => {
-      console.error('Failed to load Google Maps script');
-      showToast('Failed to load map. Please check your network or API key.');
-    };
-    document.head.appendChild(script);
-    window.addEventListener('load', checkAuth);
+    window.addEventListener('load', () => {
+      loadGoogleMaps();
+      checkAuth();
+    });
   </script>
 </body>
 </html>
