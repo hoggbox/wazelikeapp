@@ -15,7 +15,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// VAPID keys (generate with web-push generate-vapid-keys and add to .env)
+// VAPID keys
 webpush.setVapidDetails(
   'mailto:your-email@example.com',
   process.env.VAPID_PUBLIC_KEY,
@@ -69,6 +69,7 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
   } catch (error) {
+    console.error('Profile fetch error:', error);
     res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
@@ -76,11 +77,12 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
 // Update avatar
 router.post('/upload-avatar', authMiddleware, upload.single('avatar'), async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.user._id);
     user.avatar = `/uploads/${req.file.filename}`;
     await user.save();
     res.json({ avatar: user.avatar });
   } catch (error) {
+    console.error('Avatar upload error:', error);
     res.status(500).json({ error: 'Failed to upload avatar' });
   }
 });
@@ -88,11 +90,12 @@ router.post('/upload-avatar', authMiddleware, upload.single('avatar'), async (re
 // Subscribe to push
 router.post('/subscribe', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const user = await User.findById(req.user._id);
     user.pushSubscription = req.body;
     await user.save();
     res.status(201).json({ message: 'Subscribed successfully' });
   } catch (error) {
+    console.error('Push subscription error:', error);
     res.status(500).json({ error: 'Failed to subscribe' });
   }
 });
