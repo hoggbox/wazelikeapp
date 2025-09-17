@@ -7,6 +7,7 @@ const cors = require('cors');
 const turf = require('@turf/turf');
 const winston = require('winston');
 const jwt = require('jsonwebtoken');
+const User = require('./models/User');
 const authRoutes = require('./routes/auth');
 const friendsRoutes = require('./routes/friends');
 const leaderboardRoutes = require('./routes/leaderboard');
@@ -64,13 +65,12 @@ const alertSchema = new mongoose.Schema({
     }
   },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  timestamp: { type: Date, default: Date.now, expires: 3600 },
+  timestamp: { type: Date, default: Date.now, expires: parseInt(process.env.ALERT_TTL_SECONDS || 3600) },
   address: { type: String }
 });
 
 // Ensure 2dsphere index for geospatial queries
 alertSchema.index({ location: '2dsphere' });
-
 const Alert = mongoose.model('Alert', alertSchema);
 
 // Connect to MongoDB Atlas with reconnection logic
@@ -117,9 +117,9 @@ app.get('/', (req, res) => {
 // Refresh token endpoint
 app.post('/api/auth/refresh', authMiddleware, async (req, res) => {
   try {
-    const user = await mongoose.model('User').findById(req.user._id);
+    const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found' });
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
     res.json({ token });
   } catch (error) {
     logger.error('Token refresh error:', error.message);
@@ -152,9 +152,10 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       address
     });
     await alert.save();
+    const populatedAlert = await Alert.findById(alert._id).populate('userId', 'username');
     logger.info('Alert saved:', { type, userId: req.user._id, location });
-    io.emit('alert', { ...alert._doc, userId: { _id: req.user._id, username: req.user.username } });
-    res.status(201).json({ alert });
+    io.emit('alert', populatedAlert);
+    res.status(201).json({ alert: populatedAlert });
   } catch (error) {
     logger.error('Error saving alert:', error.message);
     res.status(500).json({ error: 'Failed to save alert: ' + error.message });
@@ -171,7 +172,7 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     if (alert.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Unauthorized to delete this alert' });
     }
-    await alert.remove();
+    await alert.deleteOne();
     logger.info('Alert deleted:', req.params.id);
     io.emit('alertDeleted', req.params.id);
     res.status(200).json({ message: 'Alert deleted' });

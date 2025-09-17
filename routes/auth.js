@@ -35,7 +35,7 @@ router.post('/register', async (req, res) => {
     }
     const user = new User({ username, email, password });
     await user.save();
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
     res.status(201).json({ token, user: { id: user._id, username: user.username, avatar: gravatar.url(email) } });
   } catch (error) {
     console.error('Register error:', error);
@@ -54,7 +54,7 @@ router.post('/login', async (req, res) => {
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
     res.json({ token, user: { id: user._id, username: user.username, avatar: user.avatar || gravatar.url(email) } });
   } catch (error) {
     console.error('Login error:', error);
