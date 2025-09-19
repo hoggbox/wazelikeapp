@@ -438,14 +438,14 @@
         <div class="settings-option">
           <label for="hazard-alert-distance">Hazard Alert Distance (miles)</label>
           <div>
-            <input type="range" id="hazard-alert-distance" min="1" max="5" value="2" step="0.5">
+            <input type="range" id="hazard-alert-distance" min="0.5" max="5" value="2" step="0.5">
             <span class="slider-value" id="hazard-distance-value">2 miles</span>
           </div>
         </div>
         <div class="settings-option">
           <label for="camera-alert-distance">Camera Alert Distance (miles)</label>
           <div>
-            <input type="range" id="camera-alert-distance" min="0.5" max="2" value="0.5" step="0.5">
+            <input type="range" id="camera-alert-distance" min="0.1" max="2" value="0.5" step="0.1">
             <span class="slider-value" id="camera-distance-value">0.5 miles</span>
           </div>
         </div>
@@ -512,8 +512,8 @@
   </div>
   <script>
     const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
-    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
-    const mapId = '2666b5bd496d9c6026f43f82';
+    const API_KEY = 'YOUR_API_KEY'; // Replace with your actual Google Maps API key
+    const mapId = 'YOUR_MAP_ID'; // Replace with your actual Google Maps Map ID
     let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition;
     let currentAlerts = [];
     let cameraCheckInterval = null;
@@ -538,23 +538,23 @@
     const REROUTE_CHECK_INTERVAL = 30000;
     const OFF_ROUTE_TOLERANCE = 100;
     const RECALC_COOLDOWN = 30000;
-    const HAZARD_CHECK_INTERVAL = 10000;
-    const MIN_REROUTE_DISTANCE = 500;
+    const HAZARD_CHECK_INTERVAL = 15000; // Increased to reduce mobile freezing
+    const MIN_REROUTE_DISTANCE = 100; // Reduced to detect closer hazards
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
-    const HEADING_SMOOTHING_WINDOW = 10;
+    const HEADING_SMOOTHING_WINDOW = 20; // Increased for smoother heading
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
     const TURN_ZOOM = 18;
     const STRAIGHT_ZOOM = 16.5;
     const TURN_THRESHOLD = 1609.34;
     const LOCATION_UPDATE_THRESHOLD = 200;
-    const HEADING_CHANGE_THRESHOLD = 15;
+    const HEADING_CHANGE_THRESHOLD = 10; // Reduced for more responsive rotation
     const STATIONARY_SPEED_THRESHOLD = 0.5;
     const ARRIVAL_RADIUS = 50;
     const ANNOUNCEMENT_COOLDOWN = 10000;
     const DESTINATION_ZOOM_TIME = 15000;
-    const ALTERNATE_TRIGGER_DISTANCE = 30;
+    const ALTERNATE_TRIGGER_DISTANCE = 10; // Reduced to detect hazards closer to route
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -671,14 +671,14 @@
       }
     }
     function setupDeviceOrientation() {
-      window.addEventListener('deviceorientation', (event) => {
+      window.addEventListener('deviceorientationabsolute', (event) => {
         if (event.alpha !== null) {
           compassHeading = 360 - event.alpha;
           console.log('Raw compass heading (alpha):', event.alpha, 'Adjusted:', compassHeading);
         } else {
           console.warn('Device orientation alpha is null');
         }
-      });
+      }, true);
     }
     function smoothHeading(newHeading) {
       if (isNaN(newHeading) || newHeading === null) {
@@ -689,7 +689,7 @@
       if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
         headingHistory.shift();
       }
-      const alpha = 0.05;
+      const alpha = 0.1; // Adjusted for smoother transitions
       let smoothedHeading = headingHistory[0];
       for (let i = 1; i < headingHistory.length; i++) {
         let delta = headingHistory[i] - smoothedHeading;
@@ -869,9 +869,9 @@
         confirmAlert.classList.remove('active');
         navState.alertState = 'IDLE';
         if (navState.isNavigating) {
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'greedy', disableDefaultUI: false });
           navState.isFollowing = false;
-          console.log('Map unlocked for manual report');
+          console.log('Map unlocked for manual report placement');
         }
         console.log('Hazard button clicked, report box opened in IDLE state');
       });
@@ -883,6 +883,11 @@
         closeAllHuds();
         const settingsHudContainer = document.getElementById('settings-hud-container');
         settingsHudContainer.classList.add('active');
+        if (navState.isNavigating) {
+          map.setOptions({ gestureHandling: 'greedy', disableDefaultUI: false });
+          navState.isFollowing = false;
+          console.log('Map unlocked for settings interaction');
+        }
         console.log('Settings button clicked, settings HUD opened');
       });
       document.getElementById('settings-close').addEventListener('click', () => {
@@ -902,6 +907,11 @@
         const alertsHudContainer = document.getElementById('alerts-hud-container');
         alertsHudContainer.classList.add('active');
         document.getElementById('information').style.display = 'block';
+        if (navState.isNavigating) {
+          map.setOptions({ gestureHandling: 'greedy', disableDefaultUI: false });
+          navState.isFollowing = false;
+          console.log('Map unlocked for alerts interaction');
+        }
         console.log('Current alerts button clicked, alerts HUD opened');
       });
       document.getElementById('alerts-close').addEventListener('click', () => {
@@ -920,6 +930,11 @@
         fetchLeaderboard();
         const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
         leaderboardHudContainer.classList.add('active');
+        if (navState.isNavigating) {
+          map.setOptions({ gestureHandling: 'greedy', disableDefaultUI: false });
+          navState.isFollowing = false;
+          console.log('Map unlocked for leaderboard interaction');
+        }
         console.log('Leaderboard button clicked, leaderboard HUD opened');
       });
       document.getElementById('leaderboard-close').addEventListener('click', () => {
@@ -944,6 +959,8 @@
               reportBox.classList.remove('active');
               navState.alertState = alertType === 'Manual Report' ? 'PLACING_ALERT' : 'PLACING_TRAFFIC_CAMERA';
               showToast(`Press a location on the map to place a ${alertType === 'Manual Report' ? 'hazard' : 'traffic camera'} alert.`);
+              map.setOptions({ gestureHandling: 'greedy', disableDefaultUI: false });
+              navState.isFollowing = false;
               navState.mapClickListener = map.addListener('click', (event) => {
                 if (navState.alertState === 'PLACING_ALERT' || navState.alertState === 'PLACING_TRAFFIC_CAMERA') {
                   confirmAlertLocation(event.latLng, alertType === 'Manual Report' ? 'Manual Report' : 'Traffic Camera');
@@ -968,7 +985,7 @@
       map.addListener('dragstart', () => {
         if (navState.isNavigating) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'greedy', disableDefaultUI: false });
           console.log('User started dragging map, unlocked navigation for free roam');
         }
       });
@@ -1032,7 +1049,7 @@
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
           restoreNavigationView();
         } else if (navState.isNavigating) {
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'greedy', disableDefaultUI: false });
         }
       });
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
@@ -1706,9 +1723,9 @@
       console.log('Calculated polyline bearing:', { currentIndex: closestIndex, bearing: normalizedBearing });
       return normalizedBearing;
     }
-    function shouldRotateMap(currentPos, speed) {
+    function shouldRotateMap(currentPos, speed, heading) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
-        console.log('No rotation: Not navigating or no route data, using last heading to prevent jitter');
+        console.log('No rotation: Not navigating or no route data, using last heading');
         return { shouldRotate: false, bearing: navState.lastValidHeading };
       }
       const path = navState.currentRoute.routes[0].overview_path;
@@ -1740,7 +1757,14 @@
         console.log('Stationary: Using last heading to prevent jitter', { lastHeading: navState.lastValidHeading });
         return { shouldRotate: false, bearing: navState.lastValidHeading };
       }
-      if (nextStep && nextStep.maneuver) {
+      // Prioritize device heading for map rotation
+      if (heading !== null && !isNaN(heading)) {
+        console.log('Using device heading for map rotation:', heading);
+        return { shouldRotate: true, bearing: smoothHeading(heading) };
+      } else if (compassHeading !== 0) {
+        console.log('Using compass heading for map rotation:', compassHeading);
+        return { shouldRotate: true, bearing: smoothHeading(compassHeading) };
+      } else if (nextStep && nextStep.maneuver) {
         const distanceToTurn = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
         if (distanceToTurn < TURN_THRESHOLD) {
           const currentBearing = polylineBearing;
@@ -1752,8 +1776,8 @@
           }
         }
       }
-      console.log('No significant turn, maintaining current heading', { polylineBearing });
-      return { shouldRotate: false, bearing: navState.lastValidHeading };
+      console.log('Using polyline bearing for map rotation:', polylineBearing);
+      return { shouldRotate: true, bearing: smoothHeading(polylineBearing) };
     }
     function getDynamicZoom(currentPos) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
@@ -1840,6 +1864,17 @@
           console.log('Skipping location update due to throttle');
           return;
         }
+        // Skip update if position hasn't changed significantly
+        if (lastPosition && GoogleMaps.spherical) {
+          const distanceMoved = GoogleMaps.spherical.computeDistanceBetween(
+            new google.maps.LatLng(lastPosition),
+            new google.maps.LatLng(latitude, longitude)
+          );
+          if (distanceMoved < 5) {
+            console.log('Skipping update: Position changed less than 5 meters');
+            return;
+          }
+        }
         lastLocationUpdate = now;
         navState.previousUserLocation = navState.userLocation;
         navState.userLocation = { lat: latitude, lng: longitude };
@@ -1867,8 +1902,8 @@
             console.log('Snapped to polyline:', pos, 'Distance:', minDistance);
           }
           polylineBearing = getPolylineBearing(path, closestIndex);
-          const { shouldRotate, bearing } = shouldRotateMap(pos, speed);
-          navState.currentHeading = smoothHeading(compassHeading || heading || bearing || polylineBearing);
+          const { shouldRotate, bearing } = shouldRotateMap(pos, speed, heading);
+          navState.currentHeading = bearing;
           console.log('Heading updated:', { shouldRotate, bearing, currentHeading: navState.currentHeading, compassHeading, gpsHeading: heading, polylineBearing });
           try {
             checkOffRoute(currentLatLng);
@@ -1877,7 +1912,7 @@
             showToast('Error checking route deviation. Continuing with raw location.');
           }
         } else {
-          navState.currentHeading = smoothHeading(compassHeading || heading || 0);
+          navState.currentHeading = smoothHeading(heading || compassHeading || 0);
         }
         navState.userLocation = pos;
         if (userMarker) {
@@ -2024,7 +2059,7 @@
         tilt: 0,
         heading: 0,
         disableDefaultUI: false,
-        gestureHandling: 'cooperative',
+        gestureHandling: 'greedy',
         mapTypeControl: true
       });
       map.panTo(navState.userLocation);
@@ -2207,7 +2242,7 @@
       });
       const segmentPath = path.slice(closestIndex);
       const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
-      console.log('Checking hazards for polyline:', polyline.length, 'points, maxDistance:', hazardAlertDistance * 1609.34);
+      console.log('Checking hazards for polyline:', { points: polyline.length, maxDistance: hazardAlertDistance * 1609.34, closestIndex, minDistance });
       try {
         const response = await fetch('/api/hazards-near-route', {
           method: 'POST',
@@ -2221,7 +2256,7 @@
           throw new Error(`HTTP error ${response.status}: ${await response.text()}`);
         }
         const hazards = await response.json();
-        console.log('Hazard check response:', hazards);
+        console.log('Hazard check response:', { hazardsCount: hazards.length, hazards });
         if (hazards.length > 0) {
           const validHazards = hazards.filter(hazard => {
             if (navState.ignoredHazards.includes(hazard._id)) {
@@ -2231,11 +2266,16 @@
             const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = GoogleMaps.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
             const distanceToPolyline = getMinDistanceToPolyline(hazardLatLng, path);
-            if (distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE) {
-              console.log('Hazard within 30m of polyline, triggering alternate route.');
-            }
-            console.log('Hazard distance:', distanceToHazard, 'min:', MIN_REROUTE_DISTANCE, 'max:', hazardAlertDistance * 1609.34);
-            return distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= hazardAlertDistance * 1609.34 && distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE;
+            console.log('Hazard evaluation:', {
+              hazardId: hazard._id,
+              type: hazard.type,
+              distanceToHazard,
+              distanceToPolyline,
+              minRerouteDistance: MIN_REROUTE_DISTANCE,
+              maxDistance: hazardAlertDistance * 1609.34,
+              triggerDistance: ALTERNATE_TRIGGER_DISTANCE
+            });
+            return distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= hazardAlertDistance * 1609.34 && distanceToPolyline <= ALTERNATE_TRIGGER_DISTANCE;
           });
           if (validHazards.length > 0) {
             const hazard = validHazards[0];
@@ -2287,10 +2327,11 @@
         const dist = distanceToSegment(point, path[i], path[i + 1]);
         minDist = Math.min(minDist, dist);
       }
+      console.log('Min distance to polyline:', minDist);
       return minDist;
     }
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 30; // Reduced to 30 meters for short routes
+      const BUFFER = 30;
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
@@ -2455,7 +2496,7 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
-        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
+        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading(), tilt: map.getTilt() })
           .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: navState.currentHeading, tilt: 30 }, 400)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
