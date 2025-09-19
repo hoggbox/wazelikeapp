@@ -152,7 +152,7 @@
     #settings-tabs, #alerts-tabs, #leaderboard-tabs {
       display: flex; border-bottom: 1px solid rgba(255, 255, 255, 0.3); margin-bottom: 1.5vmin;
     }
-    .settings-tab, .alerts-tab, #leaderboard-tab {
+    .settings-tab, .alerts-tab, .leaderboard-tab {
       flex: 1; padding: 0.5vmin; text-align: center; cursor: pointer; font-size: clamp(12px, 2.2vmin, 16px);
       color: rgba(255, 255, 255, 0.7); transition: color 0.2s, border-bottom 0.2s;
     }
@@ -746,14 +746,13 @@
         }
       });
       const markerElement = document.createElement('div');
-      markerElement.className = 'user-marker';
-      markerElement.style.width = '30px';
-      markerElement.style.height = '30px';
-      markerElement.style.backgroundColor = '#4285F4';
-      markerElement.style.borderRadius = '50%';
-      markerElement.style.border = '2px solid white';
+      markerElement.style.borderLeft = '15px solid transparent';
+      markerElement.style.borderRight = '15px solid transparent';
+      markerElement.style.borderBottom = '30px solid #4285F4';
+      markerElement.style.width = '0';
+      markerElement.style.height = '0';
       markerElement.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
-      markerElement.style.transform = 'rotate(0deg)';
+      markerElement.style.transformOrigin = 'center 75%';
       userMarker = new GoogleMaps.AdvancedMarkerElement({
         map: map,
         position: navState.userLocation,
@@ -871,6 +870,7 @@
         navState.alertState = 'IDLE';
         if (navState.isNavigating) {
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          navState.isFollowing = false;
           console.log('Map unlocked for manual report');
         }
         console.log('Hazard button clicked, report box opened in IDLE state');
@@ -968,7 +968,8 @@
       map.addListener('dragstart', () => {
         if (navState.isNavigating) {
           navState.isFollowing = false;
-          console.log('User started dragging map, unlocked navigation, camera auto-follow stopped');
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          console.log('User started dragging map, unlocked navigation for free roam');
         }
       });
       document.getElementById('recenter-button').addEventListener('click', () => {
@@ -976,6 +977,7 @@
           navState.isFollowing = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
           directionsRenderer.setMap(map);
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
           restoreNavigationView();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
         } else {
@@ -1029,6 +1031,8 @@
         if (navState.isFollowing && navState.isNavigating) {
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
           restoreNavigationView();
+        } else if (navState.isNavigating) {
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
         }
       });
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
@@ -1864,8 +1868,8 @@
           }
           polylineBearing = getPolylineBearing(path, closestIndex);
           const { shouldRotate, bearing } = shouldRotateMap(pos, speed);
-          navState.currentHeading = smoothHeading(compassHeading || bearing || polylineBearing);
-          console.log('Heading updated:', { shouldRotate, bearing, currentHeading: navState.currentHeading, compassHeading, polylineBearing });
+          navState.currentHeading = smoothHeading(compassHeading || heading || bearing || polylineBearing);
+          console.log('Heading updated:', { shouldRotate, bearing, currentHeading: navState.currentHeading, compassHeading, gpsHeading: heading, polylineBearing });
           try {
             checkOffRoute(currentLatLng);
           } catch (error) {
@@ -1873,7 +1877,7 @@
             showToast('Error checking route deviation. Continuing with raw location.');
           }
         } else {
-          navState.currentHeading = smoothHeading(compassHeading || 0);
+          navState.currentHeading = smoothHeading(compassHeading || heading || 0);
         }
         navState.userLocation = pos;
         if (userMarker) {
@@ -1890,7 +1894,7 @@
           }
           userMarker.map = map;
           if (Math.abs(navState.currentHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
-            new TWEEN.Tween({ rotation: parseFloat(userMarker.content.style.transform.replace('rotate(', '').replace('deg)', '')) || 0 })
+            new TWEEN.Tween({ rotation: lastHeading })
               .to({ rotation: navState.currentHeading }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => {
@@ -2452,18 +2456,18 @@
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
         new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: 0 }, 400)
+          .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: navState.currentHeading, tilt: 30 }, 400)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
             map.moveCamera({
               center: obj.center,
               zoom: obj.zoom,
               heading: obj.heading,
-              tilt: 0
+              tilt: obj.tilt
             });
           })
           .start();
-        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading: 0', 'Tilt: 0');
+        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 30');
       }
     }
     function acceptReroute() {
