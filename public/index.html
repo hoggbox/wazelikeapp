@@ -1,4 +1,3 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -83,31 +82,31 @@
     .report-container {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 15;
     }
-    #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+    #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translateY(100%); width: 80vw;
       max-width: 300px; background: rgba(0, 0, 0, 0.7); border-radius: 0.5rem; padding: 1vmin; pointer-events: auto;
       display: none; flex-direction: column; transition: transform 0.3s ease; transform-origin: center; visibility: visible;
       overflow-y: auto; max-height: 80vh; color: white;
     }
-    #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active {
+    #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active, #arrival-hud-container.active {
       display: flex; transform: translate(-50%, -50%); visibility: visible;
     }
-    #report-box::before, #reroute-hud-container::before, #settings-hud-container::before, #alerts-hud-container::before, #camera-hud-container::before, #leaderboard-hud-container::before {
+    #report-box::before, #reroute-hud-container::before, #settings-hud-container::before, #alerts-hud-container::before, #camera-hud-container::before, #leaderboard-hud-container::before, #arrival-hud-container::before {
       content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.3);
       z-index: -1; display: none;
     }
-    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container.active::before {
+    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container.active::before, #arrival-hud-container.active::before {
       display: block;
     }
-    #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+    #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
       width: 100%; padding: 1vmin 0; position: relative; margin-bottom: 1vmin;
     }
-    #report-close, #reroute-close, #settings-close, #alerts-close, #camera-close, #leaderboard-close {
+    #report-close, #reroute-close, #settings-close, #alerts-close, #camera-close, #leaderboard-close, #arrival-close {
       position: absolute; top: 0.5vmin; right: 0.5vmin; background: #d32f2f; color: white; border: none;
       padding: 0.5vmin 1vmin; border-radius: 0.4rem; cursor: pointer; font-size: clamp(12px, 2.5vmin, 16px);
       font-weight: bold; z-index: 1;
     }
-    #report-close:hover, #reroute-close:hover, #settings-close:hover, #alerts-close:hover, #camera-close:hover, #leaderboard-close:hover {
+    #report-close:hover, #reroute-close:hover, #settings-close:hover, #alerts-close:hover, #camera-close:hover, #leaderboard-close:hover, #arrival-close:hover {
       background: #b71c1c;
     }
     .report-options {
@@ -219,18 +218,26 @@
     .center-btn:hover, #center-alerts-btn:hover { background: #45a049; }
     .delete-btn:hover { background: #b71c1c; }
     .traffic-cam-marker { width: 40px; height: 40px; }
-    #camera-hud {
+    #camera-hud, #arrival-hud {
       display: none; flex-direction: column; gap: 1vmin; padding: 1vmin; text-align: center;
     }
-    #camera-hud.active { display: flex; }
-    #camera-hud h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
-    #camera-hud p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
-    #dismiss-camera-button {
+    #camera-hud.active, #arrival-hud.active { display: flex; }
+    #camera-hud h3, #arrival-hud h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
+    #camera-hud p, #arrival-hud p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
+    #dismiss-camera-button, #arrival-ok-button {
       margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
       cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #d32f2f;
     }
-    #dismiss-camera-button:hover { background-color: #b71c1c; }
+    #dismiss-camera-button:hover, #arrival-ok-button:hover { background-color: #b71c1c; }
     #high-contrast { filter: contrast(1.5); }
+    .ping {
+      animation: ping 1s ease-in-out infinite;
+    }
+    @keyframes ping {
+      0% { transform: scale(1); opacity: 0.8; }
+      50% { transform: scale(1.5); opacity: 0.4; }
+      100% { transform: scale(1); opacity: 0.8; }
+    }
     @media (max-width: 414px) {
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 8vw; height: 8vw; max-width: 32px; max-height: 32px; right: 3vw;
@@ -245,10 +252,10 @@
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
         width: 90vw; max-width: none; padding: 1.5vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
       }
       .report-options { gap: 1.5vmin; padding-top: 2.5vmin; }
@@ -274,10 +281,10 @@
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1.1rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
         width: 80vw; max-width: 320px; padding: 1.2vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
       }
       .report-options { gap: 1.2vmin; padding-top: 2vmin; }
@@ -298,10 +305,10 @@
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1.2rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container {
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
         width: 30vw; max-width: 300px; padding: 1vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header {
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
       }
       .report-options { gap: 1vmin; padding-top: 2vmin; }
@@ -477,6 +484,15 @@
       <button id="dismiss-camera-button">Dismiss</button>
     </div>
   </div>
+  <div id="arrival-hud-container">
+    <header>
+      <button id="arrival-close">X</button>
+    </header>
+    <div id="arrival-hud">
+      <h3>You've arrived!</h3>
+      <button id="arrival-ok-button">Okay</button>
+    </div>
+  </div>
   <div id="leaderboard-hud-container">
     <header>
       <button id="leaderboard-close">X</button>
@@ -538,6 +554,7 @@
     const ARRIVAL_RADIUS = 50;
     const ANNOUNCEMENT_COOLDOWN = 10000;
     const DESTINATION_ZOOM_TIME = 15000;
+    const ALTERNATE_TRIGGER_DISTANCE = 30;
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -622,10 +639,11 @@
       const alertsHudContainer = document.getElementById('alerts-hud-container');
       const cameraHudContainer = document.getElementById('camera-hud-container');
       const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
+      const arrivalHudContainer = document.getElementById('arrival-hud-container');
       const currentWidth = window.innerWidth;
       const currentHeight = window.innerHeight;
       const maxHeight = Math.min(currentHeight * 0.5, 400);
-      const hudElements = [reportBox, rerouteHudContainer, settingsHudContainer, alertsHudContainer, cameraHudContainer, leaderboardHudContainer];
+      const hudElements = [reportBox, rerouteHudContainer, settingsHudContainer, alertsHudContainer, cameraHudContainer, leaderboardHudContainer, arrivalHudContainer];
       hudElements.forEach(element => {
         element.style.maxHeight = `${maxHeight}px`;
         element.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
@@ -945,6 +963,8 @@
       document.getElementById('reject-reroute-button').addEventListener('click', rejectReroute);
       document.getElementById('camera-close').addEventListener('click', dismissCameraAlert);
       document.getElementById('dismiss-camera-button').addEventListener('click', dismissCameraAlert);
+      document.getElementById('arrival-close').addEventListener('click', endArrival);
+      document.getElementById('arrival-ok-button').addEventListener('click', endArrival);
       map.addListener('dragstart', () => {
         if (navState.isNavigating) {
           navState.isFollowing = false;
@@ -1627,6 +1647,7 @@
       document.getElementById('settings-hud-container').classList.remove('active');
       document.getElementById('alerts-hud-container').classList.remove('active');
       document.getElementById('camera-hud-container').classList.remove('active');
+      document.getElementById('arrival-hud-container').classList.remove('active');
       document.getElementById('leaderboard-hud-container').classList.remove('active');
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
@@ -1655,7 +1676,7 @@
     function recenterNonNavigation() {
       if (map) {
         new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({ zoom: 15, center: navState.userLocation, heading: compassHeading || 0 }, 500)
+          .to({ zoom: 15, center: navState.userLocation, heading: 0 }, 500)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
             map.moveCamera({
@@ -1666,7 +1687,7 @@
           })
           .start();
         map.setTilt(0);
-        console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', compassHeading || 0);
+        console.log('Non-navigation recenter:', navState.userLocation, 'Heading: 0');
       }
     }
     function getPolylineBearing(path, closestIndex) {
@@ -1683,7 +1704,7 @@
     }
     function shouldRotateMap(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
-        console.log('No rotation: Not navigating or no route data, using last heading');
+        console.log('No rotation: Not navigating or no route data, using last heading to prevent jitter');
         return { shouldRotate: false, bearing: navState.lastValidHeading };
       }
       const path = navState.currentRoute.routes[0].overview_path;
@@ -1782,25 +1803,29 @@
           utterance.lang = 'en-US';
           speechSynthesis.speak(utterance);
         }
-        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({ zoom: 19, center: currentPos, heading: navState.lastValidHeading }, 500)
-          .easing(TWEEN.Easing.Quadratic.Out)
-          .onUpdate(obj => {
-            map.moveCamera({
-              center: obj.center,
-              zoom: obj.zoom,
-              heading: obj.heading,
-              tilt: 30
-            });
-          })
-          .start();
-        setTimeout(() => {
-          stopGPS();
-          console.log('Navigation ended after arrival zoom');
-        }, DESTINATION_ZOOM_TIME);
+        destMarker.content.classList.add('ping');
+        document.getElementById('arrival-hud-container').classList.add('active');
+        document.getElementById('arrival-hud').classList.add('active');
         return true;
       }
       return false;
+    }
+    function endArrival() {
+      document.getElementById('arrival-hud-container').classList.remove('active');
+      document.getElementById('arrival-hud').classList.remove('active');
+      new TWEEN.Tween({ opacity: 1 })
+        .to({ opacity: 0 }, 1000)
+        .easing(TWEEN.Easing.Quadratic.Out)
+        .onUpdate(obj => {
+          destMarker.content.style.opacity = obj.opacity;
+        })
+        .onComplete(() => {
+          destMarker.content.classList.remove('ping');
+          destMarker.content.style.opacity = 1;
+          stopGPS();
+          console.log('Navigation ended after arrival');
+        })
+        .start();
     }
     function onPositionUpdate(position) {
       try {
@@ -1860,9 +1885,9 @@
             userMarker.position = pos;
           }
           userMarker.map = map;
-          if (Math.abs(navState.currentHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
+          if (Math.abs(compassHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
             new TWEEN.Tween({ rotation: parseFloat(userMarker.content.style.transform.replace('rotate(', '').replace('deg)', '')) || 0 })
-              .to({ rotation: navState.currentHeading }, 300)
+              .to({ rotation: compassHeading }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => {
                 userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
@@ -1988,13 +2013,13 @@
       map.setOptions({
         zoom: 15,
         tilt: 0,
-        heading: compassHeading || 0,
+        heading: 0,
         disableDefaultUI: false,
         gestureHandling: 'cooperative',
         mapTypeControl: true
       });
       map.panTo(navState.userLocation);
-      console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: compassHeading || 0, tilt: 0 });
+      console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: 0, tilt: 0 });
     }
     function calculateAndDisplayRoute(origin, dest, callback) {
       if (!origin || !dest) {
@@ -2080,7 +2105,7 @@
       hudStreet.textContent = currentStep && currentStep.instructions
         ? `Current street: ${stripHtml(currentStep.instructions)}`
         : 'Current street: Unknown';
-      hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
+      hudHeading.textContent = `Heading: ${Math.round(compassHeading || 0)}°`;
       if (nextStep && nextStep.maneuver) {
         const distanceM = GoogleMaps.spherical.computeDistanceBetween(
           currentLatLng,
@@ -2196,8 +2221,12 @@
             }
             const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = GoogleMaps.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
+            const distanceToPolyline = GoogleMaps.poly.getDistance(hazardLatLng, new google.maps.Polyline({ path }));
+            if (distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE) {
+              console.log('Hazard within 30m of polyline, triggering alternate route.');
+            }
             console.log('Hazard distance:', distanceToHazard, 'min:', MIN_REROUTE_DISTANCE, 'max:', hazardAlertDistance * 1609.34);
-            return distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= hazardAlertDistance * 1609.34;
+            return distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= hazardAlertDistance * 1609.34 && distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE;
           });
           if (validHazards.length > 0) {
             const hazard = validHazards[0];
@@ -2410,18 +2439,18 @@
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
         new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: navState.currentHeading }, 400)
+          .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: 0 }, 400)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
             map.moveCamera({
               center: obj.center,
               zoom: obj.zoom,
               heading: obj.heading,
-              tilt: 30
+              tilt: 0
             });
           })
           .start();
-        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 30');
+        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading: 0', 'Tilt: 0');
       }
     }
     function acceptReroute() {
