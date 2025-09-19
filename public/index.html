@@ -152,7 +152,7 @@
     #settings-tabs, #alerts-tabs, #leaderboard-tabs {
       display: flex; border-bottom: 1px solid rgba(255, 255, 255, 0.3); margin-bottom: 1.5vmin;
     }
-    .settings-tab, .alerts-tab, .leaderboard-tab {
+    .settings-tab, .alerts-tab, #leaderboard-tab {
       flex: 1; padding: 0.5vmin; text-align: center; cursor: pointer; font-size: clamp(12px, 2.2vmin, 16px);
       color: rgba(255, 255, 255, 0.7); transition: color 0.2s, border-bottom 0.2s;
     }
@@ -1841,6 +1841,7 @@
         navState.userLocation = { lat: latitude, lng: longitude };
         let pos = navState.userLocation;
         let snapped = false;
+        let polylineBearing = 0;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           if (checkArrival(pos)) {
             return;
@@ -1861,15 +1862,18 @@
             snapped = true;
             console.log('Snapped to polyline:', pos, 'Distance:', minDistance);
           }
+          polylineBearing = getPolylineBearing(path, closestIndex);
           const { shouldRotate, bearing } = shouldRotateMap(pos, speed);
-          navState.currentHeading = bearing;
-          console.log('Heading updated:', { shouldRotate, bearing, currentHeading: navState.currentHeading });
+          navState.currentHeading = smoothHeading(compassHeading || bearing || polylineBearing);
+          console.log('Heading updated:', { shouldRotate, bearing, currentHeading: navState.currentHeading, compassHeading, polylineBearing });
           try {
             checkOffRoute(currentLatLng);
           } catch (error) {
             console.error('checkOffRoute failed:', error);
             showToast('Error checking route deviation. Continuing with raw location.');
           }
+        } else {
+          navState.currentHeading = smoothHeading(compassHeading || 0);
         }
         navState.userLocation = pos;
         if (userMarker) {
@@ -1885,9 +1889,9 @@
             userMarker.position = pos;
           }
           userMarker.map = map;
-          if (Math.abs(compassHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
+          if (Math.abs(navState.currentHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
             new TWEEN.Tween({ rotation: parseFloat(userMarker.content.style.transform.replace('rotate(', '').replace('deg)', '')) || 0 })
-              .to({ rotation: compassHeading }, 300)
+              .to({ rotation: navState.currentHeading }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => {
                 userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
@@ -1895,6 +1899,7 @@
               .start();
           }
         }
+        lastHeading = navState.currentHeading;
         lastPosition = pos;
         if (navState.isNavigating && navState.isFollowing) {
           navState.navigationZoom = getDynamicZoom(navState.userLocation);
@@ -2105,7 +2110,7 @@
       hudStreet.textContent = currentStep && currentStep.instructions
         ? `Current street: ${stripHtml(currentStep.instructions)}`
         : 'Current street: Unknown';
-      hudHeading.textContent = `Heading: ${Math.round(compassHeading || 0)}°`;
+      hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
       if (nextStep && nextStep.maneuver) {
         const distanceM = GoogleMaps.spherical.computeDistanceBetween(
           currentLatLng,
@@ -2221,7 +2226,7 @@
             }
             const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = GoogleMaps.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
-            const distanceToPolyline = GoogleMaps.poly.getDistance(hazardLatLng, new google.maps.Polyline({ path }));
+            const distanceToPolyline = getMinDistanceToPolyline(hazardLatLng, path);
             if (distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE) {
               console.log('Hazard within 30m of polyline, triggering alternate route.');
             }
@@ -2271,6 +2276,14 @@
     function distanceToSegment(point, a, b) {
       const proj = projectPointToLine(point, a, b);
       return GoogleMaps.spherical.computeDistanceBetween(point, proj);
+    }
+    function getMinDistanceToPolyline(point, path) {
+      let minDist = Infinity;
+      for (let i = 0; i < path.length - 1; i++) {
+        const dist = distanceToSegment(point, path[i], path[i + 1]);
+        minDist = Math.min(minDist, dist);
+      }
+      return minDist;
     }
     function isHazardAvoided(hazardPoint, path) {
       const BUFFER = 30; // Reduced to 30 meters for short routes
