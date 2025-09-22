@@ -1,0 +1,1186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Waze-Like GPS App</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <link rel="manifest" href="/manifest.json">
+  <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js"></script>
+  <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+  <style>
+    /* Unchanged CSS */
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
+    #map { height: 100%; width: 100%; position: absolute; top: 0; left: 0; z-index: 0; }
+    #search-container {
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
+      display: flex; align-items: center; background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      padding: 0.5rem; border: 1px solid #ccc;
+    }
+    #search-input {
+      flex: 1; padding: 0.5rem; border: none; font-size: 1rem; outline: none; background: transparent; width: 100%;
+    }
+    #search-input::placeholder { color: #888; }
+    #start-button {
+      display: none; background: #4CAF50; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.4rem;
+      cursor: pointer; margin-left: 0.5rem; font-size: 1rem;
+    }
+    #start-button:hover { background: #45a049; }
+    .hidden { display: none !important; }
+    .pac-container {
+      z-index: 1002; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); background: white;
+      font-family: Arial, sans-serif; font-size: 1rem; width: 80% !important; max-width: 90vw; margin-top: 0.5rem;
+    }
+    .pac-item { padding: 0.5rem; cursor: pointer; color: #333; }
+    .pac-item:hover { background: #f0f0f0; }
+    #hud-container {
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1;
+      background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
+      border: 1px solid #ccc; display: none; flex-direction: column; gap: 0.5vh;
+    }
+    #hud-turn { font-size: 1.2rem; font-weight: bold; color: #333; }
+    #hud-street, #hud-heading { font-size: 0.9rem; color: #555; }
+    #bottom-hud-container {
+      position: absolute; bottom: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1;
+      background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
+      border: 1px solid #ccc; display: none; align-items: center; gap: 1vw;
+    }
+    #bottom-hud-stop {
+      background: #d32f2f; color: white; border: none; padding: 0.5rem 0.8rem; border-radius: 0.4rem;
+      cursor: pointer; font-size: 1rem; font-weight: bold;
+    }
+    #bottom-hud-stop:hover { background: #b71c1c; }
+    #bottom-hud-info { flex: 1; text-align: center; }
+    #bottom-hud-time { font-size: 1.2rem; font-weight: bold; color: #333; }
+    #bottom-hud-distance { font-size: 0.9rem; color: #555; }
+    #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+      position: fixed; right: 2vw; width: 5vw; height: 5vw; max-width: 40px; max-height: 40px;
+      border: 0.1rem solid #fff; border-radius: 50%; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+      z-index: 20; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    }
+    #hazard-button { bottom: 48vh; background: #ff4444; }
+    #hazard-button::before { content: '+'; color: #00ff00; font-size: 1.2rem; font-weight: bold; }
+    #hazard-button:hover { background: #cc0000; }
+    #recenter-button { bottom: 40vh; background: #4CAF50; }
+    #recenter-button::before { content: '↻'; color: #fff; font-size: 1.2rem; font-weight: bold; }
+    #recenter-button:hover { background: #45a049; }
+    #voice-button { bottom: 32vh; background: #FF5722; }
+    #voice-button::before { content: '\f130'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #voice-button:hover { background: #E64A19; }
+    #share-button { bottom: 24vh; background: #2196F3; }
+    #share-button::before { content: '\f1e0'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #share-button:hover { background: #1976D2; }
+    #settings-button { bottom: 16vh; background: #2196F3; }
+    #settings-button::before { content: '\f013'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #settings-button:hover { background: #1976D2; }
+    #current-alerts-button { bottom: 8vh; background: #FF9800; }
+    #current-alerts-button::before { content: '\f071'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #current-alerts-button:hover { background: #F57C00; }
+    #leaderboard-button { bottom: 0vh; background: #FFC107; }
+    #leaderboard-button::before { content: '\f091'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #leaderboard-button:hover { background: #FFA000; }
+    .report-container {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 15;
+    }
+    #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translateY(100%); width: 80vw;
+      max-width: 300px; background: rgba(0, 0, 0, 0.7); border-radius: 0.5rem; padding: 1vmin; pointer-events: auto;
+      display: none; flex-direction: column; transition: transform 0.3s ease; transform-origin: center; visibility: visible;
+      overflow-y: auto; max-height: 80vh; color: white;
+    }
+    #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active, #arrival-hud-container.active {
+      display: flex; transform: translate(-50%, -50%); visibility: visible;
+    }
+    #report-box::before, #reroute-hud-container::before, #settings-hud-container::before, #alerts-hud-container::before, #camera-hud-container::before, #leaderboard-hud-container::before, #arrival-hud-container::before {
+      content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.3);
+      z-index: -1; display: none;
+    }
+    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container.active::before, #arrival-hud-container.active::before {
+      display: block;
+    }
+    #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+      width: 100%; padding: 1vmin 0; position: relative; margin-bottom: 1vmin;
+    }
+    #report-close, #reroute-close, #settings-close, #alerts-close, #camera-close, #leaderboard-close, #arrival-close {
+      position: absolute; top: 0.5vmin; right: 0.5vmin; background: #d32f2f; color: white; border: none;
+      padding: 0.5vmin 1vmin; border-radius: 0.4rem; cursor: pointer; font-size: clamp(12px, 2.5vmin, 16px);
+      font-weight: bold; z-index: 1;
+    }
+    #report-close:hover, #reroute-close:hover, #settings-close:hover, #alerts-close:hover, #camera-close:hover, #leaderboard-close:hover, #arrival-close:hover {
+      background: #b71c1c;
+    }
+    .report-options {
+      flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: 1vmin; padding: 0.5vmin 0;
+      padding-top: 2vmin; position: relative; width: 100%; height: 100%; overflow: hidden;
+    }
+    .report-button {
+      background: rgba(255, 255, 255, 0.2); border: none; border-radius: 0.3rem; padding: 1vmin;
+      text-align: center; cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white;
+      display: flex; flex-direction: column; align-items: center; transition: background 0.2s;
+      position: relative; width: 100%; height: 100%; vertical-align: middle; grid-column: auto; grid-row: auto;
+    }
+    .report-button:hover { background: rgba(255, 255, 255, 0.3); }
+    .report-button i { font-size: clamp(12px, 2.5vmin, 16px); margin-bottom: 0.5vmin; }
+    #confirm-alert {
+      display: none; flex-direction: column; gap: 1vmin; padding: 1vmin; text-align: center;
+    }
+    #confirm-alert.active { display: flex; }
+    #confirm-alert h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
+    #confirm-alert p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
+    #post-alert-button, #cancel-alert-button {
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white;
+    }
+    #post-alert-button { background-color: #4CAF50; }
+    #post-alert-button:hover { background-color: #45a049; }
+    #cancel-alert-button { background-color: #d32f2f; }
+    #cancel-alert-button:hover { background-color: #b71c1c; }
+    #reroute-hud {
+      display: none; flex-direction: column; gap: 1vmin; padding: 1vmin; text-align: center;
+    }
+    #reroute-hud.active { display: flex; }
+    #reroute-hud h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
+    #reroute-hud p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
+    #accept-reroute-button, #reject-reroute-button {
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white;
+    }
+    #accept-reroute-button { background-color: #4CAF50; }
+    #accept-reroute-button:hover { background-color: #45a049; }
+    #reject-reroute-button { background-color: #d32f2f; }
+    #reject-reroute-button:hover { background-color: #b71c1c; }
+    #settings-tabs, #alerts-tabs, #leaderboard-tabs {
+      display: flex; border-bottom: 1px solid rgba(255, 255, 255, 0.3); margin-bottom: 1.5vmin;
+    }
+    .settings-tab, .alerts-tab, .leaderboard-tab {
+      flex: 1; padding: 0.5vmin; text-align: center; cursor: pointer; font-size: clamp(12px, 2.2vmin, 16px);
+      color: rgba(255, 255, 255, 0.7); transition: color 0.2s, border-bottom 0.2s;
+    }
+    .settings-tab.active, .alerts-tab.active, .leaderboard-tab.active {
+      color: white; border-bottom: 2px solid #4CAF50;
+    }
+    .settings-tab:hover, .alerts-tab:hover, .leaderboard-tab:hover { color: white; }
+    #settings-content {
+      flex: 1; display: flex; flex-direction: column; gap: 1.5vmin; padding: 1.5vmin;
+    }
+    .settings-option {
+      display: flex; justify-content: space-between; align-items: center; font-size: clamp(10px, 2vmin, 14px);
+      padding-bottom: 1vmin; border-bottom: 1px solid rgba(255, 255, 255, 0.2); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+    .settings-option:last-child { border-bottom: none; }
+    .settings-option label { color: white; font-weight: 600; }
+    .settings-option select {
+      padding: 0.5vmin; border-radius: 0.3rem; border: none; font-size: clamp(10px, 2vmin, 14px);
+      background: #333; color: white; width: 50%; transition: background 0.2s;
+    }
+    .settings-option select:hover { background: #444; }
+    .settings-option input[type="checkbox"] {
+      appearance: none; width: 1.5rem; height: 1.5rem; background: #555; border-radius: 0.3rem;
+      cursor: pointer; transition: background 0.2s;
+    }
+    .settings-option input[type="checkbox"]:checked {
+      background: #333; position: relative;
+    }
+    .settings-option input[type="checkbox"]:checked::before {
+      content: '\f00c'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #4CAF50;
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 1rem;
+    }
+    .settings-option input[type="checkbox"]:hover { background: #666; }
+    .settings-option input[type="range"] { width: 50%; cursor: pointer; }
+    .settings-option .slider-value { font-size: clamp(10px, 2vmin, 14px); color: white; }
+    #logout-button {
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #d32f2f;
+    }
+    #logout-button:hover { background-color: #b71c1c; }
+    #toast {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.7);
+      color: white; padding: 0.8vmin 1.5vmin; border-radius: 0.4rem; z-index: 1001; transition: opacity 0.5s;
+      opacity: 0; font-size: clamp(10px, 2vmin, 14px); pointer-events: none; max-width: 90vw; text-align: center;
+    }
+    #toast.visible-toast { opacity: 1; }
+    .alerts-tab-content, .leaderboard-tab-content {
+      flex: 1; overflow-y: auto; padding: 1.5vmin; display: none;
+    }
+    .alert-item {
+      margin-bottom: 1.5vmin; padding: 1vmin; border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 0.3rem; background: rgba(255, 255, 255, 0.1);
+    }
+    .alert-field {
+      font-size: clamp(10px, 2vmin, 14px); margin-bottom: 0.5vmin; color: white;
+    }
+    .alert-actions { display: flex; gap: 1vmin; margin-top: 1vmin; }
+    .center-btn, .delete-btn, #center-alerts-btn {
+      background: #4CAF50; color: white; border: none; padding: 0.5vmin 1vmin; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px);
+    }
+    .delete-btn { background: #d32f2f; margin-left: 0.5vmin; }
+    .center-btn:hover, #center-alerts-btn:hover { background: #45a049; }
+    .delete-btn:hover { background: #b71c1c; }
+    .traffic-cam-marker { width: 40px; height: 40px; }
+    #camera-hud, #arrival-hud {
+      display: none; flex-direction: column; gap: 1vmin; padding: 1vmin; text-align: center;
+    }
+    #camera-hud.active, #arrival-hud.active { display: flex; }
+    #camera-hud h3, #arrival-hud h3 { margin: 0; font-size: clamp(14px, 2.5vmin, 18px); color: white; }
+    #camera-hud p, #arrival-hud p { margin: 0.5vmin 0; font-size: clamp(10px, 2vmin, 14px); color: white; }
+    #dismiss-camera-button, #arrival-ok-button {
+      margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem;
+      cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #d32f2f;
+    }
+    #dismiss-camera-button:hover, #arrival-ok-button:hover { background-color: #b71c1c; }
+    #high-contrast { filter: contrast(1.5); }
+    .ping {
+      animation: ping 1s ease-in-out infinite;
+    }
+    @keyframes ping {
+      0% { transform: scale(1); opacity: 0.8; }
+      50% { transform: scale(1.5); opacity: 0.4; }
+      100% { transform: scale(1); opacity: 0.8; }
+    }
+    @media (max-width: 414px) {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+        width: 8vw; height: 8vw; max-width: 32px; max-height: 32px; right: 3vw;
+      }
+      #hazard-button { bottom: 48vh; }
+      #recenter-button { bottom: 40vh; }
+      #voice-button { bottom: 32vh; }
+      #share-button { bottom: 24vh; }
+      #settings-button { bottom: 16vh; }
+      #current-alerts-button { bottom: 8vh; }
+      #leaderboard-button { bottom: 0vh; }
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+        font-size: 1rem;
+      }
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+        width: 90vw; max-width: none; padding: 1.5vmin;
+      }
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+        padding: 1vmin 0; margin-bottom: 1vmin;
+      }
+      .report-options { gap: 1.5vmin; padding-top: 2.5vmin; }
+      .report-button { font-size: clamp(9px, 1.8vmin, 13px); }
+      .report-button i { font-size: clamp(11px, 2.2vmin, 14px); }
+      #toast { width: 90vw; max-width: none; }
+      .alert-field { font-size: clamp(9px, 1.8vmin, 13px); }
+      .center-btn, .delete-btn, #center-alerts-btn { font-size: clamp(9px, 1.8vmin, 13px); }
+      .traffic-cam-marker { width: 32px; height: 32px; }
+      .settings-option .slider-value { font-size: clamp(9px, 1.8vmin, 13px); }
+    }
+    @media (min-width: 415px) and (max-width: 768px) {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+        width: 6vw; height: 6vw; max-width: 36px; max-height: 36px; right: 2.5vw;
+      }
+      #hazard-button { bottom: 48vh; }
+      #recenter-button { bottom: 40vh; }
+      #voice-button { bottom: 32vh; }
+      #share-button { bottom: 24vh; }
+      #settings-button { bottom: 16vh; }
+      #current-alerts-button { bottom: 8vh; }
+      #leaderboard-button { bottom: 0vh; }
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+        font-size: 1.1rem;
+      }
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+        width: 80vw; max-width: 320px; padding: 1.2vmin;
+      }
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+        padding: 1vmin 0; margin-bottom: 1vmin;
+      }
+      .report-options { gap: 1.2vmin; padding-top: 2vmin; }
+      .report-button { font-size: clamp(10px, 2vmin, 14px); }
+      #toast { width: 80vw; max-width: 320px; }
+    }
+    @media (min-width: 769px) {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+        width: 5vw; height: 5vw; max-width: 40px; max-height: 40px; right: 2vw;
+      }
+      #hazard-button { bottom: 48vh; }
+      #recenter-button { bottom: 40vh; }
+      #voice-button { bottom: 32vh; }
+      #share-button { bottom: 24vh; }
+      #settings-button { bottom: 16vh; }
+      #current-alerts-button { bottom: 8vh; }
+      #leaderboard-button { bottom: 0vh; }
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+        font-size: 1.2rem;
+      }
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+        width: 30vw; max-width: 300px; padding: 1vmin;
+      }
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+        padding: 1vmin 0; margin-bottom: 1vmin;
+      }
+      .report-options { gap: 1vmin; padding-top: 2vmin; }
+      .report-button { font-size: clamp(10px, 2vmin, 14px); }
+      #toast { width: 30vw; max-width: 300px; }
+    }
+    @media (orientation: landscape) { #hud-container, #bottom-hud-container { width: 60%; } }
+    @media (orientation: portrait) { #hud-container, #bottom-hud-container { width: 80%; } }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="search-container">
+    <input id="search-input" type="text" placeholder="Enter destination address">
+    <button id="start-button">Start</button>
+  </div>
+  <div id="hud-container">
+    <div id="hud-turn">Follow the road</div>
+    <div id="hud-street">Current street: Unknown</div>
+    <div id="hud-heading">Heading: Unknown</div>
+  </div>
+  <div id="bottom-hud-container">
+    <button id="bottom-hud-stop">X</button>
+    <div id="bottom-hud-info">
+      <div id="bottom-hud-time">0 Mins</div>
+      <div id="bottom-hud-distance">0 miles - Unknown</div>
+    </div>
+  </div>
+  <div id="hazard-button"></div>
+  <div id="recenter-button"></div>
+  <div id="voice-button"></div>
+  <div id="share-button"></div>
+  <div id="settings-button"></div>
+  <div id="current-alerts-button"></div>
+  <div id="leaderboard-button"></div>
+  <div class="report-container">
+    <div id="report-box">
+      <header>
+        <button id="report-close">X</button>
+      </header>
+      <div class="report-options">
+        <div class="report-button" data-alert-type="Slowdown"><i class="fas fa-car"></i>Slowdown&nbsp;</div>
+        <div class="report-button" data-alert-type="Crash"><i class="fas fa-car-crash"></i>Crash&nbsp;</div>
+        <div class="report-button" data-alert-type="Construction"><i class="fas fa-tools"></i>Construction&nbsp;</div>
+        <div class="report-button" data-alert-type="Police"><i class="fas fa-user-shield"></i>Police&nbsp;</div>
+        <div class="report-button" data-alert-type="Object on Road"><i class="fas fa-road"></i>Object on Road&nbsp;</div>
+        <div class="report-button" data-alert-type="Lane Closure"><i class="fas fa-road-barrier"></i>Lane Closure&nbsp;</div>
+        <div class="report-button" data-alert-type="Manual Report"><i class="fas fa-comment"></i>Manual Report&nbsp;</div>
+        <div class="report-button" data-alert-type="Low Visibility"><i class="fas fa-eye-slash"></i>Low Visibility&nbsp;</div>
+        <div class="report-button" data-alert-type="Traffic Camera"><i class="fas fa-camera"></i>Traffic Camera&nbsp;</div>
+        <div class="report-button" data-alert-type="Manual Traffic Camera"><i class="fas fa-camera-retro"></i>Manual Traffic Camera&nbsp;</div>
+      </div>
+      <div id="confirm-alert">
+        <h3>Confirm Alert Location</h3>
+        <p>Alert Type: <span id="alert-type-display"></span></p>
+        <p>Location: <span id="location-display"></span></p>
+        <p>Timestamp: <span id="timestamp-display"></span></p>
+        <button id="post-alert-button">Post</button>
+        <button id="cancel-alert-button">Cancel</button>
+      </div>
+    </div>
+  </div>
+  <div id="reroute-hud-container">
+    <header>
+      <button id="reroute-close">X</button>
+    </header>
+    <div id="reroute-hud">
+      <h3>Reroute Available</h3>
+      <p id="hazard-message"></p>
+      <button id="accept-reroute-button">Accept</button>
+      <button id="reject-reroute-button">Reject</button>
+    </div>
+  </div>
+  <div id="settings-hud-container">
+    <header>
+      <button id="settings-close">X</button>
+    </header>
+    <div id="settings-tabs">
+      <div class="settings-tab active" data-tab="map-settings">Map Settings</div>
+      <div class="settings-tab" data-tab="account">Account</div>
+    </div>
+    <div id="settings-content">
+      <div id="map-settings" class="settings-tab-content">
+        <div class="settings-option">
+          <label for="traffic-layer-toggle">Show Traffic Layer</label>
+          <input type="checkbox" id="traffic-layer-toggle">
+        </div>
+        <div class="settings-option">
+          <label for="main-route-color">Main Route Color</label>
+          <select id="main-route-color">
+            <option value="#4285F4">Blue</option>
+            <option value="#FF0000">Red</option>
+            <option value="#008000">Green</option>
+            <option value="#800080">Purple</option>
+          </select>
+        </div>
+        <div class="settings-option">
+          <label for="alt-route-color">Alternate Route Color</label>
+          <select id="alt-route-color">
+            <option value="#FFA500">Orange</option>
+            <option value="#FFFF00">Yellow</option>
+            <option value="#FF69B4">Pink</option>
+            <option value="#00CED1">Cyan</option>
+          </select>
+        </div>
+        <div class="settings-option">
+          <label for="map-type">Map Type</label>
+          <select id="map-type">
+            <option value="roadmap">Roadmap</option>
+            <option value="satellite">Satellite</option>
+            <option value="hybrid">Hybrid</option>
+            <option value="terrain">Terrain</option>
+          </select>
+        </div>
+        <div class="settings-option">
+          <label for="auto-recenter-toggle">Auto-Recenter</label>
+          <input type="checkbox" id="auto-recenter-toggle" checked>
+        </div>
+        <div class="settings-option">
+          <label for="traffic-camera-toggle">Show Traffic Camera Alerts</label>
+          <input type="checkbox" id="traffic-camera-toggle" checked>
+        </div>
+        <div class="settings-option">
+          <label for="high-contrast-toggle">High Contrast Mode</label>
+          <input type="checkbox" id="high-contrast-toggle">
+        </div>
+        <div class="settings-option">
+          <label for="hazard-alert-distance">Hazard Alert Distance (miles)</label>
+          <div>
+            <input type="range" id="hazard-alert-distance" min="1" max="5" value="2" step="0.5">
+            <span class="slider-value" id="hazard-distance-value">2 miles</span>
+          </div>
+        </div>
+        <div class="settings-option">
+          <label for="camera-alert-distance">Camera Alert Distance (miles)</label>
+          <div>
+            <input type="range" id="camera-alert-distance" min="0.5" max="2" value="0.5" step="0.5">
+            <span class="slider-value" id="camera-distance-value">0.5 miles</span>
+          </div>
+        </div>
+        <div class="settings-option">
+          <label for="use-default-distances">Use Default Distances</label>
+          <input type="checkbox" id="use-default-distances" checked>
+        </div>
+      </div>
+      <div id="account" class="settings-tab-content" style="display: none;">
+        <div id="points-display">Points: 0</div>
+        <div id="achievements-display">Achievements: None</div>
+        <button id="logout-button">Logout</button>
+      </div>
+    </div>
+  </div>
+  <div id="alerts-hud-container">
+    <header>
+      <button id="alerts-close">X</button>
+    </header>
+    <div id="alerts-tabs">
+      <div class="alerts-tab active" data-tab="information">Information</div>
+      <div class="alerts-tab" data-tab="tools">Tools</div>
+    </div>
+    <div id="information" class="alerts-tab-content"></div>
+    <div id="tools" class="alerts-tab-content" style="display: none;">
+      <button id="center-alerts-btn">Center on Alerts</button>
+    </div>
+  </div>
+  <div id="camera-hud-container">
+    <header>
+      <button id="camera-close">X</button>
+    </header>
+    <div id="camera-hud">
+      <h3>Traffic Camera Ahead</h3>
+      <p>Traffic enforcement camera in the area. Drive safely!</p>
+      <button id="dismiss-camera-button">Dismiss</button>
+    </div>
+  </div>
+  <div id="arrival-hud-container">
+    <header>
+      <button id="arrival-close">X</button>
+    </header>
+    <div id="arrival-hud">
+      <h3>You've arrived!</h3>
+      <button id="arrival-ok-button">Okay</button>
+    </div>
+  </div>
+  <div id="leaderboard-hud-container">
+    <header>
+      <button id="leaderboard-close">X</button>
+    </header>
+    <div id="leaderboard-content" class="leaderboard-tab-content"></div>
+  </div>
+  <div id="toast"></div>
+  <div id="auth-container" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white;">
+    <h2 id="auth-title">Login</h2>
+    <form id="auth-form" style="display: flex; flex-direction: column; gap: 10px; width: 300px;">
+      <input type="text" id="username" name="username" placeholder="Username" style="display: none;">
+      <input type="email" id="email" name="email" placeholder="Email" required>
+      <input type="password" id="password" name="password" placeholder="Password" required>
+      <button type="submit">Submit</button>
+    </form>
+    <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
+  </div>
+  <script>
+    const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
+    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+    const mapId = '2666b5bd496d9c6026f43f82';
+    let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition;
+    let currentAlerts = [];
+    let cameraCheckInterval = null;
+    let cameraPositions = [];
+    let cameraAlertShown = new Set();
+    let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
+    let hazardAlertDistance = parseFloat(localStorage.getItem('hazardAlertDistance')) || 2;
+    let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
+    let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
+    let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
+    let isInitialized = false;
+    let toastTimeout = null;
+    let headingHistory = [];
+    let lastLocationUpdate = 0;
+    let lastAnnouncementTime = 0;
+    let lastPosition = null;
+    let compassHeading = 0;
+    let smoothedHeading = 0; // New: Smoothed compass heading
+    let orientationPermissionGranted = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 5;
+    const REROUTE_CHECK_INTERVAL = 30000;
+    const OFF_ROUTE_TOLERANCE = 100;
+    const RECALC_COOLDOWN = 30000;
+    const HAZARD_CHECK_INTERVAL = 10000;
+    const MIN_REROUTE_DISTANCE = 500;
+    const MIN_ALERT_DISTANCE = 152.4;
+    const CAMERA_CHECK_INTERVAL = 10000;
+    const HEADING_SMOOTHING_ALPHA = 0.3; // New: EMA alpha for heading smoothing
+    const MIN_ZOOM = 16;
+    const MAX_ZOOM = 19;
+    const TURN_ZOOM = 18;
+    const STRAIGHT_ZOOM = 16.5;
+    const TURN_THRESHOLD = 1609.34;
+    const LOCATION_UPDATE_THRESHOLD = 200;
+    const HEADING_CHANGE_THRESHOLD = 15;
+    const STATIONARY_SPEED_THRESHOLD = 0.5;
+    const ARRIVAL_RADIUS = 50;
+    const ANNOUNCEMENT_COOLDOWN = 10000;
+    const DESTINATION_ZOOM_TIME = 15000;
+    const ALTERNATE_TRIGGER_DISTANCE = 30;
+    const SNAP_TOLERANCE = 100; // Meters for initial snap to route
+    let navState = {
+      currentRoute: null,
+      isNavigating: false,
+      isFollowing: localStorage.getItem('isFollowing') === 'true',
+      destination: null,
+      userLocation: { lat: 33.083270, lng: -83.233040 },
+      previousUserLocation: null,
+      lastKnownPosition: null,
+      routePolyline: null,
+      rerouteCheckTimeout: null,
+      hazardCheckInterval: null,
+      currentHeading: 0,
+      alertState: 'IDLE',
+      tempMarker: null,
+      tempAlertData: null,
+      alternativeRoute: null,
+      originalRoute: null,
+      mapClickListener: null,
+      ignoredHazards: [],
+      currentHazard: null,
+      pendingReroute: null,
+      navigationZoom: 18,
+      mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
+      altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
+      mapType: localStorage.getItem('mapType') || 'roadmap',
+      showTraffic: localStorage.getItem('showTraffic') === 'true',
+      lastRecalculationTime: 0,
+      useDefaultDistances: useDefaultDistances,
+      lastValidHeading: 0,
+      projectedPosition: null, // New: Projected/snapped position on route
+      routeProgress: 0 // New: Progress along route (0-1)
+    };
+    let GoogleMaps = {
+      Map: null,
+      AdvancedMarkerElement: null,
+      PlacesService: null,
+      Autocomplete: null,
+      DirectionsService: null,
+      DirectionsRenderer: null,
+      spherical: null,
+      encoding: null,
+      poly: null,
+      TrafficLayer: null
+    };
+    async function loadGoogleMaps() {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker&loading=async`;
+      script.async = true;
+      script.defer = true;
+      script.onerror = () => {
+        console.error('Failed to load Google Maps script');
+        showToast('Failed to load map. Please check your network or API key.');
+      };
+      document.head.appendChild(script);
+    }
+    async function initMap() {
+      try {
+        GoogleMaps.Map = await google.maps.importLibrary("maps").then(lib => lib.Map);
+        GoogleMaps.TrafficLayer = await google.maps.importLibrary("maps").then(lib => lib.TrafficLayer);
+        GoogleMaps.AdvancedMarkerElement = await google.maps.importLibrary("marker").then(lib => lib.AdvancedMarkerElement);
+        GoogleMaps.PlacesService = await google.maps.importLibrary("places").then(lib => lib.PlacesService);
+        GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
+        GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
+        GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
+        GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
+        GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
+        GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
+        console.log('Google Maps libraries loaded');
+        initializeMap();
+      } catch (error) {
+        console.error('Failed to load Google Maps libraries:', error);
+        showToast('Failed to load map libraries. Check API key restrictions.');
+      }
+    }
+    function animate() {
+      requestAnimationFrame(animate);
+      TWEEN.update();
+    }
+    animate();
+    function adjustHud() {
+      // Unchanged
+      const reportBox = document.getElementById('report-box');
+      const rerouteHudContainer = document.getElementById('reroute-hud-container');
+      const settingsHudContainer = document.getElementById('settings-hud-container');
+      const alertsHudContainer = document.getElementById('alerts-hud-container');
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
+      const arrivalHudContainer = document.getElementById('arrival-hud-container');
+      const currentWidth = window.innerWidth;
+      const currentHeight = window.innerHeight;
+      const maxHeight = Math.min(currentHeight * 0.5, 400);
+      const hudElements = [reportBox, rerouteHudContainer, settingsHudContainer, alertsHudContainer, cameraHudContainer, leaderboardHudContainer, arrivalHudContainer];
+      hudElements.forEach(element => {
+        element.style.maxHeight = `${maxHeight}px`;
+        element.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
+        element.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
+      });
+      console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
+    }
+    async function requestDeviceOrientationPermission() {
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try {
+          const permission = await DeviceOrientationEvent.requestPermission();
+          if (permission === 'granted') {
+            console.log('Device orientation permission granted');
+            orientationPermissionGranted = true;
+            setupDeviceOrientation();
+          } else {
+            console.warn('Device orientation permission denied');
+            showToast('Compass access denied. Using GPS-based heading.');
+          }
+        } catch (error) {
+          console.error('Error requesting device orientation permission:', error);
+          showToast('Failed to access compass. Using GPS-based heading.');
+        }
+      } else {
+        setupDeviceOrientation();
+      }
+    }
+    function setupDeviceOrientation() {
+      window.addEventListener('deviceorientation', (event) => {
+        let rawHeading = 0;
+        if (event.webkitCompassHeading !== undefined) {
+          rawHeading = event.webkitCompassHeading; // iOS absolute compass
+        } else if (event.absolute && event.alpha !== null) {
+          rawHeading = 360 - event.alpha; // Absolute orientation (Android/others)
+        } else {
+          rawHeading = event.alpha || 0; // Relative, fallback to route
+        }
+        smoothedHeading = smoothHeading(rawHeading); // Apply EMA smoothing
+        console.log('Compass heading updated:', smoothedHeading);
+      });
+    }
+    function smoothHeading(newHeading) {
+      if (isNaN(newHeading)) return smoothedHeading || 0;
+      // Exponential Moving Average (EMA) for smoothing
+      smoothedHeading = smoothedHeading + HEADING_SMOOTHING_ALPHA * (newHeading - smoothedHeading);
+      smoothedHeading = ((smoothedHeading % 360) + 360) % 360; // Normalize to 0-360
+      return smoothedHeading;
+    }
+    function projectToPolyline(latLng, path) {
+      // New: Project point to closest point on polyline
+      let minDist = Infinity;
+      let closestPoint = latLng;
+      let progress = 0;
+      for (let i = 0; i < path.length - 1; i++) {
+        const start = path[i];
+        const end = path[i + 1];
+        const proj = projectPointToSegment(latLng, start, end);
+        const dist = GoogleMaps.spherical.computeDistanceBetween(latLng, proj);
+        if (dist < minDist) {
+          minDist = dist;
+          closestPoint = proj;
+          progress = i / (path.length - 1);
+        }
+      }
+      return { point: closestPoint, distance: minDist, progress };
+    }
+    function projectPointToSegment(p, a, b) {
+      // New: Project point to line segment
+      const lat1 = a.lat(), lng1 = a.lng();
+      const lat2 = b.lat(), lng2 = b.lng();
+      const lat = p.lat(), lng = p.lng();
+      const dx = lng2 - lng1;
+      const dy = lat2 - lat1;
+      if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return a;
+      let t = ((lat - lat1) * dy + (lng - lng1) * dx) / (dx * dx + dy * dy);
+      t = Math.max(0, Math.min(1, t));
+      return new google.maps.LatLng(lat1 + t * dy, lng1 + t * dx);
+    }
+    function snapToStartOfRoute(userPos, path) {
+      // New: Snap user to nearest point on route at start (within SNAP_TOLERANCE)
+      const { point, distance } = projectToPolyline(userPos, path);
+      if (distance <= SNAP_TOLERANCE) {
+        console.log('Snapped to route start:', point, 'Distance:', distance);
+        return point;
+      }
+      return userPos; // No snap if too far
+    }
+    function initializeMap() {
+      if (!GoogleMaps.Map || !GoogleMaps.AdvancedMarkerElement || !GoogleMaps.Autocomplete) {
+        console.error('Required Google Maps libraries not loaded');
+        showToast('Map initialization failed: libraries not loaded. Check Google Cloud Console.');
+        return;
+      }
+      map = new GoogleMaps.Map(document.getElementById('map'), {
+        center: navState.userLocation,
+        zoom: 15,
+        mapId: mapId,
+        tilt: 0, // Start flat for north-up
+        heading: 0, // Always north-up
+        disableDefaultUI: true,
+        gestureHandling: 'cooperative',
+        mapTypeControl: false,
+        clickableIcons: false,
+        renderer: 'WEBGL'
+      });
+      map.setMapTypeId(navState.mapType);
+      trafficLayer = new GoogleMaps.TrafficLayer({ map: navState.showTraffic ? map : null });
+      directionsService = new GoogleMaps.DirectionsService();
+      directionsRenderer = new GoogleMaps.DirectionsRenderer({
+        map: null,
+        suppressMarkers: true,
+        preserveViewport: true,
+        polylineOptions: {
+          strokeColor: navState.mainRouteColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.8,
+          zIndex: 5
+        }
+      });
+      alternativeRenderer = new GoogleMaps.DirectionsRenderer({
+        map: null,
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: navState.altRouteColor,
+          strokeOpacity: 0,
+          zIndex: 10,
+          icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '12px' }]
+        }
+      });
+      const markerElement = document.createElement('div');
+      markerElement.style.borderLeft = '15px solid transparent';
+      markerElement.style.borderRight = '15px solid transparent';
+      markerElement.style.borderBottom = '30px solid #4285F4';
+      markerElement.style.width = '0';
+      markerElement.style.height = '0';
+      markerElement.style.boxShadow = '0 0 5px rgba(0,0,0,0.5)';
+      markerElement.style.transformOrigin = 'center 75%';
+      userMarker = new GoogleMaps.AdvancedMarkerElement({
+        map: map,
+        position: navState.userLocation,
+        content: markerElement,
+        title: 'Your Location'
+      });
+      // Traffic cameras unchanged
+      if (showTrafficCameras) {
+        const trafficCamImage = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
+        const trafficCamLocations = [
+          { coords: { lat: 33.0921, lng: -83.2246 }, title: 'Traffic Camera - Baldwin High School' },
+          { coords: { lat: 33.0785, lng: -83.2251 }, title: 'Traffic Camera - The Kidd Center' },
+          { coords: { lat: 33.1087, lng: -83.2168 }, title: 'Traffic Camera - John Milledge Academy' }
+        ];
+        trafficCamLocations.forEach(location => {
+          fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(location.title.split(' - ')[1] + ', Milledgeville, GA, USA')}&key=${API_KEY}`)
+            .then(response => response.json())
+            .then(data => {
+              let position = location.coords;
+              if (data.status === 'OK' && data.results[0]) {
+                position = data.results[0].geometry.location;
+                console.log(`Geocoding successful for ${location.title}:`, position);
+              } else {
+                console.warn(`Geocoding failed for ${location.title}, using fallback coords:`, position);
+                showToast(`Using fallback coordinates for ${location.title}.`);
+              }
+              const markerImage = document.createElement('img');
+              markerImage.src = trafficCamImage;
+              markerImage.className = 'traffic-cam-marker';
+              new GoogleMaps.AdvancedMarkerElement({
+                map: map,
+                position: position,
+                content: markerImage,
+                title: location.title
+              });
+              cameraPositions.push(position);
+              console.log(`Traffic camera marker placed at ${location.title}:`, position);
+            })
+            .catch(error => {
+              console.error(`Error geocoding ${location.title}:`, error);
+              const markerImage = document.createElement('img');
+              markerImage.src = trafficCamImage;
+              markerImage.className = 'traffic-cam-marker';
+              new GoogleMaps.AdvancedMarkerElement({
+                map: map,
+                position: location.coords,
+                content: markerImage,
+                title: location.title
+              });
+              cameraPositions.push(location.coords);
+              showToast(`Error geocoding ${location.title}, using fallback coordinates.`);
+              console.log(`Traffic camera marker placed at ${location.title} using fallback:`, location.coords);
+            });
+        });
+      }
+      const input = document.getElementById('search-input');
+      const autocomplete = new GoogleMaps.Autocomplete(input, { fields: ['geometry', 'formatted_address'] });
+      autocomplete.bindTo('bounds', map);
+      console.log('Autocomplete initialized');
+      autocomplete.addListener('place_changed', () => {
+        const place = autocomplete.getPlace();
+        if (place && place.geometry && place.geometry.location) {
+          navState.destination = {
+            lat: place.geometry.location.lat(),
+            lng: place.geometry.location.lng()
+          };
+          console.log('Destination selected:', navState.destination);
+          if (destMarker) destMarker.setMap(null);
+          const destMarkerElement = document.createElement('div');
+          destMarkerElement.style.width = '20px';
+          destMarkerElement.style.height = '20px';
+          destMarkerElement.style.backgroundColor = 'green';
+          destMarkerElement.style.borderRadius = '50%';
+          destMarkerElement.style.border = '2px solid white';
+          destMarker = new GoogleMaps.AdvancedMarkerElement({
+            map: map,
+            position: navState.destination,
+            content: destMarkerElement,
+            title: 'Destination'
+          });
+          document.getElementById('start-button').style.display = 'block';
+          // New: Zoom to destination on select
+          map.moveCamera({
+            center: navState.destination,
+            zoom: 17,
+            heading: 0,
+            tilt: 0
+          });
+          setTimeout(() => {
+            if (navState.isNavigating) return; // If started, don't recenter
+            map.moveCamera({
+              center: navState.userLocation,
+              zoom: 15,
+              heading: 0,
+              tilt: 0
+            });
+          }, DESTINATION_ZOOM_TIME);
+        } else {
+          console.error('No location for selected place:', place);
+          showToast('Invalid address selected. Please try again.');
+        }
+      });
+      // Settings unchanged
+      document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
+      document.getElementById('main-route-color').value = navState.mainRouteColor;
+      document.getElementById('alt-route-color').value = navState.altRouteColor;
+      document.getElementById('map-type').value = navState.mapType;
+      document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
+      document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
+      document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
+      document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
+      document.getElementById('camera-alert-distance').value = cameraAlertDistance;
+      document.getElementById('camera-distance-value').textContent = `${cameraAlertDistance} miles`;
+      document.getElementById('use-default-distances').checked = navState.useDefaultDistances;
+      document.getElementById('high-contrast-toggle').checked = highContrastMode;
+      if (highContrastMode) document.body.classList.add('high-contrast');
+      fetchAndDisplayMarkers(map, navState.userLocation);
+      fetchUserProfile();
+      setupEventListeners();
+    }
+    function setupEventListeners() {
+      // Unchanged except for start-button and recenter
+      document.getElementById('start-button').addEventListener('click', startGPS);
+      document.getElementById('bottom-hud-stop').addEventListener('click', stopGPS);
+      // ... (all other listeners unchanged)
+      document.getElementById('recenter-button').addEventListener('click', () => {
+        if (navState.isNavigating) {
+          navState.isFollowing = true;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          restoreNavigationView();
+          console.log('Recenter button clicked, north-up navigation resumed');
+        } else {
+          recenterNonNavigation();
+          console.log('Recenter button clicked, re-centered to user location (non-navigation)');
+        }
+      });
+      // Settings listeners unchanged
+      // ... (rest unchanged)
+    }
+    // Unchanged functions: requestPushPermission, subscribeToPush, urlB64ToUint8Array, fetchUserProfile, fetchLeaderboard, startVoiceRecognition, shareRoute, refreshToken, confirmAlertLocation, postAlert, cancelAlert, checkOffRoute, fetchAndDisplayMarkers, fetchCurrentAlerts, formatDuration, displayAlertsInHud, deleteAlert, closeAllHuds, recenterNonNavigation, getPolylineBearing, shouldRotateMap (deprecated, not used), getDynamicZoom, checkArrival, endArrival
+    function onPositionUpdate(position) {
+      try {
+        const { latitude, longitude, speed = 0, heading: gpsHeading = null } = position.coords;
+        console.log('Location update:', { lat: latitude, lng: longitude, speed, gpsHeading });
+        const now = Date.now();
+        if (now - lastLocationUpdate < LOCATION_UPDATE_THRESHOLD) return;
+        lastLocationUpdate = now;
+        navState.previousUserLocation = { ...navState.userLocation };
+        let rawPos = { lat: latitude, lng: longitude };
+        let snapped = false;
+        if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes[0]) {
+          if (checkArrival(rawPos)) return;
+          const path = navState.currentRoute.routes[0].overview_path;
+          const latLng = new google.maps.LatLng(rawPos);
+          const projection = projectToPolyline(latLng, path);
+          navState.projectedPosition = projection.point;
+          navState.routeProgress = projection.progress;
+          if (projection.distance < 20) { // Continuous snapping during nav
+            rawPos = { lat: projection.point.lat(), lng: projection.point.lng() };
+            snapped = true;
+            console.log('Snapped to route:', rawPos, 'Progress:', navState.routeProgress);
+          }
+          // Heading: Prefer smoothed compass, fallback to GPS or route bearing
+          const routeBearing = getPolylineBearing(path, path.indexOf(projection.point)); // Approx index
+          let rawHeading = smoothedHeading || gpsHeading || routeBearing;
+          if (speed < STATIONARY_SPEED_THRESHOLD) rawHeading = navState.lastValidHeading; // No jitter when stopped
+          navState.currentHeading = smoothHeading(rawHeading);
+          console.log('Heading:', navState.currentHeading, 'Sources:', { compass: smoothedHeading, gps: gpsHeading, route: routeBearing });
+          checkOffRoute(latLng);
+        } else {
+          navState.currentHeading = smoothHeading(smoothedHeading || gpsHeading || 0);
+        }
+        navState.userLocation = rawPos;
+        // Smooth marker animation
+        if (userMarker && lastPosition) {
+          new TWEEN.Tween({ lat: lastPosition.lat, lng: lastPosition.lng })
+            .to({ lat: rawPos.lat, lng: rawPos.lng }, Math.max(100, speed * 100)) // Duration based on speed
+            .easing(TWEEN.Easing.Linear.None)
+            .onUpdate((obj) => {
+              userMarker.position = { lat: obj.lat, lng: obj.lng };
+            })
+            .start();
+        } else if (userMarker) {
+          userMarker.position = rawPos;
+        }
+        userMarker.map = map;
+        // Rotate marker to heading
+        if (Math.abs(navState.currentHeading - navState.lastValidHeading) > HEADING_CHANGE_THRESHOLD / 2) { // Reduced threshold for smoother
+          new TWEEN.Tween({ rotation: userMarker.content.style.transform ? parseFloat(userMarker.content.style.transform.match(/rotate\(([^)]+)\)/)?.[1] || 0) : navState.lastValidHeading })
+            .to({ rotation: navState.currentHeading }, 200)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate((obj) => {
+              userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
+            })
+            .start();
+        }
+        navState.lastValidHeading = navState.currentHeading;
+        lastPosition = rawPos;
+        if (navState.isNavigating && navState.isFollowing) {
+          navState.navigationZoom = getDynamicZoom(navState.userLocation);
+          restoreNavigationView(); // Keeps route ahead, north-up
+        }
+        navState.lastKnownPosition = rawPos;
+        socket.emit('locationUpdate', { location: navState.userLocation });
+        updateHUD(navState.currentRoute, navState.userLocation);
+      } catch (error) {
+        console.error('Error in position update:', error);
+        showToast('Error updating location. Please ensure GPS is enabled.');
+      }
+    }
+    function startGPS() {
+      if (!navigator.geolocation) {
+        showToast('Geolocation is not supported by this browser.');
+        return;
+      }
+      navState.isNavigating = true;
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
+      document.getElementById('search-container').classList.add('hidden');
+      document.getElementById('hud-container').style.display = 'flex';
+      document.getElementById('bottom-hud-container').style.display = 'flex';
+      directionsRenderer.setMap(map);
+      map.setOptions({ 
+        gestureHandling: 'none', 
+        disableDefaultUI: true,
+        heading: 0, // Lock north-up
+        tilt: 0 // Flat for clarity
+      });
+      calculateAndDisplayRoute(navState.userLocation, navState.destination, (response) => {
+        const path = response.routes[0].overview_path;
+        // New: Snap to route at start
+        const snappedStart = snapToStartOfRoute(new google.maps.LatLng(navState.userLocation), path);
+        navState.userLocation = { lat: snappedStart.lat(), lng: snappedStart.lng() };
+        navState.projectedPosition = snappedStart;
+        navState.routeProgress = 0;
+        navState.currentHeading = smoothHeading(getPolylineBearing(path, 0));
+        navState.lastValidHeading = navState.currentHeading;
+        smoothedHeading = navState.currentHeading;
+        headingHistory = [navState.currentHeading];
+        navState.navigationZoom = getDynamicZoom(navState.userLocation);
+        restoreNavigationView(); // Center on snapped user, north-up
+        console.log('Navigation started, snapped to route:', navState.userLocation);
+        startRerouteCheck();
+        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
+        if (showTrafficCameras) {
+          cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
+        }
+        if (watchId) navigator.geolocation.clearWatch(watchId);
+        watchId = navigator.geolocation.watchPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Geolocation watch error:', error);
+            showToast('Error getting location: ' + error.message);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000 // Shorter for live nav
+          }
+        );
+        console.log('High-accuracy GPS tracking started');
+        navigator.geolocation.getCurrentPosition(onPositionUpdate, // Initial update with snap
+          (error) => console.error('Initial position error:', error),
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+        );
+      });
+    }
+    function restoreNavigationView() {
+      if (navState.isFollowing && navState.isNavigating && navState.projectedPosition) {
+        // New: North-up, route ahead: Center map so user is at bottom, route extends north
+        const userLatLng = new google.maps.LatLng(navState.projectedPosition);
+        const aheadOffset = GoogleMaps.spherical.computeOffset(userLatLng, 100, 0); // 100m north
+        const centerAhead = new google.maps.LatLng(
+          (userLatLng.lat() + aheadOffset.lat()) / 2,
+          (userLatLng.lng() + aheadOffset.lng()) / 2
+        );
+        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() || 0, tilt: map.getTilt() || 0 })
+          .to({ 
+            zoom: navState.navigationZoom, 
+            center: centerAhead.toJSON(), 
+            heading: 0, // Always north-up
+            tilt: 0 
+          }, 400)
+          .easing(TWEEN.Easing.Quadratic.Out)
+          .onUpdate((obj) => {
+            map.moveCamera({
+              center: obj.center,
+              zoom: obj.zoom,
+              heading: obj.heading,
+              tilt: obj.tilt
+            });
+          })
+          .start();
+        console.log('North-up navigation restored: User at bottom, route ahead');
+      }
+    }
+    function stopGPS() {
+      // Unchanged, but reset heading/tilt to 0
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      // ... (rest unchanged)
+      map.setOptions({
+        zoom: 15,
+        tilt: 0,
+        heading: 0,
+        disableDefaultUI: false,
+        gestureHandling: 'cooperative',
+        mapTypeControl: true
+      });
+      map.panTo(navState.userLocation);
+      console.log('Navigation stopped, reset north-up view');
+    }
+    function calculateAndDisplayRoute(origin, dest, callback) {
+      // Unchanged, but ensure heading=0 post-calc
+      if (!origin || !dest) {
+        console.error('Invalid origin or destination');
+        showToast('Invalid route. Please select a destination.');
+        return;
+      }
+      directionsService.route(
+        {
+          origin: origin,
+          destination: dest,
+          travelMode: google.maps.TravelMode.DRIVING,
+          provideRouteAlternatives: true
+        },
+        (response, status) => {
+          if (status === 'OK') {
+            navState.currentRoute = response;
+            navState.routePolyline = response.routes[0].overview_path;
+            directionsRenderer.setDirections(response);
+            console.log('Route calculated');
+            updateHUD(response, origin);
+            updateBottomHUD(response);
+            if (callback) callback(response);
+            map.setHeading(0); // Enforce north-up
+            if (navState.isFollowing) restoreNavigationView();
+          } else {
+            console.error('Directions request failed:', status);
+            showToast('Directions request failed: ' + status);
+          }
+        }
+      );
+    }
+    // Unchanged: updateHUD, updateBottomHUD, stripHtml, startRerouteCheck, checkHazardsAndOfferReroute, getMinDistanceToPolyline, isHazardAvoided, checkAlternativeRoute, showRerouteHud, acceptReroute, rejectReroute, showCameraHud, dismissCameraAlert, checkCameraProximity, createAlertContent, createTrafficCameraContent, showToast, handleGeolocationError, switchAuthMode
+    function checkAuth() {
+      // Unchanged, but add orientation request after geolocation
+      if (isInitialized) return;
+      isInitialized = true;
+      const token = localStorage.getItem('token');
+      if (token) {
+        document.getElementById('auth-container').style.display = 'none';
+        initApp();
+      } else {
+        document.getElementById('auth-container').style.display = 'flex';
+      }
+    }
+    function initApp() {
+      // Unchanged socket setup
+      socket = io({
+        auth: { token: localStorage.getItem('token') },
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
+      // ... (socket listeners unchanged)
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            navState.userLocation = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            console.log('Initial location:', navState.userLocation);
+            requestDeviceOrientationPermission(); // New: Request compass after location
+            initializeMap();
+          },
+          (error) => handleGeolocationError(error, true),
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        );
+      } else {
+        showToast('Geolocation is not supported by this browser.');
+        handleGeolocationError({ code: 0 }, true);
+      }
+    }
+    window.addEventListener('load', () => {
+      loadGoogleMaps();
+      checkAuth();
+      requestPushPermission();
+    });
+    // Document form submit unchanged
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      // Unchanged
+    });
+  </script>
+</body>
+</html>

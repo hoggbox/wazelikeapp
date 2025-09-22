@@ -1,0 +1,35 @@
+{
+  "name": "w2.0",
+  "version": "1.0.0",
+  "description": "Waze-like GPS application with social features and real-time navigation",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "gps",
+    "navigation",
+    "waze",
+    "real-time",
+    "social"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@turf/turf": "^6.5.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.1",
+    "express": "^4.18.1",
+    "express-rate-limit": "^6.5.0",
+    "gravatar": "^1.8.2",
+    "jsonwebtoken": "^8.5.1",
+    "mongoose": "^6.5.2",
+    "multer": "^1.4.5-lts.1",
+    "socket.io": "^4.5.1",
+    "web-push": "^3.4.5",
+    "winston": "^3.8.1"
+  }
+}
