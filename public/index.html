@@ -2813,6 +2813,42 @@
         showToast('Error: ' + error.message);
       }
     });
+    let lastMapUpdate = 0;
+    const MAP_UPDATE_THROTTLE = 500; // Throttle map updates to every 500ms
+    function restoreNavigationView() {
+      if (navState.isFollowing && navState.isNavigating && navState.projectedPosition) {
+        const now = Date.now();
+        if (now - lastMapUpdate < MAP_UPDATE_THROTTLE) {
+          console.log('Skipping restoreNavigationView due to throttle');
+          return;
+        }
+        lastMapUpdate = now;
+        const userLatLng = new google.maps.LatLng(navState.projectedPosition);
+        const aheadOffset = GoogleMaps.spherical.computeOffset(userLatLng, 100, 0); // 100m north
+        const centerAhead = new google.maps.LatLng(
+          (userLatLng.lat() + aheadOffset.lat()) / 2,
+          (userLatLng.lng() + aheadOffset.lng()) / 2
+        );
+        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() || 0, tilt: map.getTilt() || 0 })
+          .to({ 
+            zoom: navState.navigationZoom, 
+            center: centerAhead.toJSON(), 
+            heading: 0, 
+            tilt: 0 
+          }, 400)
+          .easing(TWEEN.Easing.Quadratic.Out)
+          .onUpdate(obj => {
+            map.moveCamera({
+              center: obj.center,
+              zoom: obj.zoom,
+              heading: obj.heading,
+              tilt: obj.tilt
+            });
+          })
+          .start();
+        console.log('North-up navigation restored: User at bottom, route ahead', { center: centerAhead.toJSON(), zoom: navState.navigationZoom });
+      }
+    }
     function checkAuth() {
       if (isInitialized) return;
       isInitialized = true;
@@ -2905,7 +2941,7 @@
         navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
       }
       if (navigator.geolocation) {
-        navigator.geolocation.watchPosition(
+        watchId = navigator.geolocation.watchPosition(
           (position) => {
             navState.userLocation = {
               lat: position.coords.latitude,
