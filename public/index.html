@@ -238,6 +238,11 @@
       50% { transform: scale(1.5); opacity: 0.4; }
       100% { transform: scale(1); opacity: 0.8; }
     }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 0.8; }
+      50% { transform: scale(1.2); opacity: 0.6; }
+      100% { transform: scale(1); opacity: 0.8; }
+    }
     @media (max-width: 414px) {
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 8vw; height: 8vw; max-width: 32px; max-height: 32px; right: 3vw;
@@ -584,7 +589,8 @@
       useDefaultDistances: useDefaultDistances,
       lastValidHeading: 0,
       projectedPosition: null,
-      routeProgress: 0
+      routeProgress: 0,
+      isTwoFingerPanning: false
     };
     let GoogleMaps = {
       Map: null,
@@ -609,6 +615,7 @@
       };
       document.head.appendChild(script);
     }
+    let initialPositionSet = false;
     async function initMap() {
       try {
         GoogleMaps.Map = await google.maps.importLibrary("maps").then(lib => lib.Map);
@@ -622,7 +629,11 @@
         GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
         GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
         console.log('Google Maps libraries loaded:', Object.keys(GoogleMaps).filter(k => GoogleMaps[k]));
-        initializeMap();
+        if (initialPositionSet) {
+          initializeMap();
+        } else {
+          console.log('Waiting for initial position before initializing map');
+        }
       } catch (error) {
         console.error('Failed to load Google Maps libraries:', error);
         showToast('Failed to load map libraries. Check API key restrictions.');
@@ -675,9 +686,9 @@
       window.addEventListener('deviceorientation', (event) => {
         let rawHeading = 0;
         if (event.webkitCompassHeading !== undefined) {
-          rawHeading = event.webkitCompassHeading; // iOS
+          rawHeading = event.webkitCompassHeading;
         } else if (event.alpha !== null) {
-          rawHeading = 360 - event.alpha; // Android
+          rawHeading = 360 - event.alpha;
         }
         compassHeading = smoothHeading(rawHeading);
         console.log('Compass heading:', compassHeading);
@@ -917,6 +928,12 @@
       fetchAndDisplayMarkers(map, navState.userLocation);
       fetchUserProfile();
       setupEventListeners();
+      map.addListener('gesturehandling_changed', () => {
+        if (navState.isNavigating && map.get('gestureHandling') === 'cooperative') {
+          navState.isFollowing = false;
+          console.log('Two-finger gesture detected, allowing free roam in navigation mode');
+        }
+      });
     }
     function setupEventListeners() {
       document.getElementById('start-button').addEventListener('click', startGPS);
@@ -991,6 +1008,7 @@
         console.log('Leaderboard HUD closed');
         if (navState.isNavigating) {
           navState.isFollowing = true;
+          navState.isTwoFingerPanning = false;
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
           restoreNavigationView();
           console.log('Navigation view re-locked after closing leaderboard HUD');
@@ -1031,13 +1049,22 @@
       map.addListener('dragstart', () => {
         if (navState.isNavigating) {
           navState.isFollowing = false;
+          navState.isTwoFingerPanning = false;
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
-          console.log('User started dragging map, unlocked navigation for free roam');
+          console.log('Single-finger drag detected, allowing free roam in navigation mode');
+        }
+      });
+      map.addListener('gesturehandling_changed', () => {
+        if (navState.isNavigating && map.get('gestureHandling') === 'cooperative') {
+          navState.isFollowing = false;
+          navState.isTwoFingerPanning = true;
+          console.log('Two-finger gesture detected, allowing free roam in navigation mode');
         }
       });
       document.getElementById('recenter-button').addEventListener('click', () => {
         if (navState.isNavigating) {
           navState.isFollowing = true;
+          navState.isTwoFingerPanning = false;
           localStorage.setItem('isFollowing', navState.isFollowing);
           directionsRenderer.setMap(map);
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
@@ -1500,6 +1527,7 @@
         reportOptions.style.display = 'grid';
         if (navState.isNavigating) {
           navState.isFollowing = true;
+          navState.isTwoFingerPanning = false;
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
           restoreNavigationView();
           console.log('Navigation view re-locked after manual report');
@@ -1527,6 +1555,7 @@
       console.log('Alert placement cancelled');
       if (navState.isNavigating) {
         navState.isFollowing = true;
+        navState.isTwoFingerPanning = false;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
         restoreNavigationView();
         console.log('Navigation view re-locked after cancelling manual report');
@@ -1597,6 +1626,9 @@
           }
         });
         console.log('Fetched and displayed markers:', markers.length);
+        if (navState.isNavigating) {
+          checkHazardsAndOfferReroute();
+        }
       } catch (error) {
         console.error('Error fetching markers:', error);
         showToast('Failed to load alerts.');
@@ -1729,6 +1761,7 @@
       console.log('All HUDs closed');
       if (navState.isNavigating) {
         navState.isFollowing = true;
+        navState.isTwoFingerPanning = false;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
         restoreNavigationView();
         console.log('Navigation view re-locked after closing HUDs');
@@ -1911,6 +1944,12 @@
         navState.lastKnownPosition = rawPos;
         socket.emit('locationUpdate', { location: navState.userLocation });
         updateHUD(navState.currentRoute, navState.userLocation);
+        if (!initialPositionSet) {
+          initialPositionSet = true;
+          if (GoogleMaps.Map && GoogleMaps.AdvancedMarkerElement && GoogleMaps.Autocomplete) {
+            initializeMap();
+          }
+        }
       } catch (error) {
         console.error('Error in position update:', error);
         showToast('Error updating location. Please ensure GPS is enabled.');
@@ -1924,6 +1963,7 @@
       }
       navState.isNavigating = true;
       navState.isFollowing = true;
+      navState.isTwoFingerPanning = false;
       localStorage.setItem('isFollowing', navState.isFollowing);
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
@@ -1990,6 +2030,7 @@
       }
       navState.isNavigating = false;
       navState.isFollowing = false;
+      navState.isTwoFingerPanning = false;
       navState.currentRoute = null;
       navState.originalRoute = null;
       navState.routePolyline = null;
@@ -2221,11 +2262,17 @@
             const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = GoogleMaps.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
             const distanceToPolyline = getMinDistanceToPolyline(hazardLatLng, path);
-            if (distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE) {
-              console.log('Hazard within 30m of polyline, triggering alternate route.');
-            }
-            console.log('Hazard distance:', distanceToHazard, 'min:', MIN_REROUTE_DISTANCE, 'max:', hazardAlertDistance * 1609.34);
-            return distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= hazardAlertDistance * 1609.34 && distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE;
+            console.log('Hazard evaluation:', {
+              type: hazard.type,
+              distanceToHazard,
+              distanceToPolyline,
+              maxDistance: hazardAlertDistance * 1609.34,
+              minDistance: MIN_REROUTE_DISTANCE,
+              withinPolyline: distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE
+            });
+            return distanceToHazard >= MIN_REROUTE_DISTANCE && 
+                   distanceToHazard <= hazardAlertDistance * 1609.34 && 
+                   distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE;
           });
           if (validHazards.length > 0) {
             const hazard = validHazards[0];
@@ -2487,6 +2534,7 @@
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
         navState.isFollowing = true;
+        navState.isTwoFingerPanning = false;
         localStorage.setItem('isFollowing', navState.isFollowing);
         navState.navigationZoom = getDynamicZoom(navState.userLocation);
         navState.currentHeading = smoothHeading(getPolylineBearing(navState.currentRoute.routes[0].overview_path, 0));
@@ -2535,6 +2583,8 @@
       navState.navigationZoom = getDynamicZoom(navState.userLocation);
       navState.currentHeading = smoothHeading(getPolylineBearing(navState.currentRoute.routes[0].overview_path, 0));
       navState.lastValidHeading = navState.currentHeading;
+      navState.isFollowing = true;
+      navState.isTwoFingerPanning = false;
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
       restoreNavigationView();
       showToast('Reroute rejected, continuing on original route.');
@@ -2591,6 +2641,7 @@
       }
       if (navState.isNavigating) {
         navState.isFollowing = true;
+        navState.isTwoFingerPanning = false;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
         restoreNavigationView();
         console.log('Navigation view re-locked after dismissing camera alert');
@@ -2692,8 +2743,11 @@
               lng: position.coords.longitude
             };
             console.log('Initial location:', navState.userLocation);
+            initialPositionSet = true;
             requestDeviceOrientationPermission();
-            initializeMap();
+            if (GoogleMaps.Map && GoogleMaps.AdvancedMarkerElement && GoogleMaps.Autocomplete) {
+              initializeMap();
+            }
           },
           (error) => {
             console.error('Retry geolocation error:', error);
@@ -2707,7 +2761,10 @@
         ), backoff);
       } else if (isInitial) {
         navState.userLocation = { lat: 33.083270, lng: -83.233040 };
-        initializeMap();
+        initialPositionSet = true;
+        if (GoogleMaps.Map && GoogleMaps.AdvancedMarkerElement && GoogleMaps.Autocomplete) {
+          initializeMap();
+        }
       }
     }
     let isRegister = false;
@@ -2848,15 +2905,18 @@
         navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
       }
       if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
+        navigator.geolocation.watchPosition(
           (position) => {
             navState.userLocation = {
               lat: position.coords.latitude,
               lng: position.coords.longitude
             };
-            console.log('Initial location:', navState.userLocation);
+            console.log('Initial location via watchPosition:', navState.userLocation);
+            initialPositionSet = true;
             requestDeviceOrientationPermission();
-            initializeMap();
+            if (GoogleMaps.Map && GoogleMaps.AdvancedMarkerElement && GoogleMaps.Autocomplete) {
+              initializeMap();
+            }
           },
           (error) => {
             console.error('Initial geolocation error:', error);
@@ -2864,7 +2924,7 @@
           },
           {
             enableHighAccuracy: true,
-            timeout: 10000,
+            timeout: 5000,
             maximumAge: 0
           }
         );
