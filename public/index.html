@@ -614,12 +614,12 @@
       try {
         GoogleMaps.Map = await google.maps.importLibrary("maps").then(lib => lib.Map);
         GoogleMaps.TrafficLayer = await google.maps.importLibrary("maps").then(lib => lib.TrafficLayer);
+        GoogleMaps.Polyline = await google.maps.importLibrary("maps").then(lib => lib.Polyline);
         GoogleMaps.AdvancedMarkerElement = await google.maps.importLibrary("marker").then(lib => lib.AdvancedMarkerElement);
         GoogleMaps.PlacesService = await google.maps.importLibrary("places").then(lib => lib.PlacesService);
         GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
         GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
         GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
-        GoogleMaps.Polyline = await google.maps.importLibrary("core").then(lib => lib.Polyline);
         GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
         GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
         GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
@@ -1139,6 +1139,34 @@
         }
       });
     }
+    async function fetchUserProfile() {
+      try {
+        let response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
+          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        });
+        if (response.status === 401) {
+          const refreshed = await refreshToken();
+          if (refreshed) {
+            response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
+              headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            });
+          } else {
+            throw new Error('Authentication failed');
+          }
+        }
+        if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
+        const data = await response.json();
+        console.log('Profile data received:', data);
+        document.getElementById('points-display').textContent = `Points: ${data.points || 0}`;
+        document.getElementById('achievements-display').textContent = `Achievements: ${Array.isArray(data.achievements) ? data.achievements.join(', ') : 'None'}`;
+      } catch (err) {
+        console.error('Failed to fetch profile:', err);
+        showToast('Failed to load profile data. Please log in again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        document.getElementById('auth-container').style.display = 'flex';
+      }
+    }
     function requestPushPermission() {
       if ('PushManager' in window) {
         Notification.requestPermission().then(permission => {
@@ -1172,21 +1200,6 @@
         outputArray[i] = rawData.charCodeAt(i);
       }
       return outputArray;
-    }
-    function fetchUserProfile() {
-      fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      }).then(res => {
-        if (!res.ok) throw new Error(`Profile fetch failed: ${res.status}`);
-        return res.json();
-      }).then(data => {
-        console.log('Profile data received:', data);
-        document.getElementById('points-display').textContent = `Points: ${data.points || 0}`;
-        document.getElementById('achievements-display').textContent = `Achievements: ${Array.isArray(data.achievements) ? data.achievements.join(', ') : 'None'}`;
-      }).catch(err => {
-        console.error('Failed to fetch profile:', err);
-        showToast('Failed to load profile data.');
-      });
     }
     function fetchLeaderboard() {
       fetch('/api/leaderboard', {
@@ -1478,7 +1491,7 @@
         console.log('checkOffRoute skipped: Not navigating or no route data');
         return false;
       }
-      const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
+      const routePolyline = new GoogleMaps.Polyline({ path: navState.routePolyline });
       const now = Date.now();
       if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
         console.log('Recalculation skipped due to cooldown');
