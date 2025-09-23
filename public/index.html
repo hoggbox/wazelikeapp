@@ -538,7 +538,7 @@
     const REROUTE_CHECK_INTERVAL = 30000;
     const OFF_ROUTE_TOLERANCE = 100;
     const RECALC_COOLDOWN = 30000;
-    const HAZARD_CHECK_INTERVAL = 10000;
+    const HAZARD_CHECK_INTERVAL = 5000; // Reduced for more frequent checks
     const MIN_REROUTE_DISTANCE = 500;
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
@@ -1828,16 +1828,17 @@
         }
       }
       if (routePolyline) {
-        routePolyline.setMap(null);
+        routePolyline.setPath(aheadPath);
+      } else {
+        routePolyline = new GoogleMaps.Polyline({
+          path: aheadPath,
+          strokeColor: navState.mainRouteColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.8,
+          zIndex: 5,
+          map: map
+        });
       }
-      routePolyline = new GoogleMaps.Polyline({
-        path: aheadPath,
-        strokeColor: navState.mainRouteColor,
-        strokeWeight: 6,
-        strokeOpacity: 0.8,
-        zIndex: 5,
-        map: map
-      });
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
     function onPositionUpdate(position) {
@@ -1911,9 +1912,11 @@
         }
         lastHeading = navState.currentHeading;
         lastPosition = pos;
+        if (navState.isNavigating) {
+          updateRouteAhead(navState.userLocation);
+        }
         if (navState.isNavigating && navState.isFollowing) {
           navState.navigationZoom = getDynamicZoom(navState.userLocation, speed);
-          updateRouteAhead(navState.userLocation);
           map.setCenter(navState.userLocation);
           restoreNavigationView();
         }
@@ -2177,6 +2180,7 @@
       }, REROUTE_CHECK_INTERVAL);
     }
     async function checkHazardsAndOfferReroute() {
+      console.log('Checking for hazards...');
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') {
         console.log('checkHazardsAndOfferReroute skipped:', {
           isNavigating: navState.isNavigating,
