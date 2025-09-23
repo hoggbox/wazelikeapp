@@ -1489,7 +1489,7 @@
       if (showTrafficCameras) {
         cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
       }
-      if (watchId) navigator.geolocation.clearWatch(watchId);
+       if (watchId) navigator.geolocation.clearWatch(watchId);
       watchId = navigator.geolocation.watchPosition(
         onPositionUpdate,
         (error) => {
@@ -2013,23 +2013,33 @@
       );
       const zoom = getDynamicZoom(navState.userLocation);
       const tilt = zoom > 17 ? 45 : 0; // 3D effect at higher zoom
-      new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() || 0, tilt: map.getTilt() || 0 })
-        .to({ 
-          zoom: zoom, 
-          center: centerAhead.toJSON(), 
-          heading: 0, // North-up
-          tilt: tilt 
-        }, 400)
-        .easing(TWEEN.Easing.Quadratic.Out)
-        .onUpdate(obj => {
-          map.moveCamera({
-            center: obj.center,
-            zoom: obj.zoom,
-            heading: obj.heading,
-            tilt: obj.tilt
-          });
-        })
-        .start();
+      if (typeof TWEEN !== 'undefined') {
+        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() || 0, tilt: map.getTilt() || 0 })
+          .to({ 
+            zoom: zoom, 
+            center: centerAhead.toJSON(), 
+            heading: 0, // North-up
+            tilt: tilt 
+          }, 400)
+          .easing(TWEEN.Easing.Quadratic.Out)
+          .onUpdate(obj => {
+            map.moveCamera({
+              center: obj.center,
+              zoom: obj.zoom,
+              heading: obj.heading,
+              tilt: obj.tilt
+            });
+          })
+          .start();
+      } else {
+        console.warn('TWEEN not defined, updating map without animation');
+        map.moveCamera({
+          center: centerAhead,
+          zoom: zoom,
+          heading: 0,
+          tilt: tilt
+        });
+      }
       console.log('North-up navigation restored: User at bottom, route ahead', { center: centerAhead.toJSON(), zoom, tilt });
     }
   }
@@ -2457,6 +2467,17 @@
     }
   }
   window.addEventListener('load', () => {
+    // Fallback for TWEEN.js if CDN fails
+    if (typeof TWEEN === 'undefined') {
+      console.error('TWEEN.js not loaded, attempting fallback');
+      const script = document.createElement('script');
+      script.src = '/tween.min.js'; // Ensure you have a local copy in your project root
+      script.onerror = () => {
+        console.error('Failed to load TWEEN.js fallback');
+        showToast('Animation library failed to load. Some features may not work.');
+      };
+      document.head.appendChild(script);
+    }
     loadGoogleMaps();
     checkAuth();
     requestPushPermission();
