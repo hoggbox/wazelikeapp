@@ -1290,6 +1290,13 @@
       } catch (error) {
         console.error('Error posting alert:', error);
         showToast(`Error posting alert: ${error.message}`);
+        if (error.message.includes('jwt malformed')) {
+          console.log('JWT malformed detected, clearing token and reloading');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          location.reload();
+        }
       } finally {
         if (navState.tempMarker) {
           navState.tempMarker.map = null;
@@ -1370,12 +1377,30 @@
       return false;
     }
     async function fetchAndDisplayMarkers(map, center) {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.log('No token available, skipping marker fetch');
+        showToast('Please log in to view alerts.');
+        document.getElementById('auth-container').style.display = 'flex';
+        return;
+      }
       try {
         const url = `${API_BASE_URL}/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
         const response = await fetch(url, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+          headers: { 'Authorization': `Bearer ${token}` }
         });
-        if (!response.ok) throw new Error(`Failed to fetch markers: ${response.statusText}`);
+        if (!response.ok) {
+          if (response.status === 401) {
+            console.log('JWT error in fetchAndDisplayMarkers, attempting token refresh');
+            const refreshed = await refreshToken();
+            if (refreshed) {
+              return fetchAndDisplayMarkers(map, center); // Retry with new token
+            } else {
+              throw new Error('Authentication failed');
+            }
+          }
+          throw new Error(`Failed to fetch markers: ${response.statusText}`);
+        }
         const markers = await response.json();
         map?.data?.forEach(feature => feature.setMap(null));
         cameraPositions = [];
@@ -1411,16 +1436,46 @@
       } catch (error) {
         console.error('Error fetching markers:', error);
         showToast('Failed to load alerts.');
+        if (error.message.includes('jwt malformed')) {
+          console.log('JWT malformed in fetchAndDisplayMarkers, clearing token and reloading');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          location.reload();
+        }
       }
     }
     function fetchCurrentAlerts() {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.log('No token available, skipping alerts fetch');
+        showToast('Please log in to view alerts.');
+        document.getElementById('auth-container').style.display = 'flex';
+        return;
+      }
       const center = navState.userLocation;
       const url = `${API_BASE_URL}/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
       fetch(url, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        headers: { 'Authorization': `Bearer ${token}` }
       })
         .then(response => {
-          if (!response.ok) throw new Error(`Failed to fetch alerts: ${response.statusText}`);
+          if (!response.ok) {
+            if (response.status === 401) {
+              console.log('JWT error in fetchCurrentAlerts, attempting token refresh');
+              return refreshToken().then(refreshed => {
+                if (refreshed) {
+                  return fetch(url, {
+                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                  }).then(res => {
+                    if (!res.ok) throw new Error(`Failed to fetch alerts after refresh: ${res.statusText}`);
+                    return res.json();
+                  });
+                }
+                throw new Error('Authentication failed');
+              });
+            }
+            throw new Error(`Failed to fetch alerts: ${response.statusText}`);
+          }
           return response.json();
         })
         .then(alerts => {
@@ -1433,6 +1488,13 @@
         .catch(error => {
           console.error('Error fetching alerts:', error);
           showToast('Failed to load current alerts.');
+          if (error.message.includes('jwt malformed')) {
+            console.log('JWT malformed in fetchCurrentAlerts, clearing token and reloading');
+            localStorage.removeItem('token');
+            localStorage.removeItem('userId');
+            document.getElementById('auth-container').style.display = 'flex';
+            location.reload();
+          }
         });
     }
     function formatDuration(ms) {
@@ -1454,7 +1516,7 @@
       }
       alerts.forEach(alert => {
         const dateObj = new Date(alert.timestamp);
-        const now = new Date();
+        const now = Date.now();
         const durationMs = now - dateObj;
         const item = document.createElement('div');
         item.className = 'alert-item';
@@ -1498,32 +1560,53 @@
       });
     }
     async function deleteAlert(id, item) {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.log('No token available, cannot delete alert');
+        showToast('Please log in to delete alerts.');
+        document.getElementById('auth-container').style.display = 'flex';
+        return;
+      }
       try {
         const response = await fetch(`${API_BASE_URL}/api/alerts/${id}`, {
           method: 'DELETE',
           headers: {
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${token}`
           }
         });
-        if (response.ok) {
-          item.remove();
-          showToast('Alert deleted successfully.');
-          console.log('Alert deleted:', id);
-          const alert = currentAlerts.find(a => a._id === id);
-          if (alert && alert.type === 'Traffic Camera') {
-            cameraPositions = cameraPositions.filter(pos =>
-              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
-            );
-            cameraAlertShown.delete(`mongo-${id}`);
+        if (!response.ok) {
+          if (response.status === 401) {
+            console.log('JWT error in deleteAlert, attempting token refresh');
+            const refreshed = await refreshToken();
+            if (refreshed) {
+              return deleteAlert(id, item); // Retry with new token
+            }
+            throw new Error('Authentication failed');
           }
-          currentAlerts = currentAlerts.filter(a => a._id !== id);
-          fetchAndDisplayMarkers(map, navState.userLocation);
-        } else {
           throw new Error(`Failed to delete alert: ${response.statusText}`);
         }
+        item.remove();
+        showToast('Alert deleted successfully.');
+        console.log('Alert deleted:', id);
+        const alert = currentAlerts.find(a => a._id === id);
+        if (alert && alert.type === 'Traffic Camera') {
+          cameraPositions = cameraPositions.filter(pos =>
+            pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+          );
+          cameraAlertShown.delete(`mongo-${id}`);
+        }
+        currentAlerts = currentAlerts.filter(a => a._id !== id);
+        fetchAndDisplayMarkers(map, navState.userLocation);
       } catch (error) {
         console.error('Error deleting alert:', error);
         showToast('Failed to delete alert. Please try again.');
+        if (error.message.includes('jwt malformed')) {
+          console.log('JWT malformed in deleteAlert, clearing token and reloading');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          location.reload();
+        }
       }
     }
     function closeAllHuds() {
@@ -1798,6 +1881,11 @@
         console.error('Geolocation not supported');
         return;
       }
+      if (!navState.destination) {
+        showToast('Please select a destination before starting navigation.');
+        console.error('No destination selected');
+        return;
+      }
       navState.isNavigating = true;
       navState.isFollowing = true;
       navState.isTwoFingerPanning = false;
@@ -2064,6 +2152,13 @@
         navState.pendingReroute = true;
         return;
       }
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.log('No token available, skipping hazard check');
+        showToast('Please log in to check for hazards.');
+        document.getElementById('auth-container').style.display = 'flex';
+        return;
+      }
       const path = navState.currentRoute.routes[0].overview_path;
       const userLatLng = new google.maps.LatLng(navState.userLocation);
       let closestIndex = 0;
@@ -2083,11 +2178,19 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('token')}`
+            'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({ polyline, maxDistance: hazardAlertDistance * 1609.34 })
         });
         if (!response.ok) {
+          if (response.status === 401) {
+            console.log('JWT error in checkHazardsAndOfferReroute, attempting token refresh');
+            const refreshed = await refreshToken();
+            if (refreshed) {
+              return checkHazardsAndOfferReroute(); // Retry with new token
+            }
+            throw new Error('Authentication failed');
+          }
           throw new Error(`HTTP error ${response.status}: ${await response.text()}`);
         }
         const hazards = await response.json();
@@ -2136,6 +2239,13 @@
       } catch (error) {
         console.error('Error checking hazards:', error);
         showToast('Unable to check for hazards. Please try again.');
+        if (error.message.includes('jwt malformed')) {
+          console.log('JWT malformed in checkHazardsAndOfferReroute, clearing token and reloading');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          location.reload();
+        }
       }
     }
     function projectPointToLine(p, a, b) {
@@ -2365,7 +2475,7 @@
             center: centerAhead,
             zoom: zoom,
             heading: 0,
-            tilt: tilt
+            tilt: zoom > 17 ? 45 : 0
           });
         }
         console.log('North-up navigation restored: User at bottom, route ahead', { center: centerAhead.toJSON(), zoom, tilt });
@@ -2526,11 +2636,28 @@
           cameraAlertShown.delete(`static-${index}`);
         }
       });
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.log('No token available, skipping camera proximity check');
+        showToast('Please log in to check for traffic cameras.');
+        document.getElementById('auth-container').style.display = 'flex';
+        return;
+      }
       try {
         const response = await fetch(`${API_BASE_URL}/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${cameraAlertDistance * 1609.34}&type=Traffic%20Camera`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+          headers: { 'Authorization': `Bearer ${token}` }
         });
-        if (!response.ok) throw new Error(`Failed to fetch traffic camera alerts: ${response.statusText}`);
+        if (!response.ok) {
+          if (response.status === 401) {
+            console.log('JWT error in checkCameraProximity, attempting token refresh');
+            const refreshed = await refreshToken();
+            if (refreshed) {
+              return checkCameraProximity(); // Retry with new token
+            }
+            throw new Error('Authentication failed');
+          }
+          throw new Error(`Failed to fetch traffic camera alerts: ${response.statusText}`);
+        }
         const cameras = await response.json();
         cameras.forEach((camera, index) => {
           const cameraLatLng = new google.maps.LatLng(camera.location.coordinates[1], camera.location.coordinates[0]);
@@ -2545,6 +2672,13 @@
       } catch (error) {
         console.error('Error fetching traffic camera alerts:', error);
         showToast('Failed to check for traffic cameras.');
+        if (error.message.includes('jwt malformed')) {
+          console.log('JWT malformed in checkCameraProximity, clearing token and reloading');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          location.reload();
+        }
       }
     }
     function createAlertContent() {
@@ -2687,15 +2821,31 @@
       isInitialized = true;
       const token = localStorage.getItem('token');
       if (token) {
-        console.log('Token found, initializing app:', token);
-        document.getElementById('auth-container').style.display = 'none';
-        initApp();
+        // Validate token format before proceeding
+        try {
+          const payload = token.split('.');
+          if (payload.length !== 3) throw new Error('Invalid token format');
+          console.log('Token found, initializing app:', token);
+          document.getElementById('auth-container').style.display = 'none';
+          initApp();
+        } catch (error) {
+          console.error('Invalid token detected:', error.message);
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          showToast('Invalid session. Please log in again.');
+        }
       } else {
         console.log('No token found, showing auth form');
         document.getElementById('auth-container').style.display = 'flex';
       }
     }
     function initApp() {
+      if (typeof io === 'undefined') {
+        console.error('Socket.IO not loaded');
+        showToast('Failed to connect to server. Please refresh.');
+        return;
+      }
       socket = io({
         auth: { token: localStorage.getItem('token') },
         reconnectionAttempts: 5,
@@ -2710,6 +2860,8 @@
           console.log('Invalid token, clearing localStorage and reloading');
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          showToast('Session expired. Please log in again.');
           location.reload();
         } else {
           showToast('Server connection lost. Attempting to reconnect...');
@@ -2768,7 +2920,11 @@
         }
       });
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(reg => console.log('SW registered', reg)).catch(err => console.error('SW registration failed', err));
+        navigator.serviceWorker.register('/sw.js').then(reg => {
+          console.log('Service Worker registered', reg);
+        }).catch(err => {
+          console.error('Service Worker registration failed', err);
+        });
       }
       if (navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
