@@ -2019,32 +2019,45 @@
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-    function startGPS() {
-      if (!navigator.geolocation) {
-        showToast('Geolocation is not supported by this browser.');
-        console.error('Geolocation not supported');
-        return;
-      }
-      if (!navState.destination) {
-        showToast('Please select a destination.');
-        console.error('No destination selected');
-        return;
-      }
-      navState.isNavigating = true;
-      navState.isFollowing = true;
-      localStorage.setItem('isFollowing', navState.isFollowing);
-      document.getElementById('search-container').classList.add('hidden');
-      document.getElementById('hud-container').style.display = 'flex';
-      document.getElementById('bottom-hud-container').style.display = 'flex';
-      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
-      calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
-        const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
-        navState.originalRoute = navState.currentRoute;
-        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+function startGPS() {
+  if (!navigator.geolocation) {
+    showToast('Geolocation is not supported by this browser.');
+    console.error('Geolocation not supported');
+    return;
+  }
+  if (!navState.destination) {
+    showToast('Please select a destination.');
+    console.error('No destination selected');
+    return;
+  }
+  navState.isNavigating = true;
+  navState.isFollowing = true;
+  localStorage.setItem('isFollowing', navState.isFollowing);
+  document.getElementById('search-container').classList.add('hidden');
+  document.getElementById('hud-container').style.display = 'flex';
+  document.getElementById('bottom-hud-container').style.display = 'flex';
+  map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+  // CHANGED: Always snap to polyline start at navigation start
+  directionsService.route(
+    {
+      origin: navState.userLocation,
+      destination: navState.destination,
+      travelMode: google.maps.TravelMode.DRIVING,
+      provideRouteAlternatives: true
+    },
+    (response, status) => {
+      if (status === 'OK') {
+        const startLocation = response.routes[0].legs[0].start_location;
+        navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() }; // Force snap to route start
+        console.log('Forced snap to route start:', navState.userLocation);
+        navState.currentRoute = response;
+        navState.originalRoute = response;
+        navState.routePolyline = response.routes[0].overview_path;
         updateRouteAhead(navState.userLocation);
         navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
+        map.setCenter(navState.userLocation); // Center on user initially
         restoreNavigationView();
-        console.log('Navigation started, centered on user location:', startLocation);
+        console.log('Navigation started, centered on user location:', navState.userLocation);
         fetchCurrentAlerts();
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
@@ -2079,8 +2092,16 @@
             timeout: 10000
           }
         );
-      });
+      } else {
+        console.error('Directions request failed:', status);
+        showToast('Directions request failed: ' + status);
+        if (status === 'REQUEST_DENIED') {
+          showToast('API key invalid or restricted. Check Google Cloud Console.');
+        }
+      }
     }
+  );
+}
     function stopGPS() {
       if (watchId) {
         navigator.geolocation.clearWatch(watchId);
