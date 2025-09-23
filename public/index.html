@@ -7,10 +7,10 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Waze-Like GPS App</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.2">
-  <link rel="manifest" href="/manifest.json?v=1.0.2">
-  <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js?v=1.0.2"></script>
-  <script src="https://cdn.socket.io/4.5.0/socket.io.min.js?v=1.0.2"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3">
+  <link rel="manifest" href="/manifest.json?v=1.0.3">
+  <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js?v=1.0.3"></script>
+  <script src="https://cdn.socket.io/4.5.0/socket.io.min.js?v=1.0.3"></script>
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
@@ -542,7 +542,7 @@
     const OFF_ROUTE_TOLERANCE = 100;
     const RECALC_COOLDOWN = 30000;
     const HAZARD_CHECK_INTERVAL = 5000;
-    const MIN_REROUTE_DISTANCE = 100; // Reduced for 500 ft (~152m) hazards
+    const MIN_REROUTE_DISTANCE = 100;
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
     const HEADING_SMOOTHING_WINDOW = 10;
@@ -556,7 +556,7 @@
     const STATIONARY_SPEED_THRESHOLD = 0.5;
     const ARRIVAL_RADIUS = 50;
     const ANNOUNCEMENT_COOLDOWN = 10000;
-    const ALERT_FETCH_INTERVAL = 30000; // Fetch alerts every 30s
+    const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
     const ROUTE_AHEAD_DISTANCE = 2000;
     let navState = {
@@ -596,22 +596,31 @@
       script.defer = true;
       script.onerror = () => {
         console.error('Failed to load Google Maps script');
-        showToast('Failed to load map. Please check your network or API key.');
+        showToast('Failed to load map. Check network or API key.');
       };
       document.head.appendChild(script);
     }
     window.initMap = function() {
-      if (!window.google || !google.maps) {
-        console.error('Google Maps API not loaded');
-        showToast('Failed to load map libraries. Retry in a moment.');
-        setTimeout(loadGoogleMaps, 2000); // Retry after 2s
+      if (!window.google || !google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
+        console.error('Google Maps libraries not loaded:', {
+          Map: !!google.maps?.Map,
+          AdvancedMarkerElement: !!google.maps?.marker,
+          Autocomplete: !!google.maps?.places,
+          DirectionsService: !!google.maps?.routes,
+          Geometry: !!google.maps?.geometry
+        });
+        showToast('Failed to load map libraries. Retrying...');
+        setTimeout(loadGoogleMaps, 2000);
         return;
       }
+      console.log('Google Maps API loaded successfully');
       initializeMap();
     };
     function animate() {
-      requestAnimationFrame(animate);
-      TWEEN.update();
+      if (typeof TWEEN !== 'undefined') {
+        requestAnimationFrame(animate);
+        TWEEN.update();
+      }
     }
     animate();
     function adjustHud() {
@@ -664,7 +673,7 @@
     }
     function smoothHeading(newHeading) {
       if (isNaN(newHeading) || newHeading === null) {
-        console.log('Using last valid heading due to invalid input:', navState.lastValidHeading);
+        console.log('Using last valid heading:', navState.lastValidHeading);
         return navState.lastValidHeading;
       }
       headingHistory.push(newHeading);
@@ -686,14 +695,15 @@
       return smoothedHeading;
     }
     function initializeMap() {
-      if (!google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes) {
-        console.error('Required Google Maps libraries not loaded:', {
-          Map: !!google.maps.Map,
-          AdvancedMarkerElement: !!google.maps.marker,
-          Autocomplete: !!google.maps.places,
-          DirectionsService: !!google.maps.routes
+      if (!google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
+        console.error('Google Maps libraries not loaded:', {
+          Map: !!google.maps?.Map,
+          AdvancedMarkerElement: !!google.maps?.marker,
+          Autocomplete: !!google.maps?.places,
+          DirectionsService: !!google.maps?.routes,
+          Geometry: !!google.maps?.geometry
         });
-        showToast('Map initialization failed: libraries not loaded. Check Google Cloud Console.');
+        showToast('Map initialization failed: libraries not loaded.');
         return;
       }
       map = new google.maps.Map(document.getElementById('map'), {
@@ -1107,12 +1117,12 @@
         console.log('Logout button clicked, clearing localStorage');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
-        socket.disconnect();
+        if (socket) socket.disconnect();
         document.getElementById('settings-hud-container').classList.remove('active');
         document.getElementById('auth-container').style.display = 'flex';
         showToast('Logged out successfully');
         console.log('User logged out, showing auth form');
-        location.reload();
+        stopGPS();
       });
       document.getElementById('center-alerts-btn').addEventListener('click', () => {
         if (currentAlerts.length > 0) {
@@ -1135,7 +1145,7 @@
     }
     async function fetchUserProfile() {
       try {
-        let token = localStorage.getItem('token');
+        const token = localStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           throw new Error('Invalid token format in localStorage');
         }
@@ -1145,9 +1155,8 @@
         if (response.status === 401) {
           const refreshed = await refreshToken();
           if (refreshed) {
-            token = localStorage.getItem('token');
             response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
-              headers: { 'Authorization': `Bearer ${token.trim()}` }
+              headers: { 'Authorization': `Bearer ${localStorage.getItem('token').trim()}` }
             });
           } else {
             throw new Error('Authentication failed');
@@ -1166,29 +1175,47 @@
         document.getElementById('auth-container').style.display = 'flex';
       }
     }
-    function requestPushPermission() {
+    async function requestPushPermission() {
       if ('PushManager' in window) {
-        Notification.requestPermission().then(permission => {
+        try {
+          const permission = await Notification.requestPermission();
           if (permission === 'granted') {
-            subscribeToPush();
+            console.log('Push notification permission granted');
+            await subscribeToPush();
           } else {
             console.warn('Push notification permission denied');
           }
-        });
+        } catch (err) {
+          console.error('Error requesting push permission:', err);
+        }
       } else {
         console.warn('Push notifications not supported');
       }
     }
-    function subscribeToPush() {
-      navigator.serviceWorker.ready.then(reg => {
-        reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY) }).then(sub => {
-          fetch('/api/auth/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')?.trim() || ''}` },
-            body: JSON.stringify(sub)
-          }).catch(err => console.error('Failed to subscribe to push:', err));
-        }).catch(err => console.error('Push subscription failed:', err));
-      });
+    async function subscribeToPush() {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)
+        });
+        const token = localStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, cannot subscribe to push');
+          return;
+        }
+        await fetch('/api/auth/subscribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token.trim()}`
+          },
+          body: JSON.stringify(sub)
+        });
+        console.log('Subscribed to push notifications');
+      } catch (err) {
+        console.error('Failed to subscribe to push:', err);
+      }
     }
     function urlB64ToUint8Array(base64String) {
       const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -1200,7 +1227,7 @@
       }
       return outputArray;
     }
-    function fetchLeaderboard() {
+    async function fetchLeaderboard() {
       const token = localStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
         console.error('Invalid token, showing auth form');
@@ -1209,12 +1236,12 @@
         document.getElementById('auth-container').style.display = 'flex';
         return;
       }
-      fetch('/api/leaderboard', {
-        headers: { 'Authorization': `Bearer ${token.trim()}` }
-      }).then(res => {
-        if (!res.ok) throw new Error(`Leaderboard fetch failed: ${res.status}`);
-        return res.json();
-      }).then(users => {
+      try {
+        const response = await fetch('/api/leaderboard', {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (!response.ok) throw new Error(`Leaderboard fetch failed: ${response.status}`);
+        const users = await response.json();
         const content = document.getElementById('leaderboard-content');
         content.innerHTML = '';
         users.forEach((user, index) => {
@@ -1226,12 +1253,18 @@
           `;
           content.appendChild(item);
         });
-      }).catch(err => {
+        console.log('Leaderboard fetched:', users.length);
+      } catch (err) {
         console.error('Failed to fetch leaderboard:', err);
         showToast('Failed to load leaderboard.');
-      });
+      }
     }
     function startVoiceRecognition() {
+      if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
+        console.warn('Speech recognition not supported');
+        showToast('Speech recognition not supported');
+        return;
+      }
       if (!speechRecognition) {
         speechRecognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
         speechRecognition.lang = 'en-US';
@@ -1239,6 +1272,7 @@
         speechRecognition.maxAlternatives = 1;
         speechRecognition.onresult = (event) => {
           const command = event.results[0][0].transcript.toLowerCase();
+          console.log('Voice command:', command);
           if (command.includes('report hazard')) {
             document.getElementById('hazard-button').click();
           } else if (command.includes('start navigation')) {
@@ -1247,9 +1281,13 @@
             document.getElementById('bottom-hud-stop').click();
           }
         };
-        speechRecognition.onerror = (event) => console.error('Speech recognition error:', event.error);
+        speechRecognition.onerror = (event) => {
+          console.error('Speech recognition error:', event.error);
+          showToast('Speech recognition error: ' + event.error);
+        };
       }
       speechRecognition.start();
+      console.log('Speech recognition started');
     }
     function shareRoute() {
       if (navigator.share && navState.currentRoute) {
@@ -1257,10 +1295,11 @@
           title: 'My Route',
           text: 'Check out my current route!',
           url: `${window.location.href}?route=${encodeURIComponent(JSON.stringify(navState.currentRoute))}`
-        }).then(() => console.log('Shared successfully')).catch(err => {
-          console.error('Share failed:', err);
-          showToast('Sharing not supported');
-        });
+        }).then(() => console.log('Route shared successfully'))
+          .catch(err => {
+            console.error('Share failed:', err);
+            showToast('Sharing not supported');
+          });
       } else {
         showToast('Sharing not supported');
       }
@@ -1474,6 +1513,7 @@
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
+        navState.tempMarker = null;
       }
       if (navState.mapClickListener) {
         google.maps.event.removeListener(navState.mapClickListener);
@@ -1487,7 +1527,6 @@
       confirmAlert.classList.remove('active');
       navState.alertState = 'IDLE';
       navState.tempAlertData = null;
-      navState.tempMarker = null;
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
       if (navState.isNavigating && navState.isFollowing) {
@@ -1937,7 +1976,7 @@
           restoreNavigationView();
         }
         navState.lastKnownPosition = pos;
-        socket.emit('locationUpdate', { location: navState.userLocation });
+        if (socket) socket.emit('locationUpdate', { location: navState.userLocation });
         updateHUD(navState.currentRoute, navState.userLocation);
       } catch (error) {
         console.error('Error in position update:', error);
@@ -1970,7 +2009,7 @@
         navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
         restoreNavigationView();
         console.log('Navigation started, centered on user location:', startLocation);
-        fetchCurrentAlerts(); // Fetch alerts on navigation start
+        fetchCurrentAlerts();
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
         if (showTrafficCameras) {
@@ -2470,7 +2509,7 @@
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = navState.userLocation;
-        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
+        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading(), tilt: map.getTilt() })
           .to({ zoom: navState.navigationZoom, center: userLatLng, heading: 0, tilt: 45 }, 400)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
@@ -2716,6 +2755,7 @@
         ), backoff);
       } else if (isInitial) {
         navState.userLocation = { lat: 33.083270, lng: -83.233040 };
+        console.log('Using fallback location:', navState.userLocation);
         loadGoogleMaps();
       }
     }
@@ -2731,184 +2771,184 @@
         : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
       console.log('Switched auth mode, isRegister:', isRegister, 'Username required:', usernameInput.required);
     }
-      document.getElementById('auth-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        console.log('Form submitted, isRegister:', isRegister);
-        const email = document.getElementById('email').value;
-        const password = document.getElementById('password').value;
-        const username = document.getElementById('username').value;
-        console.log('Form data:', { email, password, username });
-        const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-        const body = isRegister ? { username, email, password } : { email, password };
-        console.log('Sending to endpoint:', endpoint, 'Body:', body);
-        try {
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-          });
-          console.log('Response status:', response.status);
-          const data = await response.json();
-          console.log('Response data:', data);
-          if (response.ok) {
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('userId', data.user.id);
-            document.getElementById('auth-container').style.display = 'none';
-            console.log('Authentication successful, token:', data.token, 'userId:', data.user.id);
-            initApp();
-          } else {
-            console.error('Server error response:', data.error);
-            showToast(data.error || 'Authentication failed');
-          }
-        } catch (error) {
-          console.error('Fetch error:', error.message);
-          showToast('Error: ' + error.message);
-        }
-      });
-      function checkAuth() {
-        if (isInitialized) return;
-        isInitialized = true;
-        const token = localStorage.getItem('token');
-        if (token && token.includes('.') && token !== 'undefined') {
-          console.log('Token found, initializing app:', token.substring(0, 20) + '...');
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      console.log('Form submitted, isRegister:', isRegister);
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const username = document.getElementById('username').value;
+      console.log('Form data:', { email, password, username });
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const body = isRegister ? { username, email, password } : { email, password };
+      console.log('Sending to endpoint:', endpoint, 'Body:', body);
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        console.log('Response status:', response.status);
+        const data = await response.json();
+        console.log('Response data:', data);
+        if (response.ok) {
+          localStorage.setItem('token', data.token);
+          localStorage.setItem('userId', data.user.id);
           document.getElementById('auth-container').style.display = 'none';
+          console.log('Authentication successful, token:', data.token, 'userId:', data.user.id);
           initApp();
         } else {
-          console.log('No valid token found, showing auth form');
+          console.error('Server error response:', data.error);
+          showToast(data.error || 'Authentication failed');
+        }
+      } catch (error) {
+        console.error('Fetch error:', error.message);
+        showToast('Error: ' + error.message);
+      }
+    });
+    function checkAuth() {
+      if (isInitialized) return;
+      isInitialized = true;
+      const token = localStorage.getItem('token');
+      if (token && token.includes('.') && token !== 'undefined') {
+        console.log('Token found, initializing app:', token.substring(0, 20) + '...');
+        document.getElementById('auth-container').style.display = 'none';
+        initApp();
+      } else {
+        console.log('No valid token found, showing auth form');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        document.getElementById('auth-container').style.display = 'flex';
+      }
+    }
+    function initApp() {
+      const token = localStorage.getItem('token');
+      if (!token || !token.includes('.') || token === 'undefined') {
+        console.error('Invalid token in initApp, showing auth form');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        document.getElementById('auth-container').style.display = 'flex';
+        return;
+      }
+      socket = io({
+        auth: { token: token.trim() },
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+      });
+      socket.on('connect', () => {
+        console.log('Socket.IO connected for user:', localStorage.getItem('userId'));
+      });
+      socket.on('connect_error', (err) => {
+        console.error('Socket connection error:', err.message);
+        if (err.message.includes('Authentication')) {
+          console.log('Invalid token, clearing localStorage and showing auth form');
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
           document.getElementById('auth-container').style.display = 'flex';
-        }
-      }
-      function initApp() {
-        const token = localStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token in initApp, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        socket = io({
-          auth: { token: token.trim() },
-          reconnectionAttempts: 5,
-          reconnectionDelay: 1000
-        });
-        socket.on('connect', () => {
-          console.log('Socket.IO connected for user:', localStorage.getItem('userId'));
-        });
-        socket.on('connect_error', (err) => {
-          console.error('Socket connection error:', err.message);
-          if (err.message.includes('Authentication')) {
-            console.log('Invalid token, clearing localStorage and reloading');
-            localStorage.removeItem('token');
-            localStorage.removeItem('userId');
-            document.getElementById('auth-container').style.display = 'flex';
-            location.reload();
-          } else {
-            showToast('Server connection lost. Attempting to reconnect...');
-          }
-        });
-        socket.on('reconnect_attempt', () => {
-          console.log('Attempting to reconnect to Socket.IO server');
-        });
-        socket.on('alert', (alert) => {
-          const isTrafficCamera = alert.type === 'Traffic Camera';
-          if (isTrafficCamera && !showTrafficCameras) return;
-          if (!google.maps.marker) {
-            console.error('AdvancedMarkerElement not defined, cannot place alert marker');
-            showToast('Failed to place alert: Google Maps library not loaded');
-            return;
-          }
-          const marker = new google.maps.marker.AdvancedMarkerElement({
-            map,
-            position: {
-              lat: alert.location.coordinates[1],
-              lng: alert.location.coordinates[0]
-            },
-            content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-            title: `${alert.type} Alert`
-          });
-          console.log('Received real-time alert:', alert);
-          if (isTrafficCamera) {
-            cameraPositions.push({
-              lat: alert.location.coordinates[1],
-              lng: alert.location.coordinates[0]
-            });
-          }
-          if (navState.isNavigating && !isTrafficCamera) {
-            currentAlerts.push(alert);
-            checkHazardsAndOfferReroute();
-          }
-        });
-        socket.on('alertDeleted', (id) => {
-          console.log('Alert deleted via socket:', id);
-          const alert = currentAlerts.find(a => a._id === id);
-          if (alert && alert.type === 'Traffic Camera') {
-            cameraPositions = cameraPositions.filter(pos =>
-              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
-            );
-            cameraAlertShown.delete(`mongo-${id}`);
-          }
-          currentAlerts = currentAlerts.filter(a => a._id !== id);
-          fetchAndDisplayMarkers(map, navState.userLocation);
-        });
-        socket.on('userLocation', (data) => {
-          console.log('Received friend location:', data);
-        });
-        socket.on('pointsUpdate', (data) => {
-          if (data.userId === localStorage.getItem('userId')) {
-            fetchUserProfile();
-          }
-        });
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('/sw.js?v=1.0.2').then(reg => {
-            console.log('Service worker registered:', reg);
-          }).catch(err => console.error('Service worker registration failed:', err));
-        }
-        if (navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
-        }
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              navState.userLocation = {
-                lat: position.coords.latitude,
-                lng: position.coords.longitude
-              };
-              console.log('Initial location:', navState.userLocation);
-              requestDeviceOrientationPermission();
-              loadGoogleMaps();
-            },
-            (error) => {
-              console.error('Initial geolocation error:', error);
-              handleGeolocationError(error, true);
-            },
-            {
-              enableHighAccuracy: true,
-              timeout: 10000,
-              maximumAge: 0
-            }
-          );
         } else {
-          showToast('Geolocation is not supported by this browser.');
-          handleGeolocationError({ code: 0 }, true);
-        }
-      }
-      window.addEventListener('load', () => {
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.getRegistrations().then(registrations => {
-            registrations.forEach(reg => reg.unregister());
-          }).then(() => {
-            console.log('Old service workers unregistered, reloading to apply new cache');
-            location.reload();
-          });
-        } else {
-          loadGoogleMaps();
-          checkAuth();
-          requestPushPermission();
+          showToast('Server connection lost. Attempting to reconnect...');
         }
       });
-    </script>
-  </body>
+      socket.on('reconnect_attempt', () => {
+        console.log('Attempting to reconnect to Socket.IO server');
+      });
+      socket.on('alert', (alert) => {
+        const isTrafficCamera = alert.type === 'Traffic Camera';
+        if (isTrafficCamera && !showTrafficCameras) return;
+        if (!google.maps.marker) {
+          console.error('AdvancedMarkerElement not defined, cannot place alert marker');
+          showToast('Failed to place alert: Google Maps library not loaded');
+          return;
+        }
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+          map,
+          position: {
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          },
+          content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+          title: `${alert.type} Alert`
+        });
+        console.log('Received real-time alert:', alert);
+        if (isTrafficCamera) {
+          cameraPositions.push({
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          });
+        }
+        if (navState.isNavigating && !isTrafficCamera) {
+          currentAlerts.push(alert);
+          checkHazardsAndOfferReroute();
+        }
+      });
+      socket.on('alertDeleted', (id) => {
+        console.log('Alert deleted via socket:', id);
+        const alert = currentAlerts.find(a => a._id === id);
+        if (alert && alert.type === 'Traffic Camera') {
+          cameraPositions = cameraPositions.filter(pos =>
+            pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+          );
+          cameraAlertShown.delete(`mongo-${id}`);
+        }
+        currentAlerts = currentAlerts.filter(a => a._id !== id);
+        fetchAndDisplayMarkers(map, navState.userLocation);
+      });
+      socket.on('userLocation', (data) => {
+        console.log('Received friend location:', data);
+      });
+      socket.on('pointsUpdate', (data) => {
+        if (data.userId === localStorage.getItem('userId')) {
+          fetchUserProfile();
+        }
+      });
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js?v=1.0.3').then(reg => {
+          console.log('Service worker registered:', reg);
+          reg.addEventListener('updatefound', () => {
+            const newWorker = reg.installing;
+            console.log('Service worker update found');
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('New service worker installed, prompting reload');
+                showToast('New version available. Reloading...');
+                setTimeout(() => location.reload(), 1000);
+              }
+            });
+          });
+        }).catch(err => console.error('Service worker registration failed:', err));
+      }
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
+      }
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            navState.userLocation = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude
+            };
+            console.log('Initial location:', navState.userLocation);
+            requestDeviceOrientationPermission();
+            loadGoogleMaps();
+          },
+          (error) => {
+            console.error('Initial geolocation error:', error);
+            handleGeolocationError(error, true);
+          },
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
+      } else {
+        showToast('Geolocation is not supported by this browser.');
+        handleGeolocationError({ code: 0 }, true);
+      }
+    }
+    window.addEventListener('load', () => {
+      checkAuth();
+      requestPushPermission();
+    });
+  </script>
+</body>
 </html>
