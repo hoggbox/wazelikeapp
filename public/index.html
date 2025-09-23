@@ -549,9 +549,10 @@
     const HEADING_SMOOTHING_WINDOW = 10;
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
-    const TURN_ZOOM = 18;
+    const TURN_ZOOM = 19;
     const STRAIGHT_ZOOM = 16.5;
-    const TURN_THRESHOLD = 1609.34;
+    const TURN_THRESHOLD = 500;
+    const ROUTE_OFFSET = 100;
     const LOCATION_UPDATE_THRESHOLD = 200;
     const HEADING_CHANGE_THRESHOLD = 15;
     const STATIONARY_SPEED_THRESHOLD = 0.5;
@@ -1764,6 +1765,7 @@
         console.log('Non-navigation recenter:', navState.userLocation, 'Heading: 0');
       }
     }
+    // CHANGED: Adjusted for turn detection and dynamic zoom/tilt
     function getDynamicZoom(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         return navState.navigationZoom;
@@ -1783,6 +1785,7 @@
       });
       let currentStep = null;
       let nextStep = null;
+      let turnHeading = null;
       const legs = navState.currentRoute.routes[0].legs[0];
       for (let i = 0; i < legs.steps.length; i++) {
         const stepPath = legs.steps[i].path;
@@ -1793,10 +1796,15 @@
         }
       }
       let zoom = STRAIGHT_ZOOM;
+      let tilt = 45;
       if (nextStep && nextStep.maneuver) {
         const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
         if (distanceToTurn < TURN_THRESHOLD) {
-          zoom = TURN_ZOOM - ((distanceToTurn / TURN_THRESHOLD) * (TURN_ZOOM - STRAIGHT_ZOOM));
+          zoom = TURN_ZOOM;
+          tilt = 60;
+          const turnPoint = new google.maps.LatLng(nextStep.start_location);
+          turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
+          console.log('Turn detected:', { distanceToTurn, turnHeading });
         }
       }
       const speedMph = speed * 2.23694;
@@ -1805,7 +1813,7 @@
       } else if (speedMph < 10) {
         zoom += 0.5;
       }
-      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+      return { zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), tilt, turnHeading };
     }
     function checkArrival(currentPos) {
       if (!navState.isNavigating || !navState.destination) {
@@ -1846,6 +1854,7 @@
         })
         .start();
     }
+    // CHANGED: Clips polyline to 2km ahead, keeps route north
     function updateRouteAhead(currentPos) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         if (routePolyline) {
@@ -1893,6 +1902,7 @@
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
+    // CHANGED: Real-time heading rotation, center shifted 100m ahead
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -1970,11 +1980,36 @@
         lastPosition = pos;
         if (navState.isNavigating) {
           updateRouteAhead(navState.userLocation);
-        }
-        if (navState.isNavigating && navState.isFollowing) {
-          navState.navigationZoom = getDynamicZoom(navState.userLocation, speed);
-          map.setCenter(navState.userLocation);
-          restoreNavigationView();
+          if (navState.isFollowing) {
+            const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
+            navState.navigationZoom = zoom;
+            const center = google.maps.geometry.spherical.computeOffset(
+              new google.maps.LatLng(navState.userLocation),
+              ROUTE_OFFSET,
+              navState.currentHeading
+            );
+            new TWEEN.Tween({
+              zoom: map.getZoom(),
+              center: map.getCenter().toJSON(),
+              heading: map.getHeading(),
+              tilt: map.getTilt()
+            })
+              .to({
+                zoom,
+                center: center.toJSON(),
+                heading: turnHeading || navState.currentHeading,
+                tilt
+              }, 300)
+              .easing(TWEEN.Easing.Quadratic.Out)
+              .onUpdate(obj => {
+                map.setCenter(obj.center);
+                map.setZoom(obj.zoom);
+                map.setHeading(obj.heading);
+                map.setTilt(obj.tilt);
+              })
+              .start();
+            console.log('Camera updated:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
+          }
         }
         navState.lastKnownPosition = pos;
         if (socket) socket.emit('locationUpdate', { location: navState.userLocation });
@@ -2007,7 +2042,7 @@
         navState.originalRoute = navState.currentRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         updateRouteAhead(navState.userLocation);
-        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
+        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
         restoreNavigationView();
         console.log('Navigation started, centered on user location:', startLocation);
         fetchCurrentAlerts();
@@ -2124,7 +2159,7 @@
             updateBottomHUD(response);
             if (callback) callback();
             if (navState.isFollowing) {
-              navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
+              navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
               restoreNavigationView();
             }
             console.log('Route calculated:', response.routes[0].legs[0].distance.text);
@@ -2138,6 +2173,7 @@
         }
       );
     }
+    // CHANGED: Compute turn bearing for rotation
     function updateHUD(route, currentPos) {
       const hudTurn = document.getElementById('hud-turn');
       const hudStreet = document.getElementById('hud-street');
@@ -2179,27 +2215,36 @@
           currentLatLng,
           new google.maps.LatLng(nextStep.start_location)
         );
-        if (distanceM > 500) return;
-        let distanceText;
-        if (distanceM < 1609.34) {
-          const distanceFeet = Math.round(distanceM * 3.28084);
-          distanceText = `${distanceFeet} feet`;
+        if (distanceM <= TURN_THRESHOLD) {
+          const turnPoint = new google.maps.LatLng(nextStep.start_location);
+          const turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
+          let distanceText;
+          if (distanceM < 1609.34) {
+            const distanceFeet = Math.round(distanceM * 3.28084);
+            distanceText = `${distanceFeet} feet`;
+          } else {
+            const distanceMi = (distanceM / 1609.34).toFixed(1);
+            distanceText = `${distanceMi} miles`;
+          }
+          const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
+          hudTurn.textContent = turnText;
+          const now = Date.now();
+          if (turnText !== lastSpokenTurn && now - lastAnnouncementTime > ANNOUNCEMENT_COOLDOWN && 'speechSynthesis' in window) {
+            const utterance = new SpeechSynthesisUtterance(turnText);
+            utterance.lang = 'en-US';
+            speechSynthesis.speak(utterance);
+            lastSpokenTurn = turnText;
+            lastAnnouncementTime = now;
+          }
+          navState.nextTurnHeading = turnHeading; // CHANGED: Store turn heading
+          console.log('Next turn heading computed:', turnHeading);
         } else {
-          const distanceMi = (distanceM / 1609.34).toFixed(1);
-          distanceText = `${distanceMi} miles`;
-        }
-        const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
-        hudTurn.textContent = turnText;
-        const now = Date.now();
-        if (turnText !== lastSpokenTurn && now - lastAnnouncementTime > ANNOUNCEMENT_COOLDOWN && 'speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(turnText);
-          utterance.lang = 'en-US';
-          speechSynthesis.speak(utterance);
-          lastSpokenTurn = turnText;
-          lastAnnouncementTime = now;
+          hudTurn.textContent = 'Follow the road';
+          navState.nextTurnHeading = null;
         }
       } else {
         hudTurn.textContent = 'Follow the road';
+        navState.nextTurnHeading = null;
       }
     }
     function updateBottomHUD(route) {
@@ -2353,8 +2398,9 @@
       }
       return minDist;
     }
+    // CHANGED: Relaxed buffer to 50m, increased retries to 6
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 30;
+      const BUFFER = 50; // Relaxed from 30m to 50m
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const dist = distanceToSegment(hazardPoint, path[i], path[i + 1]);
@@ -2363,6 +2409,7 @@
       console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
       return minDist > BUFFER;
     }
+    // CHANGED: Increased retries, added more option combinations
     async function checkAlternativeRoute(hazard) {
       return new Promise((resolve) => {
         if (!navState.userLocation || !navState.destination) {
@@ -2408,13 +2455,15 @@
                   const timeSavedMin = Math.round(bestTimeSaved / 60);
                   console.log(`Best alternate route found, time saved: ${timeSavedMin} minutes`);
                   resolve(timeSavedMin);
-                } else if (attempt < 4) {
+                } else if (attempt < 6) {
                   console.log(`No valid alternate route found, retrying with new options, attempt ${attempt + 1}`);
                   const newOptions = [
-                    { avoidHighways: true, avoidTolls: false, avoidFerries: false },
-                    { avoidHighways: false, avoidTolls: true, avoidFerries: false },
-                    { avoidHighways: true, avoidTolls: true, avoidFerries: false },
-                    { avoidHighways: false, avoidTolls: false, avoidFerries: true }
+                    { avoid: [] },
+                    { avoid: ['tolls'] },
+                    { avoid: ['highways'] },
+                    { avoid: ['tolls', 'highways'] },
+                    { avoid: ['ferries'] },
+                    { avoid: ['ferries', 'tolls'] }
                   ][attempt];
                   tryRoute(newOptions, attempt + 1);
                 } else {
@@ -2423,13 +2472,15 @@
                 }
               } else {
                 console.error(`Directions request failed, attempt ${attempt}:`, status);
-                if (attempt < 4) {
+                if (attempt < 6) {
                   console.log(`Retrying with new options, attempt ${attempt + 1}`);
                   const newOptions = [
-                    { avoidHighways: true, avoidTolls: false, avoidFerries: false },
-                    { avoidHighways: false, avoidTolls: true, avoidFerries: false },
-                    { avoidHighways: true, avoidTolls: true, avoidFerries: false },
-                    { avoidHighways: false, avoidTolls: false, avoidFerries: true }
+                    { avoid: [] },
+                    { avoid: ['tolls'] },
+                    { avoid: ['highways'] },
+                    { avoid: ['tolls', 'highways'] },
+                    { avoid: ['ferries'] },
+                    { avoid: ['ferries', 'tolls'] }
                   ][attempt];
                   tryRoute(newOptions, attempt + 1);
                 } else {
@@ -2440,7 +2491,7 @@
             }
           );
         };
-        tryRoute({ avoidHighways: false, avoidTolls: false, avoidFerries: false }, 1);
+        tryRoute({ avoid: [] }, 1);
       });
     }
     function showRerouteHud(hazard, timeSaved) {
@@ -2507,11 +2558,28 @@
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
+    // CHANGED: Use heading-up view with route north
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
-        const userLatLng = navState.userLocation;
-        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading(), tilt: map.getTilt() })
-          .to({ zoom: navState.navigationZoom, center: userLatLng, heading: 0, tilt: 45 }, 400)
+        const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+        navState.navigationZoom = zoom;
+        const center = google.maps.geometry.spherical.computeOffset(
+          new google.maps.LatLng(navState.userLocation),
+          ROUTE_OFFSET,
+          navState.currentHeading
+        );
+        new TWEEN.Tween({
+          zoom: map.getZoom(),
+          center: map.getCenter().toJSON(),
+          heading: map.getHeading(),
+          tilt: map.getTilt()
+        })
+          .to({
+            zoom,
+            center: center.toJSON(),
+            heading: turnHeading || navState.currentHeading,
+            tilt
+          }, 400)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
             map.setCenter(obj.center);
@@ -2520,7 +2588,7 @@
             map.setTilt(obj.tilt);
           })
           .start();
-        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading: 0', 'Tilt: 45');
+        console.log('Navigation view restored:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
       }
     }
     function acceptReroute() {
@@ -2539,7 +2607,7 @@
         rerouteHud.classList.remove('active');
         navState.isFollowing = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
-        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
+        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
         restoreNavigationView();
         showToast('Alternative route accepted.');
@@ -2579,7 +2647,7 @@
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
-      navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
+      navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
       restoreNavigationView();
       showToast('Reroute rejected, continuing on original route.');
