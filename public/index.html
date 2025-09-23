@@ -514,7 +514,7 @@
     const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
     const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
     const mapId = '2666b5bd496d9c6026f43f82';
-    let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition;
+    let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline;
     let currentAlerts = [];
     let cameraCheckInterval = null;
     let cameraPositions = [];
@@ -555,6 +555,7 @@
     const ANNOUNCEMENT_COOLDOWN = 10000;
     const DESTINATION_ZOOM_TIME = 15000;
     const ALTERNATE_TRIGGER_DISTANCE = 30;
+    const ROUTE_AHEAD_DISTANCE = 2000; // 2km ahead for route display
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -592,6 +593,7 @@
       Autocomplete: null,
       DirectionsService: null,
       DirectionsRenderer: null,
+      Polyline: null,
       spherical: null,
       encoding: null,
       TrafficLayer: null,
@@ -617,6 +619,7 @@
         GoogleMaps.Autocomplete = await google.maps.importLibrary("places").then(lib => lib.Autocomplete);
         GoogleMaps.DirectionsService = await google.maps.importLibrary("routes").then(lib => lib.DirectionsService);
         GoogleMaps.DirectionsRenderer = await google.maps.importLibrary("routes").then(lib => lib.DirectionsRenderer);
+        GoogleMaps.Polyline = await google.maps.importLibrary("core").then(lib => lib.Polyline);
         GoogleMaps.spherical = await google.maps.importLibrary("geometry").then(lib => lib.spherical);
         GoogleMaps.encoding = await google.maps.importLibrary("geometry").then(lib => lib.encoding);
         GoogleMaps.poly = await google.maps.importLibrary("geometry").then(lib => lib.poly);
@@ -660,11 +663,11 @@
             setupDeviceOrientation();
           } else {
             console.warn('Device orientation permission denied');
-            showToast('Compass access denied. Using route-based heading.');
+            showToast('Compass access denied. Using GPS heading.');
           }
         } catch (error) {
           console.error('Error requesting device orientation permission:', error);
-          showToast('Failed to access compass. Using route-based heading.');
+          showToast('Failed to access compass. Using GPS heading.');
         }
       } else {
         setupDeviceOrientation();
@@ -976,7 +979,6 @@
         if (navState.isNavigating) {
           navState.isFollowing = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
-          directionsRenderer.setMap(map);
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
           restoreNavigationView();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
@@ -994,11 +996,13 @@
       document.getElementById('main-route-color').addEventListener('change', (e) => {
         navState.mainRouteColor = e.target.value;
         localStorage.setItem('mainRouteColor', navState.mainRouteColor);
-        directionsRenderer.setOptions({
-          polylineOptions: { strokeColor: navState.mainRouteColor, strokeWeight: 6, strokeOpacity: 0.8, zIndex: 5 }
-        });
-        if (navState.currentRoute) {
-          directionsRenderer.setDirections(navState.currentRoute);
+        if (routePolyline) {
+          routePolyline.setOptions({
+            strokeColor: navState.mainRouteColor,
+            strokeWeight: 6,
+            strokeOpacity: 0.8,
+            zIndex: 5
+          });
         }
         console.log('Main route color changed to:', navState.mainRouteColor);
       });
@@ -1694,68 +1698,7 @@
         console.log('Non-navigation recenter:', navState.userLocation, 'Heading: 0');
       }
     }
-    function getPolylineBearing(path, closestIndex) {
-      if (!path || closestIndex >= path.length - 1) {
-        console.log('Using last valid heading due to invalid path or index:', navState.lastValidHeading);
-        return navState.lastValidHeading;
-      }
-      const currentPoint = path[closestIndex];
-      const nextPoint = path[closestIndex + 1];
-      const bearing = GoogleMaps.spherical.computeHeading(currentPoint, nextPoint);
-      const normalizedBearing = bearing < 0 ? bearing + 360 : bearing;
-      console.log('Calculated polyline bearing:', { currentIndex: closestIndex, bearing: normalizedBearing });
-      return normalizedBearing;
-    }
-    function shouldRotateMap(currentPos, speed) {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
-        console.log('No rotation: Not navigating or no route data, using last heading to prevent jitter');
-        return { shouldRotate: false, bearing: navState.lastValidHeading };
-      }
-      const path = navState.currentRoute.routes[0].overview_path;
-      let closestPoint = null;
-      let minDistance = Infinity;
-      let closestIndex = 0;
-      const currentLatLng = new google.maps.LatLng(currentPos);
-      path.forEach((point, index) => {
-        const distance = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, point);
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestPoint = point;
-          closestIndex = index;
-        }
-      });
-      let currentStep = null;
-      let nextStep = null;
-      const legs = navState.currentRoute.routes[0].legs[0];
-      for (let i = 0; i < legs.steps.length; i++) {
-        const stepPath = legs.steps[i].path;
-        if (stepPath.some(pt => GoogleMaps.spherical.computeDistanceBetween(pt, closestPoint) < 20)) {
-          currentStep = legs.steps[i];
-          nextStep = legs.steps[i + 1] || null;
-          break;
-        }
-      }
-      const polylineBearing = getPolylineBearing(path, closestIndex);
-      if (speed < STATIONARY_SPEED_THRESHOLD) {
-        console.log('Stationary: Using last heading to prevent jitter', { lastHeading: navState.lastValidHeading });
-        return { shouldRotate: false, bearing: navState.lastValidHeading };
-      }
-      if (nextStep && nextStep.maneuver) {
-        const distanceToTurn = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
-        if (distanceToTurn < TURN_THRESHOLD) {
-          const currentBearing = polylineBearing;
-          const nextBearing = getPolylineBearing(nextStep.path, 0);
-          const bearingDiff = Math.abs(currentBearing - nextBearing);
-          if (bearingDiff > 30) {
-            console.log('Significant turn detected, rotating map', { distanceToTurn, currentBearing, nextBearing });
-            return { shouldRotate: true, bearing: smoothHeading(nextBearing) };
-          }
-        }
-      }
-      console.log('No significant turn, maintaining current heading', { polylineBearing });
-      return { shouldRotate: false, bearing: navState.lastValidHeading };
-    }
-    function getDynamicZoom(currentPos) {
+    function getDynamicZoom(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         return navState.navigationZoom;
       }
@@ -1783,14 +1726,21 @@
           break;
         }
       }
+      let zoom = STRAIGHT_ZOOM;
       if (nextStep && nextStep.maneuver) {
         const distanceToTurn = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
         if (distanceToTurn < TURN_THRESHOLD) {
-          const zoom = TURN_ZOOM - ((distanceToTurn / TURN_THRESHOLD) * (TURN_ZOOM - STRAIGHT_ZOOM));
-          return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
+          zoom = TURN_ZOOM - ((distanceToTurn / TURN_THRESHOLD) * (TURN_ZOOM - STRAIGHT_ZOOM));
         }
       }
-      return STRAIGHT_ZOOM;
+      // Adjust zoom based on speed (m/s to mph conversion: *2.23694)
+      const speedMph = speed * 2.23694;
+      if (speedMph > 40) {
+        zoom -= 0.5; // Zoom out slightly at high speeds
+      } else if (speedMph < 10) {
+        zoom += 0.5; // Zoom in slightly at low speeds
+      }
+      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
     }
     function checkArrival(currentPos) {
       if (!navState.isNavigating || !navState.destination) {
@@ -1831,6 +1781,52 @@
         })
         .start();
     }
+    function updateRouteAhead(currentPos) {
+      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
+        if (routePolyline) {
+          routePolyline.setMap(null);
+          routePolyline = null;
+        }
+        return;
+      }
+      const path = navState.currentRoute.routes[0].overview_path;
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      let closestIndex = 0;
+      let minDistance = Infinity;
+      path.forEach((point, index) => {
+        const distance = GoogleMaps.spherical.computeDistanceBetween(currentLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestIndex = index;
+        }
+      });
+      let totalDistance = 0;
+      let aheadPath = [];
+      for (let i = closestIndex; i < path.length - 1; i++) {
+        const segmentDistance = GoogleMaps.spherical.computeDistanceBetween(path[i], path[i + 1]);
+        totalDistance += segmentDistance;
+        if (totalDistance <= ROUTE_AHEAD_DISTANCE) {
+          aheadPath.push(path[i]);
+          if (i === path.length - 2) {
+            aheadPath.push(path[i + 1]);
+          }
+        } else {
+          break;
+        }
+      }
+      if (routePolyline) {
+        routePolyline.setMap(null);
+      }
+      routePolyline = new GoogleMaps.Polyline({
+        path: aheadPath,
+        strokeColor: navState.mainRouteColor,
+        strokeWeight: 6,
+        strokeOpacity: 0.8,
+        zIndex: 5,
+        map: map
+      });
+      console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
+    }
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -1845,7 +1841,6 @@
         navState.userLocation = { lat: latitude, lng: longitude };
         let pos = navState.userLocation;
         let snapped = false;
-        let polylineBearing = 0;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           if (checkArrival(pos)) {
             return;
@@ -1866,10 +1861,8 @@
             snapped = true;
             console.log('Snapped to polyline:', pos, 'Distance:', minDistance);
           }
-          polylineBearing = getPolylineBearing(path, closestIndex);
-          const { shouldRotate, bearing } = shouldRotateMap(pos, speed);
-          navState.currentHeading = smoothHeading(compassHeading || heading || bearing || polylineBearing);
-          console.log('Heading updated:', { shouldRotate, bearing, currentHeading: navState.currentHeading, compassHeading, gpsHeading: heading, polylineBearing });
+          navState.currentHeading = smoothHeading(heading || compassHeading || 0);
+          console.log('Heading updated:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading });
           try {
             checkOffRoute(currentLatLng);
           } catch (error) {
@@ -1877,7 +1870,7 @@
             showToast('Error checking route deviation. Continuing with raw location.');
           }
         } else {
-          navState.currentHeading = smoothHeading(compassHeading || heading || 0);
+          navState.currentHeading = smoothHeading(heading || compassHeading || 0);
         }
         navState.userLocation = pos;
         if (userMarker) {
@@ -1906,7 +1899,9 @@
         lastHeading = navState.currentHeading;
         lastPosition = pos;
         if (navState.isNavigating && navState.isFollowing) {
-          navState.navigationZoom = getDynamicZoom(navState.userLocation);
+          navState.navigationZoom = getDynamicZoom(navState.userLocation, speed);
+          updateRouteAhead(navState.userLocation);
+          map.setCenter(navState.userLocation);
           restoreNavigationView();
         }
         navState.lastKnownPosition = pos;
@@ -1923,25 +1918,26 @@
         console.error('Geolocation not supported');
         return;
       }
+      if (!navState.destination) {
+        showToast('Please select a destination.');
+        console.error('No destination selected');
+        return;
+      }
       navState.isNavigating = true;
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
-      directionsRenderer.setMap(map);
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
       calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.originalRoute = navState.currentRoute;
-        const path = navState.currentRoute.routes[0].overview_path;
-        navState.currentHeading = smoothHeading(getPolylineBearing(path, 0));
-        navState.lastValidHeading = navState.currentHeading;
-        lastHeading = navState.currentHeading;
-        headingHistory = [navState.currentHeading];
-        navState.navigationZoom = getDynamicZoom(navState.userLocation);
+        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        updateRouteAhead(navState.userLocation);
+        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
         restoreNavigationView();
-        console.log('Navigation started, centered on user location:', startLocation, 'Initial heading:', navState.currentHeading);
+        console.log('Navigation started, centered on user location:', startLocation);
         startRerouteCheck();
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
         if (showTrafficCameras) {
@@ -1995,6 +1991,10 @@
         clearInterval(cameraCheckInterval);
         cameraCheckInterval = null;
       }
+      if (routePolyline) {
+        routePolyline.setMap(null);
+        routePolyline = null;
+      }
       navState.isNavigating = false;
       navState.isFollowing = false;
       navState.currentRoute = null;
@@ -2014,7 +2014,6 @@
       document.getElementById('search-container').style.display = 'flex';
       document.getElementById('hud-container').style.display = 'none';
       document.getElementById('bottom-hud-container').style.display = 'none';
-      directionsRenderer.setMap(null);
       alternativeRenderer.setMap(null);
       trafficLayer.setMap(null);
       if (destMarker) destMarker.setMap(null);
@@ -2047,26 +2046,12 @@
           if (status === 'OK') {
             navState.currentRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
-            directionsRenderer.setOptions({
-              polylineOptions: {
-                strokeColor: navState.mainRouteColor,
-                strokeWeight: 6,
-                strokeOpacity: 0.8,
-                zIndex: 5
-              }
-            });
-            directionsRenderer.setDirections(response);
-            console.log('Route calculated and polyline rendered:', response.routes[0].legs[0].distance.text);
+            updateRouteAhead(navState.userLocation);
             updateHUD(response, origin);
             updateBottomHUD(response);
-            const path = response.routes[0].overview_path;
-            navState.currentHeading = smoothHeading(getPolylineBearing(path, 0));
-            navState.lastValidHeading = navState.currentHeading;
-            lastHeading = navState.currentHeading;
-            headingHistory = [navState.currentHeading];
             if (callback) callback();
             if (navState.isFollowing) {
-              navState.navigationZoom = getDynamicZoom(navState.userLocation);
+              navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
               restoreNavigationView();
             }
           } else {
@@ -2290,11 +2275,11 @@
       return minDist;
     }
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 30; // Reduced to 30 meters for short routes
+      const BUFFER = 30;
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
-        const distToSegment = distanceToSegment(hazardPoint, path[i], path[i + 1]);
-        minDist = Math.min(minDist, distToSegment);
+        const dist = distanceToSegment(hazardPoint, path[i], path[i + 1]);
+        minDist = Math.min(minDist, dist);
       }
       console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER, pathLength: path.length });
       return minDist > BUFFER;
@@ -2456,7 +2441,7 @@
       if (navState.isFollowing && navState.isNavigating) {
         const userLatLng = new google.maps.LatLng(navState.userLocation.lat, navState.userLocation.lng);
         new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: navState.currentHeading, tilt: 30 }, 400)
+          .to({ zoom: navState.navigationZoom, center: userLatLng.toJSON(), heading: 0, tilt: 45 }, 400)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
             map.moveCamera({
@@ -2467,7 +2452,7 @@
             });
           })
           .start();
-        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading:', navState.currentHeading, 'Tilt: 30');
+        console.log('Navigation view restored: Centered on user, Zoom:', navState.navigationZoom, 'Heading: 0', 'Tilt: 45');
       }
     }
     function acceptReroute() {
@@ -2476,9 +2461,7 @@
         navState.currentRoute = navState.alternativeRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         navState.originalRoute = navState.currentRoute;
-        directionsRenderer.setMap(null);
-        directionsRenderer.setMap(map);
-        directionsRenderer.setDirections(navState.currentRoute);
+        updateRouteAhead(navState.userLocation);
         alternativeRenderer.setMap(null);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
@@ -2488,11 +2471,7 @@
         rerouteHud.classList.remove('active');
         navState.isFollowing = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
-        navState.navigationZoom = getDynamicZoom(navState.userLocation);
-        navState.currentHeading = smoothHeading(getPolylineBearing(navState.currentRoute.routes[0].overview_path, 0));
-        navState.lastValidHeading = navState.currentHeading;
-        lastHeading = navState.currentHeading;
-        headingHistory = [navState.currentHeading];
+        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
         restoreNavigationView();
         showToast('Alternative route accepted.');
@@ -2523,9 +2502,7 @@
       if (navState.originalRoute) {
         navState.currentRoute = navState.originalRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
-        directionsRenderer.setMap(null);
-        directionsRenderer.setMap(map);
-        directionsRenderer.setDirections(navState.currentRoute);
+        updateRouteAhead(navState.userLocation);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
       }
@@ -2534,11 +2511,7 @@
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
-      navState.navigationZoom = getDynamicZoom(navState.userLocation);
-      navState.currentHeading = smoothHeading(getPolylineBearing(navState.currentRoute.routes[0].overview_path, 0));
-      navState.lastValidHeading = navState.currentHeading;
-      lastHeading = navState.currentHeading;
-      headingHistory = [navState.currentHeading];
+      navState.navigationZoom = getDynamicZoom(navState.userLocation, 0);
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
       restoreNavigationView();
       showToast('Reroute rejected, continuing on original route.');
