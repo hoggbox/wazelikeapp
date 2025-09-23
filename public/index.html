@@ -266,9 +266,10 @@
   <button id="share-button"></button>
   <button id="leaderboard-button"></button>
   <script>
-    const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
-    const API_KEY = process.env.GOOGLE_MAPS_API_KEY || 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
-    const API_BASE_URL = process.env.API_BASE_URL || '';
+    // Secure these keys in production by restricting in Google Cloud Console (API key) and backend (VAPID key)
+    const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
+    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+    const API_BASE_URL = ''; // Set to 'https://your-backend.onrender.com' if backend is separate
     const mapId = '2666b5bd496d9c6026f43f82';
     let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition;
     let currentAlerts = [];
