@@ -2467,16 +2467,23 @@
     }
   }
   window.addEventListener('load', () => {
-    // Fallback for TWEEN.js if CDN fails
+    // Load TWEEN.js from reliable CDN if not available
     if (typeof TWEEN === 'undefined') {
-      console.error('TWEEN.js not loaded, attempting fallback');
-      const script = document.createElement('script');
-      script.src = '/tween.min.js'; // Ensure you have a local copy in your project root
-      script.onerror = () => {
-        console.error('Failed to load TWEEN.js fallback');
-        showToast('Animation library failed to load. Some features may not work.');
+      console.log('TWEEN.js not loaded, attempting CDN fallback');
+      const tweenScript = document.createElement('script');
+      tweenScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.min.js';
+      tweenScript.onload = () => console.log('TWEEN.js loaded from CDN');
+      tweenScript.onerror = () => {
+        console.log('CDN fallback failed, using local copy');
+        const localScript = document.createElement('script');
+        localScript.src = '/tween.min.js'; // Adjust path if needed (e.g., '/public/tween.min.js')
+        localScript.onerror = () => {
+          console.error('Failed to load TWEEN.js local fallback');
+          showToast('Animation library failed to load. Some features may not work.');
+        };
+        document.head.appendChild(localScript);
       };
-      document.head.appendChild(script);
+      document.head.appendChild(tweenScript);
     }
     loadGoogleMaps();
     checkAuth();
