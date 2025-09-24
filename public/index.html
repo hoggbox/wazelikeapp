@@ -1169,7 +1169,7 @@
         console.log('Profile data received:', data);
         document.getElementById('points-display').textContent = `Points: ${data.points || 0}`;
         document.getElementById('achievements-display').textContent = `Achievements: ${Array.isArray(data.achievements) ? data.achievements.join(', ') : 'None'}`;
-      } catch (err) {
+} catch (err) {
         console.error('Failed to fetch profile:', err);
         showToast('Failed to load profile data. Please log in again.');
         localStorage.removeItem('token');
@@ -1765,10 +1765,10 @@
         console.log('Non-navigation recenter:', navState.userLocation, 'Heading: 0');
       }
     }
-    // CHANGED: Adjusted for turn detection and dynamic zoom/tilt
+    // FIXED: Improved turn detection and dynamic zoom/tilt
     function getDynamicZoom(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
-        return navState.navigationZoom;
+        return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
       }
       const path = navState.currentRoute.routes[0].overview_path;
       let closestPoint = null;
@@ -1795,22 +1795,22 @@
           break;
         }
       }
-      let zoom = STRAIGHT_ZOOM;
+      let zoom = STRAIGHT_ZOOM; // 16.5
       let tilt = 45;
       if (nextStep && nextStep.maneuver) {
         const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
-        if (distanceToTurn < TURN_THRESHOLD) {
-          zoom = TURN_ZOOM;
+        if (distanceToTurn < TURN_THRESHOLD) { // 500m
+          zoom = TURN_ZOOM; // 19
           tilt = 60;
           const turnPoint = new google.maps.LatLng(nextStep.start_location);
           turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
           console.log('Turn detected:', { distanceToTurn, turnHeading });
         }
       }
-      const speedMph = speed * 2.23694;
+      const speedMph = speed ? speed * 2.23694 : 0;
       if (speedMph > 40) {
         zoom -= 0.5;
-      } else if (speedMph < 10) {
+      } else if (speedMph < 10 && speedMph > 0) {
         zoom += 0.5;
       }
       return { zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), tilt, turnHeading };
@@ -1902,7 +1902,7 @@
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // CHANGED: Real-time heading rotation, center shifted 100m ahead
+    // FIXED: Ensure map follows user and maintains north-up view
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -1978,38 +1978,36 @@
         }
         lastHeading = navState.currentHeading;
         lastPosition = pos;
-        if (navState.isNavigating) {
+        if (navState.isNavigating && navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
-          if (navState.isFollowing) {
-            const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
-            navState.navigationZoom = zoom;
-            const center = google.maps.geometry.spherical.computeOffset(
-              new google.maps.LatLng(navState.userLocation),
-              ROUTE_OFFSET,
-              navState.currentHeading
-            );
-            new TWEEN.Tween({
-              zoom: map.getZoom(),
-              center: map.getCenter().toJSON(),
-              heading: map.getHeading(),
-              tilt: map.getTilt()
+          const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
+          navState.navigationZoom = zoom;
+          const center = google.maps.geometry.spherical.computeOffset(
+            new google.maps.LatLng(navState.userLocation),
+            ROUTE_OFFSET,
+            navState.currentHeading
+          );
+          new TWEEN.Tween({
+            zoom: map.getZoom(),
+            center: map.getCenter().toJSON(),
+            heading: map.getHeading(),
+            tilt: map.getTilt()
+          })
+            .to({
+              zoom,
+              center: center.toJSON(),
+              heading: turnHeading || navState.currentHeading,
+              tilt
+            }, 300)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(obj => {
+              map.setCenter(obj.center);
+              map.setZoom(obj.zoom);
+              map.setHeading(obj.heading);
+              map.setTilt(obj.tilt);
             })
-              .to({
-                zoom,
-                center: center.toJSON(),
-                heading: turnHeading || navState.currentHeading,
-                tilt
-              }, 300)
-              .easing(TWEEN.Easing.Quadratic.Out)
-              .onUpdate(obj => {
-                map.setCenter(obj.center);
-                map.setZoom(obj.zoom);
-                map.setHeading(obj.heading);
-                map.setTilt(obj.tilt);
-              })
-              .start();
-            console.log('Camera updated:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
-          }
+            .start();
+          console.log('Camera updated:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
         }
         navState.lastKnownPosition = pos;
         if (socket) socket.emit('locationUpdate', { location: navState.userLocation });
@@ -2019,89 +2017,89 @@
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-function startGPS() {
-  if (!navigator.geolocation) {
-    showToast('Geolocation is not supported by this browser.');
-    console.error('Geolocation not supported');
-    return;
-  }
-  if (!navState.destination) {
-    showToast('Please select a destination.');
-    console.error('No destination selected');
-    return;
-  }
-  navState.isNavigating = true;
-  navState.isFollowing = true;
-  localStorage.setItem('isFollowing', navState.isFollowing);
-  document.getElementById('search-container').classList.add('hidden');
-  document.getElementById('hud-container').style.display = 'flex';
-  document.getElementById('bottom-hud-container').style.display = 'flex';
-  map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
-  // CHANGED: Always snap to polyline start at navigation start
-  directionsService.route(
-    {
-      origin: navState.userLocation,
-      destination: navState.destination,
-      travelMode: google.maps.TravelMode.DRIVING,
-      provideRouteAlternatives: true
-    },
-    (response, status) => {
-      if (status === 'OK') {
-        const startLocation = response.routes[0].legs[0].start_location;
-        navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() }; // Force snap to route start
-        console.log('Forced snap to route start:', navState.userLocation);
-        navState.currentRoute = response;
-        navState.originalRoute = response;
-        navState.routePolyline = response.routes[0].overview_path;
-        updateRouteAhead(navState.userLocation);
-        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
-        map.setCenter(navState.userLocation); // Center on user initially
-        restoreNavigationView();
-        console.log('Navigation started, centered on user location:', navState.userLocation);
-        fetchCurrentAlerts();
-        startRerouteCheck();
-        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
-        if (showTrafficCameras) {
-          cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
-        }
-        if (watchId) {
-          navigator.geolocation.clearWatch(watchId);
-        }
-        watchId = navigator.geolocation.watchPosition(
-          onPositionUpdate,
-          (error) => {
-            console.error('Geolocation watch error:', error);
-            showToast('Error getting location: ' + error.message);
-          },
-          {
-            enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 10000
-          }
-        );
-        console.log('GPS tracking started, watchId:', watchId);
-        navigator.geolocation.getCurrentPosition(
-          onPositionUpdate,
-          (error) => {
-            console.error('Immediate position update error:', error);
-            showToast('Error getting initial navigation position.');
-          },
-          {
-            enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 10000
-          }
-        );
-      } else {
-        console.error('Directions request failed:', status);
-        showToast('Directions request failed: ' + status);
-        if (status === 'REQUEST_DENIED') {
-          showToast('API key invalid or restricted. Check Google Cloud Console.');
-        }
+    // CHANGED: Always snap to polyline start at navigation start
+    function startGPS() {
+      if (!navigator.geolocation) {
+        showToast('Geolocation is not supported by this browser.');
+        console.error('Geolocation not supported');
+        return;
       }
+      if (!navState.destination) {
+        showToast('Please select a destination.');
+        console.error('No destination selected');
+        return;
+      }
+      navState.isNavigating = true;
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
+      document.getElementById('search-container').classList.add('hidden');
+      document.getElementById('hud-container').style.display = 'flex';
+      document.getElementById('bottom-hud-container').style.display = 'flex';
+      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+      directionsService.route(
+        {
+          origin: navState.userLocation,
+          destination: navState.destination,
+          travelMode: google.maps.TravelMode.DRIVING,
+          provideRouteAlternatives: true
+        },
+        (response, status) => {
+          if (status === 'OK') {
+            const startLocation = response.routes[0].legs[0].start_location;
+            navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() };
+            console.log('Forced snap to route start:', navState.userLocation);
+            navState.currentRoute = response;
+            navState.originalRoute = response;
+            navState.routePolyline = response.routes[0].overview_path;
+            updateRouteAhead(navState.userLocation);
+            navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
+            map.setCenter(navState.userLocation);
+            restoreNavigationView();
+            console.log('Navigation started, centered on user location:', navState.userLocation);
+            fetchCurrentAlerts();
+            startRerouteCheck();
+            navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
+            if (showTrafficCameras) {
+              cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
+            }
+            if (watchId) {
+              navigator.geolocation.clearWatch(watchId);
+            }
+            watchId = navigator.geolocation.watchPosition(
+              onPositionUpdate,
+              (error) => {
+                console.error('Geolocation watch error:', error);
+                showToast('Error getting location: ' + error.message);
+              },
+              {
+                enableHighAccuracy: true,
+                maximumAge: 0,
+                timeout: 10000
+              }
+            );
+            console.log('GPS tracking started, watchId:', watchId);
+            navigator.geolocation.getCurrentPosition(
+              onPositionUpdate,
+              (error) => {
+                console.error('Immediate position update error:', error);
+                showToast('Error getting initial navigation position.');
+              },
+              {
+                enableHighAccuracy: true,
+                maximumAge: 0,
+                timeout: 10000
+              }
+            );
+          } else {
+            console.error('Directions request failed:', status);
+            showToast('Directions request failed: ' + status);
+            if (status === 'REQUEST_DENIED') {
+              showToast('API key invalid or restricted. Check Google Cloud Console.');
+            }
+          }
+        }
+      );
     }
-  );
-}
     function stopGPS() {
       if (watchId) {
         navigator.geolocation.clearWatch(watchId);
@@ -2232,19 +2230,19 @@ function startGPS() {
         : 'Current street: Unknown';
       hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
       if (nextStep && nextStep.maneuver) {
-        const distanceM = google.maps.geometry.spherical.computeDistanceBetween(
+        const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(
           currentLatLng,
           new google.maps.LatLng(nextStep.start_location)
         );
-        if (distanceM <= TURN_THRESHOLD) {
+        if (distanceToTurn <= TURN_THRESHOLD) {
           const turnPoint = new google.maps.LatLng(nextStep.start_location);
           const turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
           let distanceText;
-          if (distanceM < 1609.34) {
-            const distanceFeet = Math.round(distanceM * 3.28084);
+          if (distanceToTurn < 1609.34) {
+            const distanceFeet = Math.round(distanceToTurn * 3.28084);
             distanceText = `${distanceFeet} feet`;
           } else {
-            const distanceMi = (distanceM / 1609.34).toFixed(1);
+            const distanceMi = (distanceToTurn / 1609.34).toFixed(1);
             distanceText = `${distanceMi} miles`;
           }
           const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
@@ -2257,7 +2255,7 @@ function startGPS() {
             lastSpokenTurn = turnText;
             lastAnnouncementTime = now;
           }
-          navState.nextTurnHeading = turnHeading; // CHANGED: Store turn heading
+          navState.nextTurnHeading = turnHeading;
           console.log('Next turn heading computed:', turnHeading);
         } else {
           hudTurn.textContent = 'Follow the road';
@@ -2419,9 +2417,8 @@ function startGPS() {
       }
       return minDist;
     }
-    // CHANGED: Relaxed buffer to 50m, increased retries to 6
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 50; // Relaxed from 30m to 50m
+      const BUFFER = 50;
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const dist = distanceToSegment(hazardPoint, path[i], path[i + 1]);
@@ -2430,91 +2427,91 @@ function startGPS() {
       console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
       return minDist > BUFFER;
     }
- // FIXED: Replaced invalid 'avoid' property with correct boolean flags
-async function checkAlternativeRoute(hazard) {
-  return new Promise((resolve) => {
-    if (!navState.userLocation || !navState.destination) {
-      console.error('Missing userLocation or destination for route calculation');
-      resolve(null);
-      return;
-    }
-    const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
-    const tryRoute = (options, attempt) => {
-      console.log(`Attempting alternate route calculation, attempt ${attempt}:`, options);
-      directionsService.route(
-        {
-          origin: navState.userLocation,
-          destination: navState.destination,
-          travelMode: google.maps.TravelMode.DRIVING,
-          provideRouteAlternatives: true,
-          ...options // Spread valid options: avoidTolls, avoidHighways, avoidFerries
-        },
-        (response, status) => {
-          console.log(`Alternative route response, attempt ${attempt}:`, { status, routeCount: response?.routes?.length || 0 });
-          if (status === 'OK' && response.routes && response.routes.length > 0) {
-            const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
-            let bestAlt = null;
-            let bestTimeSaved = -Infinity;
-            for (let i = 0; i < response.routes.length; i++) {
-              const alt = response.routes[i];
-              const altPath = alt.overview_path;
-              if (isHazardAvoided(hazardLatLng, altPath)) {
-                const altDuration = alt.legs[0].duration.value;
-                const timeSaved = currentDuration - altDuration;
-                console.log(`Route ${i}:`, { duration: altDuration, timeSaved, avoidsHazard: true });
-                if (timeSaved >= bestTimeSaved) {
-                  bestAlt = alt;
-                  bestTimeSaved = timeSaved;
+    // FIXED: Corrected invalid 'avoid' property with boolean flags
+    async function checkAlternativeRoute(hazard) {
+      return new Promise((resolve) => {
+        if (!navState.userLocation || !navState.destination) {
+          console.error('Missing userLocation or destination for route calculation');
+          resolve(null);
+          return;
+        }
+        const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+        const tryRoute = (options, attempt) => {
+          console.log(`Attempting alternate route calculation, attempt ${attempt}:`, options);
+          directionsService.route(
+            {
+              origin: navState.userLocation,
+              destination: navState.destination,
+              travelMode: google.maps.TravelMode.DRIVING,
+              provideRouteAlternatives: true,
+              ...options
+            },
+            (response, status) => {
+              console.log(`Alternative route response, attempt ${attempt}:`, { status, routeCount: response?.routes?.length || 0 });
+              if (status === 'OK' && response.routes && response.routes.length > 0) {
+                const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
+                let bestAlt = null;
+                let bestTimeSaved = -Infinity;
+                for (let i = 0; i < response.routes.length; i++) {
+                  const alt = response.routes[i];
+                  const altPath = alt.overview_path;
+                  if (isHazardAvoided(hazardLatLng, altPath)) {
+                    const altDuration = alt.legs[0].duration.value;
+                    const timeSaved = currentDuration - altDuration;
+                    console.log(`Route ${i}:`, { duration: altDuration, timeSaved, avoidsHazard: true });
+                    if (timeSaved >= bestTimeSaved) {
+                      bestAlt = alt;
+                      bestTimeSaved = timeSaved;
+                    }
+                  }
+                }
+                if (bestAlt) {
+                  navState.alternativeRoute = {
+                    ...response,
+                    routes: [bestAlt]
+                  };
+                  const timeSavedMin = Math.round(bestTimeSaved / 60);
+                  console.log(`Best alternate route found, time saved: ${timeSavedMin} minutes`);
+                  resolve(timeSavedMin);
+                } else if (attempt < 6) {
+                  console.log(`No valid alternate route found, retrying with new options, attempt ${attempt + 1}`);
+                  const newOptions = [
+                    { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+                    { avoidTolls: true, avoidHighways: false, avoidFerries: false },
+                    { avoidTolls: false, avoidHighways: true, avoidFerries: false },
+                    { avoidTolls: true, avoidHighways: true, avoidFerries: false },
+                    { avoidTolls: false, avoidHighways: false, avoidFerries: true },
+                    { avoidTolls: true, avoidHighways: false, avoidFerries: true }
+                  ][attempt];
+                  tryRoute(newOptions, attempt + 1);
+                } else {
+                  console.log('No suitable alternative route found after all attempts.');
+                  resolve(null);
+                }
+              } else {
+                console.error(`Directions request failed, attempt ${attempt}:`, status);
+                if (attempt < 6) {
+                  console.log(`Retrying with new options, attempt ${attempt + 1}`);
+                  const newOptions = [
+                    { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+                    { avoidTolls: true, avoidHighways: false, avoidFerries: false },
+                    { avoidTolls: false, avoidHighways: true, avoidFerries: false },
+                    { avoidTolls: true, avoidHighways: true, avoidFerries: false },
+                    { avoidTolls: false, avoidHighways: false, avoidFerries: true },
+                    { avoidTolls: true, avoidHighways: false, avoidFerries: true }
+                  ][attempt];
+                  tryRoute(newOptions, attempt + 1);
+                } else {
+                  showToast('Failed to find alternate routes.');
+                  resolve(null);
                 }
               }
             }
-            if (bestAlt) {
-              navState.alternativeRoute = {
-                ...response,
-                routes: [bestAlt]
-              };
-              const timeSavedMin = Math.round(bestTimeSaved / 60);
-              console.log(`Best alternate route found, time saved: ${timeSavedMin} minutes`);
-              resolve(timeSavedMin);
-            } else if (attempt < 6) {
-              console.log(`No valid alternate route found, retrying with new options, attempt ${attempt + 1}`);
-              const newOptions = [
-                { avoidTolls: false, avoidHighways: false, avoidFerries: false }, // No restrictions
-                { avoidTolls: true, avoidHighways: false, avoidFerries: false }, // Avoid tolls
-                { avoidTolls: false, avoidHighways: true, avoidFerries: false }, // Avoid highways
-                { avoidTolls: true, avoidHighways: true, avoidFerries: false }, // Avoid tolls+highways
-                { avoidTolls: false, avoidHighways: false, avoidFerries: true }, // Avoid ferries
-                { avoidTolls: true, avoidHighways: false, avoidFerries: true }  // Avoid ferries+tolls
-              ][attempt];
-              tryRoute(newOptions, attempt + 1);
-            } else {
-              console.log('No suitable alternative route found after all attempts.');
-              resolve(null);
-            }
-          } else {
-            console.error(`Directions request failed, attempt ${attempt}:`, status);
-            if (attempt < 6) {
-              console.log(`Retrying with new options, attempt ${attempt + 1}`);
-              const newOptions = [
-                { avoidTolls: false, avoidHighways: false, avoidFerries: false },
-                { avoidTolls: true, avoidHighways: false, avoidFerries: false },
-                { avoidTolls: false, avoidHighways: true, avoidFerries: false },
-                { avoidTolls: true, avoidHighways: true, avoidFerries: false },
-                { avoidTolls: false, avoidHighways: false, avoidFerries: true },
-                { avoidTolls: true, avoidHighways: false, avoidFerries: true }
-              ][attempt];
-              tryRoute(newOptions, attempt + 1);
-            } else {
-              showToast('Failed to find alternate routes.');
-              resolve(null);
-            }
-          }
-        }
-      );
-    };
-    tryRoute({ avoidTolls: false, avoidHighways: false, avoidFerries: false }, 1); // Start with no restrictions
-  });
-}
+          );
+        };
+        tryRoute({ avoidTolls: false, avoidHighways: false, avoidFerries: false }, 1);
+      });
+    }
     function showRerouteHud(hazard, timeSaved) {
       const cameraHudContainer = document.getElementById('camera-hud-container');
       if (cameraHudContainer.classList.contains('active')) {
@@ -2579,7 +2576,7 @@ async function checkAlternativeRoute(hazard) {
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
-    // CHANGED: Use heading-up view with route north
+    // FIXED: Ensure north-up view with route following
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
@@ -2790,7 +2787,7 @@ async function checkAlternativeRoute(hazard) {
       cameraContent.className = 'traffic-cam-marker';
       return cameraContent;
     }
- function showToast(message) {
+    function showToast(message) {
       const toast = document.getElementById('toast');
       if (toastTimeout) {
         clearTimeout(toastTimeout);
@@ -2849,7 +2846,7 @@ async function checkAlternativeRoute(hazard) {
         loadGoogleMaps();
       }
     }
-    let isRegister = false;
+let isRegister = false;
     function switchAuthMode() {
       isRegister = !isRegister;
       const usernameInput = document.getElementById('username');
