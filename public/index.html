@@ -1164,12 +1164,12 @@
             throw new Error('Authentication failed');
           }
         }
-        if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
+if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         const data = await response.json();
         console.log('Profile data received:', data);
         document.getElementById('points-display').textContent = `Points: ${data.points || 0}`;
         document.getElementById('achievements-display').textContent = `Achievements: ${Array.isArray(data.achievements) ? data.achievements.join(', ') : 'None'}`;
-} catch (err) {
+      } catch (err) {
         console.error('Failed to fetch profile:', err);
         showToast('Failed to load profile data. Please log in again.');
         localStorage.removeItem('token');
@@ -1902,7 +1902,7 @@
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // FIXED: Ensure map follows user and maintains north-up view
+    // FIXED: Ensure map follows user, route stays north-up, and marker is centered
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -2017,7 +2017,7 @@
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-    // CHANGED: Always snap to polyline start at navigation start
+    // FIXED: Force snap to polyline start and sync view
     function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
@@ -2048,6 +2048,7 @@
             const startLocation = response.routes[0].legs[0].start_location;
             navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() };
             console.log('Forced snap to route start:', navState.userLocation);
+            userMarker.position = navState.userLocation; // Sync marker immediately
             navState.currentRoute = response;
             navState.originalRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
@@ -2078,18 +2079,15 @@
               }
             );
             console.log('GPS tracking started, watchId:', watchId);
-            navigator.geolocation.getCurrentPosition(
-              onPositionUpdate,
-              (error) => {
-                console.error('Immediate position update error:', error);
-                showToast('Error getting initial navigation position.');
-              },
-              {
-                enableHighAccuracy: true,
-                maximumAge: 0,
-                timeout: 10000
+            // Trigger immediate position update to sync view
+            onPositionUpdate({
+              coords: {
+                latitude: navState.userLocation.lat,
+                longitude: navState.userLocation.lng,
+                speed: 0,
+                heading: navState.currentHeading
               }
-            );
+            });
           } else {
             console.error('Directions request failed:', status);
             showToast('Directions request failed: ' + status);
@@ -2576,7 +2574,7 @@
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
-    // FIXED: Ensure north-up view with route following
+    // FIXED: Ensure north-up view with route following and centered on user
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
@@ -2584,7 +2582,7 @@
         const center = google.maps.geometry.spherical.computeOffset(
           new google.maps.LatLng(navState.userLocation),
           ROUTE_OFFSET,
-          navState.currentHeading
+          turnHeading || navState.currentHeading
         );
         new TWEEN.Tween({
           zoom: map.getZoom(),
@@ -2609,6 +2607,7 @@
         console.log('Navigation view restored:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
       }
     }
+    // FIXED: Center map on user after reroute
     function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
@@ -2629,7 +2628,7 @@
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
         restoreNavigationView();
         showToast('Alternative route accepted.');
-        console.log('Reroute accepted:', navState.alternativeRoute.routes[0].legs[0].distance.text);
+        console.log('Reroute accepted, navigation view restored:', navState.alternativeRoute.routes[0].legs[0].distance.text);
         navState.alertState = 'IDLE';
         navState.alternativeRoute = null;
         navState.currentHazard = null;
@@ -2726,44 +2725,6 @@
         console.log('Navigation view re-locked after dismissing camera alert');
       }
     }
-    async function checkCameraProximity() {
-      if (!navState.isNavigating || !navState.userLocation || !showTrafficCameras) return;
-      const userLatLng = new google.maps.LatLng(navState.userLocation);
-      cameraPositions.forEach((cameraPos, index) => {
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, new google.maps.LatLng(cameraPos));
-        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(`static-${index}`)) {
-          showCameraHud();
-          cameraAlertShown.add(`static-${index}`);
-        } else if (distance > cameraAlertDistance * 1609.34) {
-          cameraAlertShown.delete(`static-${index}`);
-        }
-      });
-      try {
-        const token = localStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, skipping camera check');
-          return;
-        }
-        const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${cameraAlertDistance * 1609.34}&type=Traffic%20Camera`, {
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        if (!response.ok) throw new Error(`Failed to fetch traffic camera alerts: ${response.statusText}`);
-        const cameras = await response.json();
-        cameras.forEach((camera, index) => {
-          const cameraLatLng = new google.maps.LatLng(camera.location.coordinates[1], camera.location.coordinates[0]);
-          const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
-          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(`mongo-${camera._id}`)) {
-            showCameraHud();
-            cameraAlertShown.add(`mongo-${camera._id}`);
-          } else if (distance > cameraAlertDistance * 1609.34) {
-            cameraAlertShown.delete(`mongo-${camera._id}`);
-          }
-        });
-      } catch (error) {
-        console.error('Error fetching traffic camera alerts:', error);
-        showToast('Failed to check for traffic cameras.');
-      }
-    }
     function createAlertContent() {
       const alertContent = document.createElement('div');
       alertContent.style.cssText = `
@@ -2846,7 +2807,7 @@
         loadGoogleMaps();
       }
     }
-let isRegister = false;
+    let isRegister = false;
     function switchAuthMode() {
       isRegister = !isRegister;
       const usernameInput = document.getElementById('username');
@@ -2874,7 +2835,7 @@ let isRegister = false;
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        console.log('Response status:', response.status);
+console.log('Response status:', response.status);
         const data = await response.json();
         console.log('Response data:', data);
         if (response.ok) {
