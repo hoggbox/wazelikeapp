@@ -589,7 +589,8 @@
       showTraffic: localStorage.getItem('showTraffic') === 'true',
       lastRecalculationTime: 0,
       useDefaultDistances: useDefaultDistances,
-      lastValidHeading: 0
+      lastValidHeading: 0,
+      isInitialSnap: true // CHANGED: Added to lock initial snap
     };
     function loadGoogleMaps() {
       const script = document.createElement('script');
@@ -1154,7 +1155,7 @@
         let response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
-        if (response.status === 401) {
+if (response.status === 401) {
           const refreshed = await refreshToken();
           if (refreshed) {
             response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
@@ -1164,7 +1165,7 @@
             throw new Error('Authentication failed');
           }
         }
-if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
+        if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         const data = await response.json();
         console.log('Profile data received:', data);
         document.getElementById('points-display').textContent = `Points: ${data.points || 0}`;
@@ -1765,7 +1766,6 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         console.log('Non-navigation recenter:', navState.userLocation, 'Heading: 0');
       }
     }
-    // FIXED: Improved turn detection and dynamic zoom/tilt
     function getDynamicZoom(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
@@ -1854,7 +1854,6 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         })
         .start();
     }
-    // CHANGED: Clips polyline to 2km ahead, keeps route north
     function updateRouteAhead(currentPos) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         if (routePolyline) {
@@ -1902,7 +1901,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // FIXED: Ensure map follows user, route stays north-up, and marker is centered
+    // FIXED: Ensure map follows user, route stays north-up, and respects initial snap
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -1918,9 +1917,8 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
           lastAlertFetchTime = now;
         }
         navState.previousUserLocation = navState.userLocation;
-        navState.userLocation = { lat: latitude, lng: longitude };
         let pos = navState.userLocation;
-        let snapped = false;
+        let snapped = navState.isInitialSnap; // CHANGED: Respect initial snap
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           if (checkArrival(pos)) {
             return;
@@ -1928,7 +1926,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
           const path = navState.currentRoute.routes[0].overview_path;
           let minDistance = Infinity;
           let closestIndex = 0;
-          const currentLatLng = new google.maps.LatLng(pos);
+          const currentLatLng = new google.maps.LatLng({ lat: latitude, lng: longitude });
           path.forEach((point, index) => {
             const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
             if (distance < minDistance) {
@@ -1936,10 +1934,12 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
               closestIndex = index;
             }
           });
-          if (minDistance < 20) {
+          if (minDistance < 20 && !navState.isInitialSnap) {
             pos = { lat: path[closestIndex].lat(), lng: path[closestIndex].lng() };
             snapped = true;
             console.log('Snapped to polyline:', pos, 'Distance:', minDistance);
+          } else if (navState.isInitialSnap) {
+            console.log('Maintaining initial snap position:', pos);
           }
           navState.currentHeading = smoothHeading(heading || compassHeading || 0);
           console.log('Heading updated:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading });
@@ -1951,6 +1951,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
           }
         } else {
           navState.currentHeading = smoothHeading(heading || compassHeading || 0);
+          pos = { lat: latitude, lng: longitude };
         }
         navState.userLocation = pos;
         if (userMarker) {
@@ -1985,7 +1986,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
           const center = google.maps.geometry.spherical.computeOffset(
             new google.maps.LatLng(navState.userLocation),
             ROUTE_OFFSET,
-            navState.currentHeading
+            turnHeading || navState.currentHeading
           );
           new TWEEN.Tween({
             zoom: map.getZoom(),
@@ -2008,6 +2009,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
             })
             .start();
           console.log('Camera updated:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
+          navState.isInitialSnap = false; // CHANGED: Clear initial snap after first update
         }
         navState.lastKnownPosition = pos;
         if (socket) socket.emit('locationUpdate', { location: navState.userLocation });
@@ -2017,7 +2019,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-    // FIXED: Force snap to polyline start and sync view
+    // FIXED: Lock initial snap and sync view
     function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
@@ -2031,6 +2033,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
       }
       navState.isNavigating = true;
       navState.isFollowing = true;
+      navState.isInitialSnap = true; // CHANGED: Set initial snap flag
       localStorage.setItem('isFollowing', navState.isFollowing);
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
@@ -2122,6 +2125,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
       }
       navState.isNavigating = false;
       navState.isFollowing = false;
+      navState.isInitialSnap = false; // CHANGED: Reset initial snap
       navState.currentRoute = null;
       navState.originalRoute = null;
       navState.routePolyline = null;
@@ -2190,7 +2194,6 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         }
       );
     }
-    // CHANGED: Compute turn bearing for rotation
     function updateHUD(route, currentPos) {
       const hudTurn = document.getElementById('hud-turn');
       const hudStreet = document.getElementById('hud-street');
@@ -2425,7 +2428,6 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
       console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
       return minDist > BUFFER;
     }
-    // FIXED: Corrected invalid 'avoid' property with boolean flags
     async function checkAlternativeRoute(hazard) {
       return new Promise((resolve) => {
         if (!navState.userLocation || !navState.destination) {
@@ -2574,7 +2576,6 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
-    // FIXED: Ensure north-up view with route following and centered on user
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
@@ -2607,13 +2608,18 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         console.log('Navigation view restored:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
       }
     }
-    // FIXED: Center map on user after reroute
+    // FIXED: Maintain snap to new route's polyline
     function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         navState.originalRoute = navState.currentRoute;
+        // CHANGED: Snap to new route's start
+        const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
+        navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() };
+        userMarker.position = navState.userLocation;
+        console.log('Snapped to new route start after reroute:', navState.userLocation);
         updateRouteAhead(navState.userLocation);
         alternativeRenderer.setMap(null);
         updateBottomHUD(navState.currentRoute);
@@ -2623,6 +2629,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
         navState.isFollowing = true;
+        navState.isInitialSnap = true; // CHANGED: Lock snap after reroute
         localStorage.setItem('isFollowing', navState.isFollowing);
         navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
@@ -2725,6 +2732,47 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         console.log('Navigation view re-locked after dismissing camera alert');
       }
     }
+    // FIXED: Added missing checkCameraProximity function
+    async function checkCameraProximity() {
+      if (!navState.isNavigating || !navState.userLocation || !showTrafficCameras) return;
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      cameraPositions.forEach((cameraPos, index) => {
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, new google.maps.LatLng(cameraPos));
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(`static-${index}`)) {
+          showCameraHud();
+          cameraAlertShown.add(`static-${index}`);
+          console.log('Traffic camera alert triggered:', { cameraPos, distance });
+        } else if (distance > cameraAlertDistance * 1609.34) {
+          cameraAlertShown.delete(`static-${index}`);
+        }
+      });
+      try {
+        const token = localStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, skipping camera check');
+          return;
+        }
+        const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${cameraAlertDistance * 1609.34}&type=Traffic%20Camera`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (!response.ok) throw new Error(`Failed to fetch traffic camera alerts: ${response.statusText}`);
+        const cameras = await response.json();
+        cameras.forEach((camera, index) => {
+          const cameraLatLng = new google.maps.LatLng(camera.location.coordinates[1], camera.location.coordinates[0]);
+          const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
+          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(`mongo-${camera._id}`)) {
+            showCameraHud();
+            cameraAlertShown.add(`mongo-${camera._id}`);
+            console.log('MongoDB traffic camera alert triggered:', { cameraId: camera._id, distance });
+          } else if (distance > cameraAlertDistance * 1609.34) {
+            cameraAlertShown.delete(`mongo-${camera._id}`);
+          }
+        });
+      } catch (error) {
+        console.error('Error fetching traffic camera alerts:', error);
+        showToast('Failed to check for traffic cameras.');
+      }
+    }
     function createAlertContent() {
       const alertContent = document.createElement('div');
       alertContent.style.cssText = `
@@ -2766,7 +2814,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         }, 3000);
       }
     }
-    function handleGeolocationError(error, isInitial = false) {
+function handleGeolocationError(error, isInitial = false) {
       let message = 'Failed to get location. Please try again later.';
       if (error.code === 1) {
         message = 'Location access denied. Please enable location permissions in your browser settings.';
@@ -2835,7 +2883,7 @@ if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-console.log('Response status:', response.status);
+        console.log('Response status:', response.status);
         const data = await response.json();
         console.log('Response data:', data);
         if (response.ok) {
