@@ -16,6 +16,11 @@
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
     #map { height: 100%; width: 100%; position: absolute; top: 0; left: 0; z-index: 0; }
+    #compass {
+      position: absolute; top: 10vh; right: 2vw; width: 40px; height: 40px; z-index: 1001;
+      background: url('https://i.postimg.cc/YS0h0m7R/compass.png') no-repeat center center;
+      background-size: contain; transition: transform 0.3s ease;
+    }
     #search-container {
       position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
       display: flex; align-items: center; background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
@@ -246,6 +251,7 @@
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 8vw; height: 8vw; max-width: 32px; max-height: 32px; right: 3vw;
       }
+      #compass { width: 32px; height: 32px; top: 12vh; right: 3vw; }
       #hazard-button { bottom: 48vh; }
       #recenter-button { bottom: 40vh; }
       #voice-button { bottom: 32vh; }
@@ -275,6 +281,7 @@
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 6vw; height: 6vw; max-width: 36px; max-height: 36px; right: 2.5vw;
       }
+      #compass { width: 36px; height: 36px; top: 11vh; right: 2.5vw; }
       #hazard-button { bottom: 48vh; }
       #recenter-button { bottom: 40vh; }
       #voice-button { bottom: 32vh; }
@@ -299,6 +306,7 @@
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 5vw; height: 5vw; max-width: 40px; max-height: 40px; right: 2vw;
       }
+      #compass { width: 40px; height: 40px; top: 10vh; right: 2vw; }
       #hazard-button { bottom: 48vh; }
       #recenter-button { bottom: 40vh; }
       #voice-button { bottom: 32vh; }
@@ -325,6 +333,7 @@
 </head>
 <body>
   <div id="map"></div>
+  <div id="compass"></div>
   <div id="search-container">
     <input id="search-input" type="text" placeholder="Enter destination address">
     <button id="start-button">Start</button>
@@ -428,6 +437,13 @@
           </select>
         </div>
         <div class="settings-option">
+          <label for="map-orientation">Map Orientation</label>
+          <select id="map-orientation">
+            <option value="heading-up">Heading-Up</option>
+            <option value="north-up">North-Up</option>
+          </select>
+        </div>
+        <div class="settings-option">
           <label for="auto-recenter-toggle">Auto-Recenter</label>
           <input type="checkbox" id="auto-recenter-toggle" checked>
         </div>
@@ -528,6 +544,7 @@
     let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
     let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
     let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
+    let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up'; // CHANGED: Added map orientation preference
     let isInitialized = false;
     let toastTimeout = null;
     let lastHeading = 0;
@@ -561,12 +578,13 @@
     const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
     const ROUTE_AHEAD_DISTANCE = 2000;
-    const VIEWPORT_EDGE_THRESHOLD = 0.2; // CHANGED: 20% for sensitive re-centering
+    const SNAP_BUFFER = 50; // CHANGED: 50m buffer for map-matching
+    const MAX_GPS_DISTANCE = 300; // Max distance between GPS points for interpolation
     let navState = {
       currentRoute: null,
       isNavigating: false,
       isFollowing: localStorage.getItem('isFollowing') === 'true',
-      forceHeadingUp: true, // CHANGED: Enforce heading-up mode
+      mapOrientation: mapOrientation, // CHANGED: Added orientation state
       destination: null,
       userLocation: { lat: 33.083270, lng: -83.233040 },
       previousUserLocation: null,
@@ -620,6 +638,15 @@
         element.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
       });
       console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
+    }
+    // CHANGED: Update compass rotation
+    function updateCompass() {
+      const compass = document.getElementById('compass');
+      if (compass && map) {
+        const mapHeading = map.getHeading() || 0;
+        compass.style.transform = `rotate(${-mapHeading}deg)`;
+        console.log('Compass updated:', { mapHeading, rotation: -mapHeading });
+      }
     }
     async function requestDeviceOrientationPermission() {
       if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
@@ -700,7 +727,7 @@
       console.log('Google Maps API loaded successfully');
       initializeMap();
     };
-    // FIXED: Initialize map with tilt for 3D perspective
+    // FIXED: Initialize map with tilt and compass
     function initializeMap() {
       if (!google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
         console.error('Google Maps libraries not loaded:', {
@@ -718,7 +745,7 @@
         zoom: 15,
         mapId: mapId,
         tilt: 45, // CHANGED: Added tilt for 3D perspective
-        heading: 0,
+        heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
         disableDefaultUI: true,
         gestureHandling: 'cooperative',
         mapTypeControl: false,
@@ -845,6 +872,7 @@
       document.getElementById('main-route-color').value = navState.mainRouteColor;
       document.getElementById('alt-route-color').value = navState.altRouteColor;
       document.getElementById('map-type').value = navState.mapType;
+      document.getElementById('map-orientation').value = navState.mapOrientation; // CHANGED: Initialize orientation
       document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
       document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
       document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
@@ -857,6 +885,7 @@
       fetchAndDisplayMarkers(map, navState.userLocation);
       fetchUserProfile();
       setupEventListeners();
+      updateCompass();
     }
     function setupEventListeners() {
       document.getElementById('start-button').addEventListener('click', startGPS);
@@ -986,6 +1015,9 @@
           console.log('Map unlocked for free roam on zoom change during navigation');
         }
       });
+      map.addListener('heading_changed', () => {
+        updateCompass();
+      });
       document.getElementById('recenter-button').addEventListener('click', () => {
         if (navState.isNavigating) {
           navState.isFollowing = true;
@@ -1039,6 +1071,15 @@
         map.setMapTypeId(navState.mapType);
         console.log('Map type changed to:', navState.mapType);
       });
+      document.getElementById('map-orientation').addEventListener('change', (e) => {
+        navState.mapOrientation = e.target.value;
+        localStorage.setItem('mapOrientation', navState.mapOrientation);
+        console.log('Map orientation changed to:', navState.mapOrientation);
+        if (navState.isNavigating && navState.isFollowing) {
+          restoreNavigationView();
+          updateCompass();
+        }
+      });
       document.getElementById('auto-recenter-toggle').addEventListener('change', (e) => {
         navState.isFollowing = e.target.checked;
         localStorage.setItem('isFollowing', navState.isFollowing);
@@ -1084,7 +1125,7 @@
           console.log('Camera alert distance set to:', cameraAlertDistance, 'miles');
         }
       });
-      document.getElementById('use-default-distances').addEventListener('change', (e) => {
+document.getElementById('use-default-distances').addEventListener('change', (e) => {
         navState.useDefaultDistances = e.target.checked;
         localStorage.setItem('useDefaultDistances', navState.useDefaultDistances);
         if (navState.useDefaultDistances) {
@@ -1108,7 +1149,7 @@
           if (tab.getAttribute('data-tab') === 'account') {
             fetchUserProfile();
           }
-console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
+          console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         });
       });
       document.querySelectorAll('.alerts-tab').forEach(tab => {
@@ -1762,19 +1803,20 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
     function recenterNonNavigation() {
       if (map) {
         new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({ zoom: 15, center: navState.userLocation, heading: 0 }, 500)
+          .to({ zoom: 15, center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading }, 500)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
             map.setCenter(obj.center);
             map.setZoom(obj.zoom);
             map.setHeading(obj.heading);
+            updateCompass();
           })
           .start();
         map.setTilt(0);
-        console.log('Non-navigation recenter:', navState.userLocation, 'Heading: 0');
+        console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
       }
     }
-    // FIXED: Enhanced for heading-up mode and turn detection
+    // CHANGED: Enhanced for heading-up mode with turn handling
     function getDynamicZoom(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
@@ -1806,7 +1848,7 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
       }
       let zoom = STRAIGHT_ZOOM;
       let tilt = 45;
-      if (nextStep && nextStep.maneuver) {
+      if (nextStep && nextStep.maneuver && navState.mapOrientation === 'heading-up') {
         const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
         if (distanceToTurn < TURN_THRESHOLD) {
           zoom = TURN_ZOOM;
@@ -1815,11 +1857,6 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
           turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
           console.log('Turn detected:', { distanceToTurn, turnHeading });
         }
-      }
-      // CHANGED: Fallback to polyline heading for straight segments
-      if (!turnHeading && closestIndex < path.length - 1) {
-        turnHeading = google.maps.geometry.spherical.computeHeading(path[closestIndex], path[closestIndex + 1]);
-        console.log('Polyline heading for straight segment:', turnHeading);
       }
       const speedMph = speed ? speed * 2.23694 : 0;
       if (speedMph > 40) {
@@ -1915,7 +1952,37 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // FIXED: Heading-up mode with smooth transitions
+    // CHANGED: Added map-matching with HMM-like scoring
+    function findClosestRoutePoint(currentPos, path, heading, speed) {
+      if (!path || path.length < 2) return currentPos;
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      let bestPoint = currentPos;
+      let bestScore = -Infinity;
+      let closestIndex = 0;
+      const speedMph = speed ? speed * 2.23694 : 0;
+      const isHighway = navState.currentRoute && navState.currentRoute.routes[0].legs[0].steps.some(step => step.travel_mode === 'DRIVING' && step.distance.value > 1000);
+      path.forEach((point, index) => {
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
+        if (distance <= SNAP_BUFFER) {
+          const nextPoint = index < path.length - 1 ? path[index + 1] : point;
+          const pointHeading = google.maps.geometry.spherical.computeHeading(point, nextPoint);
+          const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
+          const proximityScore = (SNAP_BUFFER - distance) / SNAP_BUFFER * 0.5;
+          const headingScore = (1 - headingDiff / 180) * 0.3;
+          const speedScore = speedMph > 20 && isHighway ? 0.1 : speedMph < 10 ? 0.05 : 0;
+          const contextScore = index < path.length - 1 ? 0.1 : 0.05;
+          const totalScore = proximityScore + headingScore + speedScore + contextScore;
+          if (totalScore > bestScore) {
+            bestScore = totalScore;
+            bestPoint = { lat: point.lat(), lng: point.lng() };
+            closestIndex = index;
+          }
+        }
+      });
+      console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
+      return { point: bestPoint, index: closestIndex };
+    }
+    // CHANGED: Enhanced for heading-up and map-matching
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -1939,38 +2006,44 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
             return;
           }
           const path = navState.currentRoute.routes[0].overview_path;
-          let minDistance = Infinity;
-          let closestIndex = 0;
-          const currentLatLng = new google.maps.LatLng(pos);
-          path.forEach((point, index) => {
-            const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestIndex = index;
-            }
-          });
-          if (minDistance < 20 && !navState.isInitialSnap) {
-            pos = { lat: path[closestIndex].lat(), lng: path[closestIndex].lng() };
+          const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
+          if (google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point)) < SNAP_BUFFER) {
+            pos = point;
             snapped = true;
-            console.log('Snapped to polyline:', pos, 'Distance:', minDistance);
-          } else if (navState.isInitialSnap) {
-            console.log('Maintaining initial snap position:', pos);
+            console.log('Snapped to polyline:', pos);
           }
-          // CHANGED: Compute heading for heading-up mode
-          if (heading == null && closestIndex < path.length - 1) {
-            computedHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, path[closestIndex + 1]);
+          if (navState.previousUserLocation) {
+            const distance = google.maps.geometry.spherical.computeDistanceBetween(
+              new google.maps.LatLng(navState.previousUserLocation),
+              new google.maps.LatLng(pos)
+            );
+            if (distance > MAX_GPS_DISTANCE) {
+              const numPoints = Math.ceil(distance / 100);
+              for (let i = 1; i < numPoints; i++) {
+                const fraction = i / numPoints;
+                const interpolated = google.maps.geometry.spherical.interpolate(
+                  new google.maps.LatLng(navState.previousUserLocation),
+                  new google.maps.LatLng(pos),
+                  fraction
+                );
+                console.log('Interpolated point added:', { lat: interpolated.lat(), lng: interpolated.lng() });
+              }
+            }
+          }
+          if (heading == null && index < path.length - 1) {
+            computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[index + 1]);
             console.log('Computed heading from polyline:', computedHeading);
           } else if (heading == null && navState.previousUserLocation) {
             computedHeading = google.maps.geometry.spherical.computeHeading(
               new google.maps.LatLng(navState.previousUserLocation),
-              currentLatLng
+              new google.maps.LatLng(pos)
             );
             console.log('Computed heading from previous position:', computedHeading);
           }
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || 0);
           console.log('Heading updated:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading });
           try {
-            checkOffRoute(currentLatLng);
+            checkOffRoute(new google.maps.LatLng(pos));
           } catch (error) {
             console.error('checkOffRoute failed:', error);
             showToast('Error checking route deviation. Continuing with raw location.');
@@ -1994,7 +2067,7 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
           userMarker.map = map;
           if (Math.abs(navState.currentHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
             new TWEEN.Tween({ rotation: lastHeading })
-              .to({ rotation: navState.currentHeading }, 300)
+              .to({ rotation: navState.mapOrientation === 'north-up' ? navState.currentHeading : 0 }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => {
                 userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
@@ -2006,12 +2079,11 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         lastPosition = pos;
         if (navState.isNavigating && navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
-          // CHANGED: Force restoreNavigationView for heading-up
           if (isMarkerNearViewportEdge(navState.userLocation) || true) {
             restoreNavigationView();
             console.log('Camera updated via onPositionUpdate:', {
               center: navState.userLocation,
-              heading: navState.currentHeading
+              heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading
             });
           }
           navState.isInitialSnap = false;
@@ -2019,12 +2091,13 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         navState.lastKnownPosition = pos;
         if (socket) socket.emit('locationUpdate', { location: navState.userLocation });
         updateHUD(navState.currentRoute, navState.userLocation);
+        updateCompass();
       } catch (error) {
         console.error('Error in position update:', error);
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-    // CHANGED: Use watchPosition for live GPS tracking
+    // CHANGED: Use watchPosition with enhanced snapping
     function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
@@ -2154,13 +2227,14 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
       map.setOptions({
         zoom: 15,
         tilt: 0,
-        heading: 0,
+        heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
         disableDefaultUI: false,
         gestureHandling: 'cooperative',
         mapTypeControl: true
       });
       map.setCenter(navState.userLocation);
-      console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: 0, tilt: 0 });
+      updateCompass();
+      console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, tilt: 0 });
     }
     function calculateAndDisplayRoute(origin, dest, callback) {
       if (!origin || !dest) {
@@ -2529,12 +2603,13 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
       alternativeRenderer.setMap(map);
       alternativeRenderer.setDirections(navState.alternativeRoute);
       new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-        .to({ zoom: 14, center: map.getCenter().toJSON(), heading: 0 }, 500)
+        .to({ zoom: 14, center: map.getCenter().toJSON(), heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading }, 500)
         .easing(TWEEN.Easing.Quadratic.Out)
         .onUpdate(obj => {
           map.setCenter(obj.center);
           map.setZoom(obj.zoom);
           map.setHeading(obj.heading);
+          updateCompass();
         })
         .start();
       map.setTilt(0);
@@ -2569,12 +2644,12 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
-    // FIXED: Heading-up mode with centered marker and smooth transitions
+    // FIXED: Enhanced for heading-up mode and robust snapping
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         navState.navigationZoom = zoom;
-        const heading = navState.forceHeadingUp && !turnHeading ? navState.currentHeading : turnHeading || navState.currentHeading;
+        const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
         new TWEEN.Tween({
           zoom: map.getZoom(),
           center: map.getCenter().toJSON(),
@@ -2583,7 +2658,7 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         })
           .to({
             zoom,
-            center: navState.userLocation, // CHANGED: Center on user for heading-up
+            center: navState.userLocation,
             heading,
             tilt
           }, 300)
@@ -2592,7 +2667,10 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
             map.setCenter(obj.center);
             map.setZoom(obj.zoom);
             map.setHeading(obj.heading);
-            map.setTilt(obj.tilt);
+            updateCompass();
+            if (navState.mapOrientation === 'north-up') {
+              userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
+            }
           })
           .start();
         console.log('Navigation view restored:', {
@@ -2603,14 +2681,16 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         });
       }
     }
+    // FIXED: Snap to new route with map-matching
     function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         navState.originalRoute = navState.currentRoute;
-        const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
-        navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() };
+        const path = navState.routePolyline;
+        const { point } = findClosestRoutePoint(navState.userLocation, path, navState.currentHeading, 0);
+        navState.userLocation = point;
         userMarker.position = navState.userLocation;
         console.log('Snapped to new route start after reroute:', navState.userLocation);
         updateRouteAhead(navState.userLocation);
@@ -2648,6 +2728,7 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         );
       }
     }
+    // FIXED: Resume navigation with correct zoom and orientation
     function rejectReroute() {
       if (navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
@@ -2655,20 +2736,27 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
       if (navState.originalRoute) {
         navState.currentRoute = navState.originalRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        const path = navState.routePolyline;
+        const { point } = findClosestRoutePoint(navState.userLocation, path, navState.currentHeading, 0);
+        navState.userLocation = point;
+        userMarker.position = navState.userLocation;
+        console.log('Snapped to original route after reroute rejection:', navState.userLocation);
         updateRouteAhead(navState.userLocation);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
       }
-      alternativeRenderer.setMap(null);
+alternativeRenderer.setMap(null);
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
       restoreNavigationView();
       showToast('Reroute rejected, continuing on original route.');
-      console.log('Reroute rejected');
+      console.log('Reroute rejected, navigation view restored:', { center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading });
       navState.alertState = 'IDLE';
       navState.alternativeRoute = null;
       navState.currentHazard = null;
@@ -2737,8 +2825,8 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
       const sw = bounds.getSouthWest();
       const latSpan = ne.lat() - sw.lat();
       const lngSpan = ne.lng() - sw.lng();
-      const edgeThresholdLat = latSpan * VIEWPORT_EDGE_THRESHOLD;
-      const edgeThresholdLng = lngSpan * VIEWPORT_EDGE_THRESHOLD;
+      const edgeThresholdLat = latSpan * 0.2; // 20% threshold
+      const edgeThresholdLng = lngSpan * 0.2;
       const isNearEdge =
         position.lat > ne.lat() - edgeThresholdLat ||
         position.lat < sw.lat() + edgeThresholdLat ||
@@ -2760,7 +2848,7 @@ console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
           cameraAlertShown.delete(`static-${index}`);
         }
       });
-try {
+      try {
         const token = localStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, skipping camera check');
@@ -2828,7 +2916,7 @@ try {
         }, 3000);
       }
     }
-    // CHANGED: Enhanced geolocation error handling for permissions
+    // CHANGED: Enhanced geolocation error handling with offline capability
     function handleGeolocationError(error, isInitial = false) {
       let message = 'Failed to get location. Please try again later.';
       if (error.code === 1) {
@@ -2836,7 +2924,24 @@ try {
       } else if (error.code === 2) {
         message = 'Location unavailable. Ensure location services are enabled and try again.';
       } else if (error.code === 3) {
-        message = 'Weak GPS signal, retrying...';
+        message = 'Weak GPS signal, using last known position...';
+        if (navState.lastKnownPosition && navState.isNavigating) {
+          const now = Date.now();
+          if (now - lastLocationUpdate < 10000) {
+            onPositionUpdate({
+              coords: {
+                latitude: navState.lastKnownPosition.lat,
+                longitude: navState.lastKnownPosition.lng,
+                speed: 0,
+                heading: navState.currentHeading
+              }
+            });
+            console.log('Using cached position due to GPS timeout:', navState.lastKnownPosition);
+            return;
+          } else {
+            message = 'GPS signal lost for too long. Searching for GPS...';
+          }
+        }
       }
       console.error(message, error);
       showToast(message);
