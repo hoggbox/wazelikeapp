@@ -42,14 +42,14 @@
     .pac-item { padding: 0.5rem; cursor: pointer; color: #333; }
     .pac-item:hover { background: #f0f0f0; }
     #hud-container {
-      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1;
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
       background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
       border: 1px solid #ccc; display: none; flex-direction: column; gap: 0.5vh;
     }
     #hud-turn { font-size: 1.2rem; font-weight: bold; color: #333; }
     #hud-street, #hud-heading { font-size: 0.9rem; color: #555; }
     #bottom-hud-container {
-      position: absolute; bottom: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1;
+      position: absolute; bottom: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
       background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
       border: 1px solid #ccc; display: none; align-items: center; gap: 1vw;
     }
@@ -61,10 +61,10 @@
     #bottom-hud-info { flex: 1; text-align: center; }
     #bottom-hud-time { font-size: 1.2rem; font-weight: bold; color: #333; }
     #bottom-hud-distance { font-size: 0.9rem; color: #555; }
-#button-container {
-  position: fixed; top: 50%; right: 2vw; transform: translateY(-50%); display: flex; flex-direction: column;
-  gap: 1vh; padding: 1vmin; background: rgba(0, 0, 0, 0.3); border-radius: 0.5rem; z-index: 20;
-}
+    #button-container {
+      position: fixed; top: 50%; right: 2vw; transform: translateY(-50%); display: flex; flex-direction: column;
+      gap: 1.2vh; padding: 1.5vmin; background: rgba(0, 0, 0, 0.3); border-radius: 0.5rem; z-index: 1001; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.3);
+    }
     #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
       width: 5vw; height: 5vw; max-width: 40px; max-height: 40px; border: 0.1rem solid #fff; border-radius: 50%;
       box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; cursor: pointer;
@@ -91,7 +91,7 @@
     #leaderboard-button::before { content: '\f091'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
     #leaderboard-button:hover { background: #FFA000; }
     .report-container {
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 15;
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 1000;
     }
     #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translateY(100%); width: 80vw;
@@ -206,7 +206,7 @@
     #logout-button:hover { background-color: #b71c1c; }
     #toast {
       position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.7);
-      color: white; padding: 0.8vmin 1.5vmin; border-radius: 0.4rem; z-index: 1001; transition: opacity 0.5s;
+      color: white; padding: 0.8vmin 1.5vmin; border-radius: 0.4rem; z-index: 1002; transition: opacity 0.5s;
       opacity: 0; font-size: clamp(10px, 2vmin, 14px); pointer-events: none; max-width: 90vw; text-align: center;
     }
     #toast.visible-toast { opacity: 1; }
@@ -250,7 +250,7 @@
       100% { transform: scale(1); opacity: 0.8; }
     }
     @media (max-width: 414px) {
-      #button-container { right: 3vw; gap: 1.5vh; padding: 1.5vmin; } /* CHANGED */
+      #button-container { right: 3vw; gap: 1.5vh; padding: 1.5vmin; }
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 8vw; height: 8vw; max-width: 32px; max-height: 32px;
       }
@@ -274,7 +274,7 @@
       .settings-option .slider-value { font-size: clamp(9px, 1.8vmin, 13px); }
     }
     @media (min-width: 415px) and (max-width: 768px) {
-      #button-container { right: 2.5vw; gap: 1.2vh; padding: 1.2vmin; } /* CHANGED */
+      #button-container { right: 2.5vw; gap: 1.2vh; padding: 1.5vmin; }
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 6vw; height: 6vw; max-width: 36px; max-height: 36px;
       }
@@ -293,7 +293,7 @@
       #toast { width: 80vw; max-width: 320px; }
     }
     @media (min-width: 769px) {
-      #button-container { right: 2vw; gap: 1vh; padding: 1vmin; } /* CHANGED */
+      #button-container { right: 2vw; gap: 1vh; padding: 1.5vmin; }
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
         width: 5vw; height: 5vw; max-width: 40px; max-height: 40px;
       }
@@ -334,7 +334,7 @@
       <div id="bottom-hud-distance">0 miles - Unknown</div>
     </div>
   </div>
-  <div id="button-container"> <!-- CHANGED: Added container for buttons -->
+  <div id="button-container">
     <div id="hazard-button"></div>
     <div id="recenter-button"></div>
     <div id="voice-button"></div>
@@ -523,6 +523,7 @@
     let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline, offRoadPolyline;
     let currentAlerts = [];
     let cameraCheckInterval = null;
+    let alertPollInterval = null; // CHANGED: Added for polling
     let cameraPositions = [];
     let cameraAlertShown = new Set();
     let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
@@ -552,6 +553,7 @@
     const MIN_REROUTE_DISTANCE = 100;
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
+    const ALERT_POLL_INTERVAL = 10000; // CHANGED: Reduced to 10s for faster sync
     const HEADING_SMOOTHING_WINDOW = 10;
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
@@ -871,6 +873,7 @@
       fetchUserProfile();
       setupEventListeners();
       updateCompass();
+      console.log('Button container repositioned and styled: { top: 50%, right: 2vw, z-index: 1001 }');
     }
     function setupEventListeners() {
       document.getElementById('start-button').addEventListener('click', startGPS);
@@ -1086,6 +1089,7 @@
           if (marker.title.includes('Traffic Camera') && !showTrafficCameras) {
             marker.map = null;
             markers.delete(id);
+            console.log('Removed traffic camera marker due to toggle off:', id);
           }
         });
         fetchAndDisplayMarkers(map, navState.userLocation);
@@ -1098,7 +1102,7 @@
         } else {
           document.body.classList.remove('high-contrast');
         }
-        console.log('High contrast mode toggled:', highContrastMode);
+console.log('High contrast mode toggled:', highContrastMode);
       });
       document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
@@ -1116,7 +1120,7 @@
           console.log('Camera alert distance set to:', cameraAlertDistance, 'miles');
         }
       });
-document.getElementById('use-default-distances').addEventListener('change', (e) => {
+      document.getElementById('use-default-distances').addEventListener('change', (e) => {
         navState.useDefaultDistances = e.target.checked;
         localStorage.setItem('useDefaultDistances', navState.useDefaultDistances);
         if (navState.useDefaultDistances) {
@@ -1515,7 +1519,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
             title: `${navState.tempAlertData.type} Alert`
           });
-          markers.set(result.alert._id, marker);
+          markers.set(result.alert._id, marker); // CHANGED: Store marker in map
           console.log('Alert saved to MongoDB:', result.alert);
           showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
           if (isTrafficCamera) {
@@ -1526,6 +1530,10 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           } else if (navState.isNavigating) {
             currentAlerts.push(result.alert);
             checkHazardsAndOfferReroute();
+          }
+          if (socket) {
+            socket.emit('alert', result.alert); // CHANGED: Emit new alert to other clients
+            console.log('Emitted alert event:', result.alert._id);
           }
         } else {
           console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
@@ -1579,31 +1587,88 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         console.log('Navigation view re-locked after cancelling manual report');
       }
     }
-    function checkOffRoute(userLatLng) {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
-        console.log('checkOffRoute skipped: Not navigating or no route data');
-        return false;
-      }
-      const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
-      const now = Date.now();
-      if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
-        console.log('Recalculation skipped due to cooldown');
-        return false;
-      }
-      if (!google.maps.geometry.poly.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) {
-        console.log('User off-route detected, recalculating...');
-        showToast('You are off-route. Recalculating route...');
-        navState.lastRecalculationTime = now;
-        calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
-          showToast('Route recalculated successfully.');
-          console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
-          updateOffRoadPolyline(rawUserLocation, navState.currentRoute.routes[0].overview_path[0]);
-          restoreNavigationView();
+    // FIXED: Enhanced real-time marker removal with retry and validation
+    async function deleteAlert(id, item) {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, showing auth form');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          return;
+        }
+        const response = await fetch(`/api/alerts/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
-        return true;
+        if (response.ok) {
+          item.remove();
+          const marker = markers.get(id);
+          if (marker) {
+            marker.map = null;
+            markers.delete(id);
+            console.log('Marker removed for alert:', id);
+          } else {
+            console.warn('Marker not found for alert:', id);
+          }
+          const alert = currentAlerts.find(a => a._id === id);
+          if (alert && alert.type === 'Traffic Camera') {
+            cameraPositions = cameraPositions.filter(pos =>
+              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+            );
+            cameraAlertShown.delete(`mongo-${id}`);
+          }
+          currentAlerts = currentAlerts.filter(a => a._id !== id);
+          displayAlertsInHud(currentAlerts);
+          showToast('Alert deleted successfully.');
+          console.log('Real-time alert deletion attempted:', id);
+          if (socket && socket.connected) {
+            socket.emit('alertDeleted', id); // FIXED: Emit deletion with validation
+            console.log('Emitted alertDeleted event:', id);
+          } else {
+            console.warn('Socket not connected, relying on polling for alert deletion:', id);
+            setTimeout(() => pollAlerts(), 1000); // CHANGED: Trigger immediate poll if socket fails
+          }
+        } else {
+          throw new Error(`Failed to delete alert: ${response.statusText}`);
+        }
+      } catch (error) {
+        console.error('Error deleting alert:', error);
+        showToast('Failed to delete alert. Please try again.');
       }
-      console.log('User on route');
-      return false;
+    }
+    // CHANGED: Enhanced polling with 10s interval and stale marker cleanup
+    async function pollAlerts() {
+      if (!navState.userLocation) return;
+      try {
+        const token = localStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, skipping alert poll');
+          return;
+        }
+        const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=50000`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (!response.ok) throw new Error(`Failed to fetch alerts for polling: ${response.statusText}`);
+        const serverAlerts = await response.json();
+        const serverAlertIds = new Set(serverAlerts.map(alert => alert._id));
+        let removedCount = 0;
+        markers.forEach((marker, id) => {
+          if (!serverAlertIds.has(id)) {
+            marker.map = null;
+            markers.delete(id);
+            removedCount++;
+            console.log('Removed stale marker during poll:', id);
+          }
+        });
+        currentAlerts = serverAlerts.filter(alert => showTrafficCameras || alert.type !== 'Traffic Camera');
+        displayAlertsInHud(currentAlerts);
+        console.log(`Polled alerts, synced ${serverAlerts.length} markers, removed ${removedCount} stale markers`);
+      } catch (error) {
+        console.error('Error polling alerts:', error);
+        showToast('Failed to sync alerts.');
+      }
     }
     async function fetchAndDisplayMarkers(map, center) {
       try {
@@ -1635,7 +1700,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
             title: `${markerData.type} Alert`
           });
-          markers.set(markerData._id, marker);
+          markers.set(markerData._id, marker); // CHANGED: Store marker in map
           if (isTrafficCamera) {
             cameraPositions.push({
               lat: markerData.location.coordinates[1],
@@ -1730,49 +1795,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           deleteAlert(id, item);
         });
       });
-    }
-    // FIXED: Enhanced real-time marker removal
-    async function deleteAlert(id, item) {
-      try {
-        const token = localStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        const response = await fetch(`/api/alerts/${id}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        if (response.ok) {
-          item.remove();
-          const marker = markers.get(id);
-          if (marker) {
-            marker.map = null;
-            markers.delete(id);
-            console.log('Marker removed for alert:', id);
-          }
-          showToast('Alert deleted successfully.');
-          console.log('Alert deleted:', id);
-          const alert = currentAlerts.find(a => a._id === id);
-          if (alert && alert.type === 'Traffic Camera') {
-            cameraPositions = cameraPositions.filter(pos =>
-              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
-            );
-            cameraAlertShown.delete(`mongo-${id}`);
-          }
-          currentAlerts = currentAlerts.filter(a => a._id !== id);
-          if (socket) socket.emit('alertDeleted', id); // CHANGED: Emit alert deletion to other clients
-          console.log('Real-time alert deletion propagated:', id);
-        } else {
-          throw new Error(`Failed to delete alert: ${response.statusText}`);
-        }
-      } catch (error) {
-        console.error('Error deleting alert:', error);
-        showToast('Failed to delete alert. Please try again.');
-      }
     }
     function closeAllHuds() {
       document.getElementById('report-box').classList.remove('active');
@@ -2138,7 +2160,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           navState.isInitialSnap = false;
         }
         navState.lastKnownPosition = pos;
-        if (socket) socket.emit('locationUpdate', { location: navState.userLocation });
+        if (socket && socket.connected) socket.emit('locationUpdate', { location: navState.userLocation });
         updateHUD(navState.currentRoute, navState.userLocation);
         updateCompass();
       } catch (error) {
@@ -2194,6 +2216,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             if (showTrafficCameras) {
               cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
             }
+            alertPollInterval = setInterval(pollAlerts, ALERT_POLL_INTERVAL); // CHANGED: Start polling
             if (watchId) {
               navigator.geolocation.clearWatch(watchId);
             }
@@ -2245,6 +2268,11 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
       if (cameraCheckInterval) {
         clearInterval(cameraCheckInterval);
         cameraCheckInterval = null;
+      }
+      if (alertPollInterval) {
+        clearInterval(alertPollInterval); // CHANGED: Stop polling
+        alertPollInterval = null;
+        console.log('Alert polling stopped.');
       }
       if (routePolyline) {
         routePolyline.setMap(null);
@@ -2431,6 +2459,32 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         startRerouteCheck();
       }, REROUTE_CHECK_INTERVAL);
     }
+    function checkOffRoute(userLatLng) {
+      if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
+        console.log('checkOffRoute skipped: Not navigating or no route data');
+        return false;
+      }
+      const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
+      const now = Date.now();
+      if (now - navState.lastRecalculationTime < RECALC_COOLDOWN) {
+        console.log('Recalculation skipped due to cooldown');
+        return false;
+      }
+      if (!google.maps.geometry.poly.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) {
+        console.log('User off-route detected, recalculating...');
+        showToast('You are off-route. Recalculating route...');
+        navState.lastRecalculationTime = now;
+        calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
+          showToast('Route recalculated successfully.');
+          console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
+          updateOffRoadPolyline(rawUserLocation, navState.currentRoute.routes[0].overview_path[0]);
+          restoreNavigationView();
+        });
+        return true;
+      }
+      console.log('User on route');
+      return false;
+    }
     async function checkHazardsAndOfferReroute() {
       console.log('Checking for hazards...');
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') {
@@ -2614,24 +2668,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
                   ][attempt];
                   tryRoute(newOptions, attempt + 1);
                 } else {
-                  console.log('No suitable alternative route found after all attempts.');
-                  resolve(null);
-                }
-              } else {
-                console.error(`Directions request failed, attempt ${attempt}:`, status);
-                if (attempt < 6) {
-                  console.log(`Retrying with new options, attempt ${attempt + 1}`);
-                  const newOptions = [
-                    { avoidTolls: false, avoidHighways: false, avoidFerries: false },
-                    { avoidTolls: true, avoidHighways: false, avoidFerries: false },
-                    { avoidTolls: false, avoidHighways: true, avoidFerries: false },
-                    { avoidTolls: true, avoidHighways: true, avoidFerries: false },
-                    { avoidTolls: false, avoidHighways: false, avoidFerries: true },
-                    { avoidTolls: true, avoidHighways: false, avoidFerries: true }
-                  ][attempt];
-                  tryRoute(newOptions, attempt + 1);
-                } else {
-                  showToast('Failed to find alternate routes.');
+console.log('No suitable alternative route found after all attempts.');
                   resolve(null);
                 }
               }
@@ -2742,7 +2779,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         });
       }
     }
-function acceptReroute() {
+    function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
@@ -3128,6 +3165,7 @@ function acceptReroute() {
           document.getElementById('auth-container').style.display = 'flex';
         } else {
           showToast('Server connection lost. Attempting to reconnect...');
+          setTimeout(() => pollAlerts(), 1000); // CHANGED: Trigger immediate poll on connection error
         }
       });
       socket.on('reconnect_attempt', () => {
@@ -3163,24 +3201,34 @@ function acceptReroute() {
           checkHazardsAndOfferReroute();
         }
       });
+      // FIXED: Enhanced real-time marker removal with retry logic
       socket.on('alertDeleted', (id) => {
         console.log('Alert deleted via socket:', id);
-        const marker = markers.get(id);
-        if (marker) {
-          marker.map = null;
-          markers.delete(id);
-          console.log('Marker removed for alert:', id);
+        try {
+          const marker = markers.get(id);
+          if (marker) {
+            marker.map = null;
+            markers.delete(id);
+            console.log('Marker removed for alert:', id);
+          } else {
+            console.warn('Marker not found for alert:', id);
+            setTimeout(() => pollAlerts(), 1000); // CHANGED: Trigger immediate poll if marker not found
+          }
+          const alert = currentAlerts.find(a => a._id === id);
+          if (alert && alert.type === 'Traffic Camera') {
+            cameraPositions = cameraPositions.filter(pos =>
+              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+            );
+            cameraAlertShown.delete(`mongo-${id}`);
+          }
+          currentAlerts = currentAlerts.filter(a => a._id !== id);
+          displayAlertsInHud(currentAlerts);
+          console.log('Alert deletion synced for:', id);
+        } catch (error) {
+          console.error('Marker removal failed for:', id, 'reason:', error.message);
+          showToast('Failed to sync alert deletion. Retrying...');
+          setTimeout(() => pollAlerts(), 1000); // CHANGED: Fallback to poll on error
         }
-        const alert = currentAlerts.find(a => a._id === id);
-        if (alert && alert.type === 'Traffic Camera') {
-          cameraPositions = cameraPositions.filter(pos =>
-            pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
-          );
-          cameraAlertShown.delete(`mongo-${id}`);
-        }
-        currentAlerts = currentAlerts.filter(a => a._id !== id);
-        displayAlertsInHud(currentAlerts);
-        console.log('Real-time alert deletion propagated:', id);
       });
       socket.on('userLocation', (data) => {
         console.log('Received friend location:', data);
