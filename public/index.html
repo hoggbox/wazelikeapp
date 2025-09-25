@@ -10,7 +10,8 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3">
   <link rel="manifest" href="/manifest.json?v=1.0.3">
   <script src="https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3"></script>
-  <script src="https://cdn.socket.io/4.5.0/4.5.0/socket.io.min.js?v=1.0.3"></script>
+  <!-- FIXED: Updated Socket.IO CDN to stable version 4.7.5 -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
@@ -1127,7 +1128,7 @@
         console.log('User logged out, showing auth form');
         stopGPS();
       });
-      document.getElementById('center-alerts-btn').addEventListener('click', () => {
+document.getElementById('center-alerts-btn').addEventListener('click', () => {
         if (currentAlerts.length > 0) {
           const bounds = new google.maps.LatLngBounds();
           currentAlerts.forEach(alert => {
@@ -1146,7 +1147,7 @@
         }
       });
     }
-async function fetchUserProfile() {
+    async function fetchUserProfile() {
       try {
         const token = localStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
@@ -2782,7 +2783,7 @@ async function fetchUserProfile() {
         }, 3000);
       }
     }
-    function handleGeolocationError(error, isInitial = false) {
+function handleGeolocationError(error, isInitial = false) {
       let message = 'Failed to get location. Please try again later.';
       if (error.code === 1) {
         message = 'Location access denied. Please enable location permissions in your browser settings.';
@@ -2815,7 +2816,7 @@ async function fetchUserProfile() {
             enableHighAccuracy: true,
             timeout: 10000,
             maximumAge: 0
-}
+          }
         ), backoff);
       } else if (isInitial) {
         navState.userLocation = { lat: 33.083270, lng: -83.233040 };
@@ -2884,6 +2885,7 @@ async function fetchUserProfile() {
         document.getElementById('auth-container').style.display = 'flex';
       }
     }
+    // FIXED: Added check for io to prevent ReferenceError
     function initApp() {
       const token = localStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
@@ -2891,6 +2893,12 @@ async function fetchUserProfile() {
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
         document.getElementById('auth-container').style.display = 'flex';
+        return;
+      }
+      if (typeof io === 'undefined') {
+        console.error('Socket.IO not loaded, retrying in 1s');
+        showToast('Failed to load Socket.IO. Retrying...');
+        setTimeout(initApp, 1000);
         return;
       }
       socket = io({
@@ -3009,8 +3017,22 @@ async function fetchUserProfile() {
         handleGeolocationError({ code: 0 }, true);
       }
     }
+    // FIXED: Ensure all scripts are loaded before checkAuth
     window.addEventListener('load', () => {
-      checkAuth();
+      if (typeof io === 'undefined') {
+        console.error('Socket.IO not loaded on window load, retrying in 1s');
+        setTimeout(() => {
+          if (typeof io === 'undefined') {
+            console.error('Socket.IO still not loaded, check CDN');
+            showToast('Failed to load Socket.IO. Some features may be unavailable.');
+            checkAuth();
+          } else {
+            checkAuth();
+          }
+        }, 1000);
+      } else {
+        checkAuth();
+      }
       requestPushPermission();
     });
   </script>
