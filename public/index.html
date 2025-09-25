@@ -555,7 +555,8 @@
     let lastPosition = null;
     let compassHeading = 0;
     let retryCount = 0;
-    let rawUserLocation = null; // CHANGED: Track raw GPS for off-road line
+    let rawUserLocation = null;
+    const markers = new Map(); // CHANGED: Track alert markers for real-time removal
     const MAX_RETRIES = 5;
     const REROUTE_CHECK_INTERVAL = 30000;
     const OFF_ROUTE_TOLERANCE = 100;
@@ -1094,6 +1095,12 @@
         console.log('Traffic camera alerts toggled:', showTrafficCameras);
         cameraPositions = [];
         cameraAlertShown.clear();
+        markers.forEach((marker, id) => {
+          if (marker.title.includes('Traffic Camera') && !showTrafficCameras) {
+            marker.map = null;
+            markers.delete(id);
+          }
+        });
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
       document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
@@ -1106,7 +1113,7 @@
         }
         console.log('High contrast mode toggled:', highContrastMode);
       });
-      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
+document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
@@ -1122,7 +1129,7 @@
           console.log('Camera alert distance set to:', cameraAlertDistance, 'miles');
         }
       });
-document.getElementById('use-default-distances').addEventListener('change', (e) => {
+      document.getElementById('use-default-distances').addEventListener('change', (e) => {
         navState.useDefaultDistances = e.target.checked;
         localStorage.setItem('useDefaultDistances', navState.useDefaultDistances);
         if (navState.useDefaultDistances) {
@@ -1521,6 +1528,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
             title: `${navState.tempAlertData.type} Alert`
           });
+          markers.set(result.alert._id, marker); // CHANGED: Store marker in map
           console.log('Alert saved to MongoDB:', result.alert);
           showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
           if (isTrafficCamera) {
@@ -1584,6 +1592,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         console.log('Navigation view re-locked after cancelling manual report');
       }
     }
+    // FIXED: Enhanced recalculation with off-road polyline
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
         console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -1602,6 +1611,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
           showToast('Route recalculated successfully.');
           console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
+          updateOffRoadPolyline(rawUserLocation, navState.currentRoute.routes[0].overview_path[0]);
           restoreNavigationView();
         });
         return true;
@@ -1621,13 +1631,16 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         if (!response.ok) throw new Error(`Failed to fetch markers: ${response.statusText}`);
-        const markers = await response.json();
-        map.data.forEach(feature => feature.setMap(null));
+        const markersData = await response.json();
+        markers.forEach((marker, id) => {
+          marker.map = null;
+          markers.delete(id);
+        });
         cameraPositions = [];
-        markers.forEach(markerData => {
+        markersData.forEach(markerData => {
           const isTrafficCamera = markerData.type === 'Traffic Camera';
           if (isTrafficCamera && !showTrafficCameras) return;
-          new google.maps.marker.AdvancedMarkerElement({
+          const marker = new google.maps.marker.AdvancedMarkerElement({
             map,
             position: {
               lat: markerData.location.coordinates[1],
@@ -1636,6 +1649,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
             title: `${markerData.type} Alert`
           });
+          markers.set(markerData._id, marker); // CHANGED: Store marker in map
           if (isTrafficCamera) {
             cameraPositions.push({
               lat: markerData.location.coordinates[1],
@@ -1643,7 +1657,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             });
           }
         });
-        console.log('Fetched and displayed markers:', markers.length);
+        console.log('Fetched and displayed markers:', markersData.length);
       } catch (error) {
         console.error('Error fetching markers:', error);
         showToast('Failed to load alerts.');
@@ -1731,6 +1745,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         });
       });
     }
+    // CHANGED: Real-time marker removal
     async function deleteAlert(id, item) {
       try {
         const token = localStorage.getItem('token');
@@ -1747,6 +1762,12 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         });
         if (response.ok) {
           item.remove();
+          const marker = markers.get(id);
+          if (marker) {
+            marker.map = null;
+            markers.delete(id);
+            console.log('Marker removed for alert:', id);
+          }
           showToast('Alert deleted successfully.');
           console.log('Alert deleted:', id);
           const alert = currentAlerts.find(a => a._id === id);
@@ -1757,7 +1778,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             cameraAlertShown.delete(`mongo-${id}`);
           }
           currentAlerts = currentAlerts.filter(a => a._id !== id);
-          fetchAndDisplayMarkers(map, navState.userLocation);
         } else {
           throw new Error(`Failed to delete alert: ${response.statusText}`);
         }
@@ -1901,7 +1921,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         })
         .start();
     }
-    // CHANGED: Added gray dotted line for off-road segments
     function updateRouteAhead(currentPos) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         if (routePolyline) {
@@ -1951,7 +1970,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           map: map
         });
       }
-      // CHANGED: Clear off-road polyline if snapped
       if (minDistance <= 20 && offRoadPolyline) {
         offRoadPolyline.setMap(null);
         offRoadPolyline = null;
@@ -1959,7 +1977,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // CHANGED: Added off-road polyline logic
     function updateOffRoadPolyline(rawPos, targetPos) {
       if (!navState.isNavigating || !rawPos || !targetPos) {
         if (offRoadPolyline) {
@@ -1993,6 +2010,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         console.log('Off-road polyline cleared: close to target');
       }
     }
+    // CHANGED: Optimized map-matching for performance
     function findClosestRoutePoint(currentPos, path, heading, speed) {
       if (!path || path.length < 2) return { point: currentPos, index: 0 };
       const currentLatLng = new google.maps.LatLng(currentPos);
@@ -2001,24 +2019,26 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
       let closestIndex = 0;
       const speedMph = speed ? speed * 2.23694 : 0;
       const isHighway = navState.currentRoute && navState.currentRoute.routes[0].legs[0].steps.some(step => step.travel_mode === 'DRIVING' && step.distance.value > 1000);
-      path.forEach((point, index) => {
+      for (let i = 0; i < path.length; i++) {
+        const point = path[i];
         const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
         if (distance <= SNAP_BUFFER) {
-          const nextPoint = index < path.length - 1 ? path[index + 1] : point;
+          const nextPoint = i < path.length - 1 ? path[i + 1] : point;
           const pointHeading = google.maps.geometry.spherical.computeHeading(point, nextPoint);
           const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
           const proximityScore = (SNAP_BUFFER - distance) / SNAP_BUFFER * 0.5;
           const headingScore = (1 - headingDiff / 180) * 0.3;
           const speedScore = speedMph > 20 && isHighway ? 0.1 : speedMph < 10 ? 0.05 : 0;
-          const contextScore = index < path.length - 1 ? 0.1 : 0.05;
+          const contextScore = i < path.length - 1 ? 0.1 : 0.05;
           const totalScore = proximityScore + headingScore + speedScore + contextScore;
           if (totalScore > bestScore) {
             bestScore = totalScore;
             bestPoint = { lat: point.lat(), lng: point.lng() };
-            closestIndex = index;
+            closestIndex = i;
           }
+          if (distance < 20) break; // CHANGED: Early break for performance
         }
-      });
+      }
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
@@ -2037,7 +2057,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           lastAlertFetchTime = now;
         }
         navState.previousUserLocation = navState.userLocation;
-        rawUserLocation = { lat: latitude, lng: longitude }; // CHANGED: Store raw GPS
+        rawUserLocation = { lat: latitude, lng: longitude };
         let pos = rawUserLocation;
         let snapped = navState.isInitialSnap;
         let computedHeading = heading;
@@ -2053,7 +2073,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             snapped = true;
             console.log('Snapped to polyline:', pos);
           }
-          updateOffRoadPolyline(rawUserLocation, path[0]); // CHANGED: Update off-road polyline
+          updateOffRoadPolyline(rawUserLocation, path[0]);
           if (navState.previousUserLocation) {
             const distance = google.maps.geometry.spherical.computeDistanceBetween(
               new google.maps.LatLng(navState.previousUserLocation),
@@ -2171,7 +2191,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
             navState.currentRoute = response;
             navState.originalRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
-            // CHANGED: Add off-road polyline to route start
             updateOffRoadPolyline(rawUserLocation || navState.userLocation, startLocation);
             const { point } = findClosestRoutePoint(navState.userLocation, navState.routePolyline, navState.currentHeading, 0);
             navState.userLocation = point;
@@ -2302,7 +2321,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           if (status === 'OK') {
             navState.currentRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
-            // CHANGED: Check if destination is off-road
             const destLatLng = new google.maps.LatLng(dest);
             const lastRoutePoint = navState.routePolyline[navState.routePolyline.length - 1];
             const distanceToDest = google.maps.geometry.spherical.computeDistanceBetween(destLatLng, lastRoutePoint);
@@ -2712,7 +2730,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           heading: map.getHeading(),
           tilt: map.getTilt()
         })
-          .to({
+.to({
             zoom,
             center: navState.userLocation,
             heading,
@@ -2737,7 +2755,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         });
       }
     }
-function acceptReroute() {
+    function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
@@ -3008,7 +3026,7 @@ function acceptReroute() {
               lat: position.coords.latitude,
               lng: position.coords.longitude
             };
-            rawUserLocation = navState.userLocation; // CHANGED: Initialize raw location
+            rawUserLocation = navState.userLocation;
             console.log('Initial location:', navState.userLocation);
             requestDeviceOrientationPermission();
             loadGoogleMaps();
@@ -3025,7 +3043,7 @@ function acceptReroute() {
         ), backoff);
       } else if (isInitial) {
         navState.userLocation = { lat: 33.083270, lng: -83.233040 };
-        rawUserLocation = navState.userLocation; // CHANGED: Initialize raw location
+        rawUserLocation = navState.userLocation;
         console.log('Using fallback location:', navState.userLocation);
         loadGoogleMaps();
       }
@@ -3145,6 +3163,7 @@ function acceptReroute() {
           content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
           title: `${alert.type} Alert`
         });
+        markers.set(alert._id, marker); // CHANGED: Store new alert marker
         console.log('Received real-time alert:', alert);
         if (isTrafficCamera) {
           cameraPositions.push({
@@ -3159,6 +3178,12 @@ function acceptReroute() {
       });
       socket.on('alertDeleted', (id) => {
         console.log('Alert deleted via socket:', id);
+        const marker = markers.get(id);
+        if (marker) {
+          marker.map = null;
+          markers.delete(id);
+          console.log('Marker removed for alert:', id);
+        }
         const alert = currentAlerts.find(a => a._id === id);
         if (alert && alert.type === 'Traffic Camera') {
           cameraPositions = cameraPositions.filter(pos =>
@@ -3167,7 +3192,7 @@ function acceptReroute() {
           cameraAlertShown.delete(`mongo-${id}`);
         }
         currentAlerts = currentAlerts.filter(a => a._id !== id);
-        fetchAndDisplayMarkers(map, navState.userLocation);
+        displayAlertsInHud(currentAlerts); // CHANGED: Update HUD
       });
       socket.on('userLocation', (data) => {
         console.log('Received friend location:', data);
@@ -3203,7 +3228,7 @@ function acceptReroute() {
               lat: position.coords.latitude,
               lng: position.coords.longitude
             };
-            rawUserLocation = navState.userLocation; // CHANGED: Initialize raw location
+            rawUserLocation = navState.userLocation;
             console.log('Initial location:', navState.userLocation);
             requestDeviceOrientationPermission();
             loadGoogleMaps();
