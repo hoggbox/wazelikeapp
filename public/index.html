@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3">
   <link rel="manifest" href="/manifest.json?v=1.0.3">
   <script src="https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3"></script>
-  <!-- FIXED: Stable Socket.IO CDN -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
   <style>
     * { box-sizing: border-box; }
@@ -534,7 +533,7 @@
     const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
     const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
     const mapId = '2666b5bd496d9c6026f43f82';
-    let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline;
+    let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline, offRoadPolyline;
     let currentAlerts = [];
     let cameraCheckInterval = null;
     let cameraPositions = [];
@@ -544,7 +543,7 @@
     let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
     let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
     let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
-    let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up'; // CHANGED: Added map orientation preference
+    let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up';
     let isInitialized = false;
     let toastTimeout = null;
     let lastHeading = 0;
@@ -556,6 +555,7 @@
     let lastPosition = null;
     let compassHeading = 0;
     let retryCount = 0;
+    let rawUserLocation = null; // CHANGED: Track raw GPS for off-road line
     const MAX_RETRIES = 5;
     const REROUTE_CHECK_INTERVAL = 30000;
     const OFF_ROUTE_TOLERANCE = 100;
@@ -570,7 +570,7 @@
     const TURN_ZOOM = 19;
     const STRAIGHT_ZOOM = 16.5;
     const TURN_THRESHOLD = 500;
-    const LOCATION_UPDATE_THRESHOLD = 30; // CHANGED: Reduced to 30ms for smoother updates
+    const LOCATION_UPDATE_THRESHOLD = 30;
     const HEADING_CHANGE_THRESHOLD = 15;
     const STATIONARY_SPEED_THRESHOLD = 0.5;
     const ARRIVAL_RADIUS = 50;
@@ -578,13 +578,13 @@
     const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
     const ROUTE_AHEAD_DISTANCE = 2000;
-    const SNAP_BUFFER = 50; // CHANGED: 50m buffer for map-matching
-    const MAX_GPS_DISTANCE = 300; // Max distance between GPS points for interpolation
+    const SNAP_BUFFER = 50;
+    const MAX_GPS_DISTANCE = 300;
     let navState = {
       currentRoute: null,
       isNavigating: false,
       isFollowing: localStorage.getItem('isFollowing') === 'true',
-      mapOrientation: mapOrientation, // CHANGED: Added orientation state
+      mapOrientation: mapOrientation,
       destination: null,
       userLocation: { lat: 33.083270, lng: -83.233040 },
       previousUserLocation: null,
@@ -612,7 +612,6 @@
       lastValidHeading: 0,
       isInitialSnap: true
     };
-    // CHANGED: Use requestAnimationFrame for animations
     function animate() {
       if (typeof TWEEN !== 'undefined') {
         TWEEN.update();
@@ -639,7 +638,6 @@
       });
       console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
     }
-    // CHANGED: Update compass rotation
     function updateCompass() {
       const compass = document.getElementById('compass');
       if (compass && map) {
@@ -727,7 +725,6 @@
       console.log('Google Maps API loaded successfully');
       initializeMap();
     };
-    // FIXED: Initialize map with tilt and compass
     function initializeMap() {
       if (!google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
         console.error('Google Maps libraries not loaded:', {
@@ -744,7 +741,7 @@
         center: navState.userLocation,
         zoom: 15,
         mapId: mapId,
-        tilt: 45, // CHANGED: Added tilt for 3D perspective
+        tilt: 45,
         heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
         disableDefaultUI: true,
         gestureHandling: 'cooperative',
@@ -872,7 +869,7 @@
       document.getElementById('main-route-color').value = navState.mainRouteColor;
       document.getElementById('alt-route-color').value = navState.altRouteColor;
       document.getElementById('map-type').value = navState.mapType;
-      document.getElementById('map-orientation').value = navState.mapOrientation; // CHANGED: Initialize orientation
+      document.getElementById('map-orientation').value = navState.mapOrientation;
       document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
       document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
       document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
@@ -1816,7 +1813,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
       }
     }
-    // CHANGED: Enhanced for heading-up mode with turn handling
     function getDynamicZoom(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
@@ -1905,11 +1901,16 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         })
         .start();
     }
+    // CHANGED: Added gray dotted line for off-road segments
     function updateRouteAhead(currentPos) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         if (routePolyline) {
           routePolyline.setMap(null);
           routePolyline = null;
+        }
+        if (offRoadPolyline) {
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
         }
         return;
       }
@@ -1950,11 +1951,50 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           map: map
         });
       }
+      // CHANGED: Clear off-road polyline if snapped
+      if (minDistance <= 20 && offRoadPolyline) {
+        offRoadPolyline.setMap(null);
+        offRoadPolyline = null;
+        console.log('Off-road polyline cleared: snapped to route');
+      }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // CHANGED: Added map-matching with HMM-like scoring
+    // CHANGED: Added off-road polyline logic
+    function updateOffRoadPolyline(rawPos, targetPos) {
+      if (!navState.isNavigating || !rawPos || !targetPos) {
+        if (offRoadPolyline) {
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+        }
+        return;
+      }
+      const rawLatLng = new google.maps.LatLng(rawPos);
+      const targetLatLng = new google.maps.LatLng(targetPos);
+      const distance = google.maps.geometry.spherical.computeDistanceBetween(rawLatLng, targetLatLng);
+      if (distance > 20) {
+        const path = [rawPos, targetPos];
+        if (offRoadPolyline) {
+          offRoadPolyline.setPath(path);
+        } else {
+          offRoadPolyline = new google.maps.Polyline({
+            path: path,
+            strokeColor: '#808080',
+            strokeOpacity: 0.6,
+            strokeWeight: 4,
+            zIndex: 4,
+            icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '10px' }],
+            map: map
+          });
+        }
+        console.log('Off-road polyline updated:', { from: rawPos, to: targetPos, distance });
+      } else if (offRoadPolyline) {
+        offRoadPolyline.setMap(null);
+        offRoadPolyline = null;
+        console.log('Off-road polyline cleared: close to target');
+      }
+    }
     function findClosestRoutePoint(currentPos, path, heading, speed) {
-      if (!path || path.length < 2) return currentPos;
+      if (!path || path.length < 2) return { point: currentPos, index: 0 };
       const currentLatLng = new google.maps.LatLng(currentPos);
       let bestPoint = currentPos;
       let bestScore = -Infinity;
@@ -1982,7 +2022,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
-    // CHANGED: Enhanced for heading-up and map-matching
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -1998,7 +2037,8 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           lastAlertFetchTime = now;
         }
         navState.previousUserLocation = navState.userLocation;
-        let pos = { lat: latitude, lng: longitude };
+        rawUserLocation = { lat: latitude, lng: longitude }; // CHANGED: Store raw GPS
+        let pos = rawUserLocation;
         let snapped = navState.isInitialSnap;
         let computedHeading = heading;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
@@ -2007,11 +2047,13 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           }
           const path = navState.currentRoute.routes[0].overview_path;
           const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
-          if (google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point)) < SNAP_BUFFER) {
+          const distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point));
+          if (distanceToRoute < 20) {
             pos = point;
             snapped = true;
             console.log('Snapped to polyline:', pos);
           }
+          updateOffRoadPolyline(rawUserLocation, path[0]); // CHANGED: Update off-road polyline
           if (navState.previousUserLocation) {
             const distance = google.maps.geometry.spherical.computeDistanceBetween(
               new google.maps.LatLng(navState.previousUserLocation),
@@ -2097,7 +2139,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-    // CHANGED: Use watchPosition with enhanced snapping
     function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
@@ -2127,12 +2168,15 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         (response, status) => {
           if (status === 'OK') {
             const startLocation = response.routes[0].legs[0].start_location;
-            navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() };
-            console.log('Forced snap to route start:', navState.userLocation);
-            userMarker.position = navState.userLocation;
             navState.currentRoute = response;
             navState.originalRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
+            // CHANGED: Add off-road polyline to route start
+            updateOffRoadPolyline(rawUserLocation || navState.userLocation, startLocation);
+            const { point } = findClosestRoutePoint(navState.userLocation, navState.routePolyline, navState.currentHeading, 0);
+            navState.userLocation = point;
+            console.log('Forced snap to route start:', navState.userLocation);
+            userMarker.position = navState.userLocation;
             updateRouteAhead(navState.userLocation);
             navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
             map.setCenter(navState.userLocation);
@@ -2200,6 +2244,10 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         routePolyline.setMap(null);
         routePolyline = null;
       }
+      if (offRoadPolyline) {
+        offRoadPolyline.setMap(null);
+        offRoadPolyline = null;
+      }
       navState.isNavigating = false;
       navState.isFollowing = false;
       navState.isInitialSnap = false;
@@ -2216,6 +2264,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
       lastLocationUpdate = 0;
       lastAlertFetchTime = 0;
       lastPosition = null;
+      rawUserLocation = null;
       document.getElementById('search-container').classList.remove('hidden');
       document.getElementById('search-container').style.display = 'flex';
       document.getElementById('hud-container').style.display = 'none';
@@ -2253,6 +2302,14 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
           if (status === 'OK') {
             navState.currentRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
+            // CHANGED: Check if destination is off-road
+            const destLatLng = new google.maps.LatLng(dest);
+            const lastRoutePoint = navState.routePolyline[navState.routePolyline.length - 1];
+            const distanceToDest = google.maps.geometry.spherical.computeDistanceBetween(destLatLng, lastRoutePoint);
+            if (distanceToDest > 20) {
+              updateOffRoadPolyline(navState.userLocation, dest);
+              console.log('Destination off-road, added dotted line:', { distance: distanceToDest });
+            }
             updateRouteAhead(navState.userLocation);
             updateHUD(response, origin);
             updateBottomHUD(response);
@@ -2644,7 +2701,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
-    // FIXED: Enhanced for heading-up mode and robust snapping
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
@@ -2681,8 +2737,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         });
       }
     }
-    // FIXED: Snap to new route with map-matching
-    function acceptReroute() {
+function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
@@ -2694,6 +2749,7 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         userMarker.position = navState.userLocation;
         console.log('Snapped to new route start after reroute:', navState.userLocation);
         updateRouteAhead(navState.userLocation);
+        updateOffRoadPolyline(rawUserLocation, path[0]); // CHANGED: Update off-road polyline
         alternativeRenderer.setMap(null);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
@@ -2713,7 +2769,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         navState.alternativeRoute = null;
         navState.currentHazard = null;
         navState.pendingReroute = null;
-        navState.lastRecalculationTime = Date.now();
         navigator.geolocation.getCurrentPosition(
           onPositionUpdate,
           (error) => {
@@ -2728,7 +2783,6 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         );
       }
     }
-    // FIXED: Resume navigation with correct zoom and orientation
     function rejectReroute() {
       if (navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
@@ -2742,10 +2796,11 @@ document.getElementById('use-default-distances').addEventListener('change', (e) 
         userMarker.position = navState.userLocation;
         console.log('Snapped to original route after reroute rejection:', navState.userLocation);
         updateRouteAhead(navState.userLocation);
+        updateOffRoadPolyline(rawUserLocation, path[0]); // CHANGED: Update off-road polyline
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
       }
-alternativeRenderer.setMap(null);
+      alternativeRenderer.setMap(null);
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
@@ -2813,7 +2868,6 @@ alternativeRenderer.setMap(null);
         console.log('Navigation view re-locked after dismissing camera alert');
       }
     }
-    // CHANGED: Ensure marker stays centered
     function isMarkerNearViewportEdge(position) {
       if (!map || !position) return false;
       const bounds = map.getBounds();
@@ -2825,7 +2879,7 @@ alternativeRenderer.setMap(null);
       const sw = bounds.getSouthWest();
       const latSpan = ne.lat() - sw.lat();
       const lngSpan = ne.lng() - sw.lng();
-      const edgeThresholdLat = latSpan * 0.2; // 20% threshold
+      const edgeThresholdLat = latSpan * 0.2;
       const edgeThresholdLng = lngSpan * 0.2;
       const isNearEdge =
         position.lat > ne.lat() - edgeThresholdLat ||
@@ -2916,7 +2970,6 @@ alternativeRenderer.setMap(null);
         }, 3000);
       }
     }
-    // CHANGED: Enhanced geolocation error handling with offline capability
     function handleGeolocationError(error, isInitial = false) {
       let message = 'Failed to get location. Please try again later.';
       if (error.code === 1) {
@@ -2955,6 +3008,7 @@ alternativeRenderer.setMap(null);
               lat: position.coords.latitude,
               lng: position.coords.longitude
             };
+            rawUserLocation = navState.userLocation; // CHANGED: Initialize raw location
             console.log('Initial location:', navState.userLocation);
             requestDeviceOrientationPermission();
             loadGoogleMaps();
@@ -2971,6 +3025,7 @@ alternativeRenderer.setMap(null);
         ), backoff);
       } else if (isInitial) {
         navState.userLocation = { lat: 33.083270, lng: -83.233040 };
+        rawUserLocation = navState.userLocation; // CHANGED: Initialize raw location
         console.log('Using fallback location:', navState.userLocation);
         loadGoogleMaps();
       }
@@ -3036,7 +3091,6 @@ alternativeRenderer.setMap(null);
         document.getElementById('auth-container').style.display = 'flex';
       }
     }
-    // FIXED: Added check for io to prevent ReferenceError
     function initApp() {
       const token = localStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
@@ -3149,6 +3203,7 @@ alternativeRenderer.setMap(null);
               lat: position.coords.latitude,
               lng: position.coords.longitude
             };
+            rawUserLocation = navState.userLocation; // CHANGED: Initialize raw location
             console.log('Initial location:', navState.userLocation);
             requestDeviceOrientationPermission();
             loadGoogleMaps();
@@ -3168,7 +3223,6 @@ alternativeRenderer.setMap(null);
         handleGeolocationError({ code: 0 }, true);
       }
     }
-    // FIXED: Ensure all scripts are loaded before checkAuth
     window.addEventListener('load', () => {
       if (typeof io === 'undefined') {
         console.error('Socket.IO not loaded on window load, retrying in 1s');
