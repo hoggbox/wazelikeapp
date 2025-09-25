@@ -61,30 +61,33 @@
     #bottom-hud-info { flex: 1; text-align: center; }
     #bottom-hud-time { font-size: 1.2rem; font-weight: bold; color: #333; }
     #bottom-hud-distance { font-size: 0.9rem; color: #555; }
+#button-container {
+  position: fixed; top: 50%; right: 2vw; transform: translateY(-50%); display: flex; flex-direction: column;
+  gap: 1vh; padding: 1vmin; background: rgba(0, 0, 0, 0.3); border-radius: 0.5rem; z-index: 20;
+}
     #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-      position: fixed; right: 2vw; width: 5vw; height: 5vw; max-width: 40px; max-height: 40px;
-      border: 0.1rem solid #fff; border-radius: 50%; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
-      z-index: 20; display: flex; align-items: center; justify-content: center; cursor: pointer;
+      width: 5vw; height: 5vw; max-width: 40px; max-height: 40px; border: 0.1rem solid #fff; border-radius: 50%;
+      box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; cursor: pointer;
     }
-    #hazard-button { bottom: 48vh; background: #ff4444; }
+    #hazard-button { background: #ff4444; }
     #hazard-button::before { content: '+'; color: #00ff00; font-size: 1.2rem; font-weight: bold; }
     #hazard-button:hover { background: #cc0000; }
-    #recenter-button { bottom: 40vh; background: #4CAF50; }
+    #recenter-button { background: #4CAF50; }
     #recenter-button::before { content: '↻'; color: #fff; font-size: 1.2rem; font-weight: bold; }
     #recenter-button:hover { background: #45a049; }
-    #voice-button { bottom: 32vh; background: #FF5722; }
+    #voice-button { background: #FF5722; }
     #voice-button::before { content: '\f130'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
     #voice-button:hover { background: #E64A19; }
-    #share-button { bottom: 24vh; background: #2196F3; }
+    #share-button { background: #2196F3; }
     #share-button::before { content: '\f1e0'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
     #share-button:hover { background: #1976D2; }
-    #settings-button { bottom: 16vh; background: #2196F3; }
+    #settings-button { background: #2196F3; }
     #settings-button::before { content: '\f013'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
     #settings-button:hover { background: #1976D2; }
-    #current-alerts-button { bottom: 8vh; background: #FF9800; }
+    #current-alerts-button { background: #FF9800; }
     #current-alerts-button::before { content: '\f071'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
     #current-alerts-button:hover { background: #F57C00; }
-    #leaderboard-button { bottom: 0vh; background: #FFC107; }
+    #leaderboard-button { background: #FFC107; }
     #leaderboard-button::before { content: '\f091'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
     #leaderboard-button:hover { background: #FFA000; }
     .report-container {
@@ -247,17 +250,11 @@
       100% { transform: scale(1); opacity: 0.8; }
     }
     @media (max-width: 414px) {
+      #button-container { right: 3vw; gap: 1.5vh; padding: 1.5vmin; } /* CHANGED */
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-        width: 8vw; height: 8vw; max-width: 32px; max-height: 32px; right: 3vw;
+        width: 8vw; height: 8vw; max-width: 32px; max-height: 32px;
       }
       #compass { width: 32px; height: 32px; top: 12vh; right: 3vw; }
-      #hazard-button { bottom: 48vh; }
-      #recenter-button { bottom: 40vh; }
-      #voice-button { bottom: 32vh; }
-      #share-button { bottom: 24vh; }
-      #settings-button { bottom: 16vh; }
-      #current-alerts-button { bottom: 8vh; }
-      #leaderboard-button { bottom: 0vh; }
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1rem;
       }
@@ -277,17 +274,11 @@
       .settings-option .slider-value { font-size: clamp(9px, 1.8vmin, 13px); }
     }
     @media (min-width: 415px) and (max-width: 768px) {
+      #button-container { right: 2.5vw; gap: 1.2vh; padding: 1.2vmin; } /* CHANGED */
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-        width: 6vw; height: 6vw; max-width: 36px; max-height: 36px; right: 2.5vw;
+        width: 6vw; height: 6vw; max-width: 36px; max-height: 36px;
       }
       #compass { width: 36px; height: 36px; top: 11vh; right: 2.5vw; }
-      #hazard-button { bottom: 48vh; }
-      #recenter-button { bottom: 40vh; }
-      #voice-button { bottom: 32vh; }
-      #share-button { bottom: 24vh; }
-      #settings-button { bottom: 16vh; }
-      #current-alerts-button { bottom: 8vh; }
-      #leaderboard-button { bottom: 0vh; }
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1.1rem;
       }
@@ -302,17 +293,11 @@
       #toast { width: 80vw; max-width: 320px; }
     }
     @media (min-width: 769px) {
+      #button-container { right: 2vw; gap: 1vh; padding: 1vmin; } /* CHANGED */
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
-        width: 5vw; height: 5vw; max-width: 40px; max-height: 40px; right: 2vw;
+        width: 5vw; height: 5vw; max-width: 40px; max-height: 40px;
       }
       #compass { width: 40px; height: 40px; top: 10vh; right: 2vw; }
-      #hazard-button { bottom: 48vh; }
-      #recenter-button { bottom: 40vh; }
-      #voice-button { bottom: 32vh; }
-      #share-button { bottom: 24vh; }
-      #settings-button { bottom: 16vh; }
-      #current-alerts-button { bottom: 8vh; }
-      #leaderboard-button { bottom: 0vh; }
       #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
         font-size: 1.2rem;
       }
@@ -349,13 +334,15 @@
       <div id="bottom-hud-distance">0 miles - Unknown</div>
     </div>
   </div>
-  <div id="hazard-button"></div>
-  <div id="recenter-button"></div>
-  <div id="voice-button"></div>
-  <div id="share-button"></div>
-  <div id="settings-button"></div>
-  <div id="current-alerts-button"></div>
-  <div id="leaderboard-button"></div>
+  <div id="button-container"> <!-- CHANGED: Added container for buttons -->
+    <div id="hazard-button"></div>
+    <div id="recenter-button"></div>
+    <div id="voice-button"></div>
+    <div id="share-button"></div>
+    <div id="settings-button"></div>
+    <div id="current-alerts-button"></div>
+    <div id="leaderboard-button"></div>
+  </div>
   <div class="report-container">
     <div id="report-box">
       <header>
@@ -556,7 +543,7 @@
     let compassHeading = 0;
     let retryCount = 0;
     let rawUserLocation = null;
-    const markers = new Map(); // CHANGED: Track alert markers for real-time removal
+    const markers = new Map();
     const MAX_RETRIES = 5;
     const REROUTE_CHECK_INTERVAL = 30000;
     const OFF_ROUTE_TOLERANCE = 100;
@@ -1113,7 +1100,7 @@
         }
         console.log('High contrast mode toggled:', highContrastMode);
       });
-document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
+      document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
@@ -1129,7 +1116,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
           console.log('Camera alert distance set to:', cameraAlertDistance, 'miles');
         }
       });
-      document.getElementById('use-default-distances').addEventListener('change', (e) => {
+document.getElementById('use-default-distances').addEventListener('change', (e) => {
         navState.useDefaultDistances = e.target.checked;
         localStorage.setItem('useDefaultDistances', navState.useDefaultDistances);
         if (navState.useDefaultDistances) {
@@ -1528,7 +1515,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
             content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
             title: `${navState.tempAlertData.type} Alert`
           });
-          markers.set(result.alert._id, marker); // CHANGED: Store marker in map
+          markers.set(result.alert._id, marker);
           console.log('Alert saved to MongoDB:', result.alert);
           showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
           if (isTrafficCamera) {
@@ -1592,7 +1579,6 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
         console.log('Navigation view re-locked after cancelling manual report');
       }
     }
-    // FIXED: Enhanced recalculation with off-road polyline
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
         console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -1649,7 +1635,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
             content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
             title: `${markerData.type} Alert`
           });
-          markers.set(markerData._id, marker); // CHANGED: Store marker in map
+          markers.set(markerData._id, marker);
           if (isTrafficCamera) {
             cameraPositions.push({
               lat: markerData.location.coordinates[1],
@@ -1745,7 +1731,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
         });
       });
     }
-    // CHANGED: Real-time marker removal
+    // FIXED: Enhanced real-time marker removal
     async function deleteAlert(id, item) {
       try {
         const token = localStorage.getItem('token');
@@ -1778,6 +1764,8 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
             cameraAlertShown.delete(`mongo-${id}`);
           }
           currentAlerts = currentAlerts.filter(a => a._id !== id);
+          if (socket) socket.emit('alertDeleted', id); // CHANGED: Emit alert deletion to other clients
+          console.log('Real-time alert deletion propagated:', id);
         } else {
           throw new Error(`Failed to delete alert: ${response.statusText}`);
         }
@@ -2010,7 +1998,6 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
         console.log('Off-road polyline cleared: close to target');
       }
     }
-    // CHANGED: Optimized map-matching for performance
     function findClosestRoutePoint(currentPos, path, heading, speed) {
       if (!path || path.length < 2) return { point: currentPos, index: 0 };
       const currentLatLng = new google.maps.LatLng(currentPos);
@@ -2036,7 +2023,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
             bestPoint = { lat: point.lat(), lng: point.lng() };
             closestIndex = i;
           }
-          if (distance < 20) break; // CHANGED: Early break for performance
+          if (distance < 20) break;
         }
       }
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
@@ -2730,7 +2717,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
           heading: map.getHeading(),
           tilt: map.getTilt()
         })
-.to({
+          .to({
             zoom,
             center: navState.userLocation,
             heading,
@@ -2755,7 +2742,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
         });
       }
     }
-    function acceptReroute() {
+function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
@@ -2767,7 +2754,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
         userMarker.position = navState.userLocation;
         console.log('Snapped to new route start after reroute:', navState.userLocation);
         updateRouteAhead(navState.userLocation);
-        updateOffRoadPolyline(rawUserLocation, path[0]); // CHANGED: Update off-road polyline
+        updateOffRoadPolyline(rawUserLocation, path[0]);
         alternativeRenderer.setMap(null);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
@@ -2814,7 +2801,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
         userMarker.position = navState.userLocation;
         console.log('Snapped to original route after reroute rejection:', navState.userLocation);
         updateRouteAhead(navState.userLocation);
-        updateOffRoadPolyline(rawUserLocation, path[0]); // CHANGED: Update off-road polyline
+        updateOffRoadPolyline(rawUserLocation, path[0]);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
       }
@@ -3163,7 +3150,7 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
           content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
           title: `${alert.type} Alert`
         });
-        markers.set(alert._id, marker); // CHANGED: Store new alert marker
+        markers.set(alert._id, marker);
         console.log('Received real-time alert:', alert);
         if (isTrafficCamera) {
           cameraPositions.push({
@@ -3192,7 +3179,8 @@ document.getElementById('hazard-alert-distance').addEventListener('change', (e) 
           cameraAlertShown.delete(`mongo-${id}`);
         }
         currentAlerts = currentAlerts.filter(a => a._id !== id);
-        displayAlertsInHud(currentAlerts); // CHANGED: Update HUD
+        displayAlertsInHud(currentAlerts);
+        console.log('Real-time alert deletion propagated:', id);
       });
       socket.on('userLocation', (data) => {
         console.log('Received friend location:', data);
