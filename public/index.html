@@ -9,8 +9,8 @@
   <title>Waze-Like GPS App</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3">
   <link rel="manifest" href="/manifest.json?v=1.0.3">
-  <script src="https://unpkg.com/@tweenjs/tween.js@18.6.4/dist/tween.umd.js?v=1.0.3"></script>
-  <script src="https://cdn.socket.io/4.5.0/socket.io.min.js?v=1.0.3"></script>
+  <script src="https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3"></script>
+  <script src="https://cdn.socket.io/4.5.0/4.5.0/socket.io.min.js?v=1.0.3"></script>
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
@@ -553,7 +553,7 @@
     const STRAIGHT_ZOOM = 16.5;
     const TURN_THRESHOLD = 500;
     const ROUTE_OFFSET = 100;
-    const LOCATION_UPDATE_THRESHOLD = 200;
+    const LOCATION_UPDATE_THRESHOLD = 100; // CHANGED: Reduced to 100ms for smoother tracking
     const HEADING_CHANGE_THRESHOLD = 15;
     const STATIONARY_SPEED_THRESHOLD = 0.5;
     const ARRIVAL_RADIUS = 50;
@@ -590,7 +590,7 @@
       lastRecalculationTime: 0,
       useDefaultDistances: useDefaultDistances,
       lastValidHeading: 0,
-      isInitialSnap: true // CHANGED: Added to lock initial snap
+      isInitialSnap: true
     };
     function loadGoogleMaps() {
       const script = document.createElement('script');
@@ -1146,7 +1146,7 @@
         }
       });
     }
-    async function fetchUserProfile() {
+async function fetchUserProfile() {
       try {
         const token = localStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
@@ -1155,7 +1155,7 @@
         let response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
-if (response.status === 401) {
+        if (response.status === 401) {
           const refreshed = await refreshToken();
           if (refreshed) {
             response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
@@ -1901,7 +1901,7 @@ if (response.status === 401) {
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // FIXED: Ensure map follows user, route stays north-up, and respects initial snap
+    // FIXED: Ensure map follows user and keeps route north-up
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -1918,7 +1918,7 @@ if (response.status === 401) {
         }
         navState.previousUserLocation = navState.userLocation;
         let pos = navState.userLocation;
-        let snapped = navState.isInitialSnap; // CHANGED: Respect initial snap
+        let snapped = navState.isInitialSnap;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           if (checkArrival(pos)) {
             return;
@@ -1981,35 +1981,13 @@ if (response.status === 401) {
         lastPosition = pos;
         if (navState.isNavigating && navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
-          const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
-          navState.navigationZoom = zoom;
-          const center = google.maps.geometry.spherical.computeOffset(
-            new google.maps.LatLng(navState.userLocation),
-            ROUTE_OFFSET,
-            turnHeading || navState.currentHeading
-          );
-          new TWEEN.Tween({
-            zoom: map.getZoom(),
-            center: map.getCenter().toJSON(),
-            heading: map.getHeading(),
-            tilt: map.getTilt()
-          })
-            .to({
-              zoom,
-              center: center.toJSON(),
-              heading: turnHeading || navState.currentHeading,
-              tilt
-            }, 300)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(obj => {
-              map.setCenter(obj.center);
-              map.setZoom(obj.zoom);
-              map.setHeading(obj.heading);
-              map.setTilt(obj.tilt);
-            })
-            .start();
-          console.log('Camera updated:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
-          navState.isInitialSnap = false; // CHANGED: Clear initial snap after first update
+          // CHANGED: Call restoreNavigationView on every update for smooth following
+          restoreNavigationView();
+          console.log('Camera updated via onPositionUpdate:', {
+            center: navState.userLocation,
+            heading: navState.currentHeading
+          });
+          navState.isInitialSnap = false;
         }
         navState.lastKnownPosition = pos;
         if (socket) socket.emit('locationUpdate', { location: navState.userLocation });
@@ -2019,7 +1997,6 @@ if (response.status === 401) {
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
-    // FIXED: Lock initial snap and sync view
     function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
@@ -2033,7 +2010,7 @@ if (response.status === 401) {
       }
       navState.isNavigating = true;
       navState.isFollowing = true;
-      navState.isInitialSnap = true; // CHANGED: Set initial snap flag
+      navState.isInitialSnap = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
@@ -2051,7 +2028,7 @@ if (response.status === 401) {
             const startLocation = response.routes[0].legs[0].start_location;
             navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() };
             console.log('Forced snap to route start:', navState.userLocation);
-            userMarker.position = navState.userLocation; // Sync marker immediately
+            userMarker.position = navState.userLocation;
             navState.currentRoute = response;
             navState.originalRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
@@ -2082,7 +2059,6 @@ if (response.status === 401) {
               }
             );
             console.log('GPS tracking started, watchId:', watchId);
-            // Trigger immediate position update to sync view
             onPositionUpdate({
               coords: {
                 latitude: navState.userLocation.lat,
@@ -2125,7 +2101,7 @@ if (response.status === 401) {
       }
       navState.isNavigating = false;
       navState.isFollowing = false;
-      navState.isInitialSnap = false; // CHANGED: Reset initial snap
+      navState.isInitialSnap = false;
       navState.currentRoute = null;
       navState.originalRoute = null;
       navState.routePolyline = null;
@@ -2236,16 +2212,9 @@ if (response.status === 401) {
           new google.maps.LatLng(nextStep.start_location)
         );
         if (distanceToTurn <= TURN_THRESHOLD) {
-          const turnPoint = new google.maps.LatLng(nextStep.start_location);
-          const turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
-          let distanceText;
-          if (distanceToTurn < 1609.34) {
-            const distanceFeet = Math.round(distanceToTurn * 3.28084);
-            distanceText = `${distanceFeet} feet`;
-          } else {
-            const distanceMi = (distanceToTurn / 1609.34).toFixed(1);
-            distanceText = `${distanceMi} miles`;
-          }
+          const distanceText = distanceToTurn < 1609.34
+            ? `${Math.round(distanceToTurn * 3.28084)} feet`
+            : `${(distanceToTurn / 1609.34).toFixed(1)} miles`;
           const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
           hudTurn.textContent = turnText;
           const now = Date.now();
@@ -2256,15 +2225,11 @@ if (response.status === 401) {
             lastSpokenTurn = turnText;
             lastAnnouncementTime = now;
           }
-          navState.nextTurnHeading = turnHeading;
-          console.log('Next turn heading computed:', turnHeading);
         } else {
           hudTurn.textContent = 'Follow the road';
-          navState.nextTurnHeading = null;
         }
       } else {
         hudTurn.textContent = 'Follow the road';
-        navState.nextTurnHeading = null;
       }
     }
     function updateBottomHUD(route) {
@@ -2576,6 +2541,7 @@ if (response.status === 401) {
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
+    // FIXED: Enhanced to ensure route stays north-up and user is centered
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
@@ -2605,17 +2571,20 @@ if (response.status === 401) {
             map.setTilt(obj.tilt);
           })
           .start();
-        console.log('Navigation view restored:', { center: center.toJSON(), heading: turnHeading || navState.currentHeading, zoom, tilt });
+        console.log('Navigation view restored:', {
+          center: center.toJSON(),
+          heading: turnHeading || navState.currentHeading,
+          zoom,
+          tilt
+        });
       }
     }
-    // FIXED: Maintain snap to new route's polyline
     function acceptReroute() {
       if (navState.alternativeRoute && navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         navState.currentRoute = navState.alternativeRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
         navState.originalRoute = navState.currentRoute;
-        // CHANGED: Snap to new route's start
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.userLocation = { lat: startLocation.lat(), lng: startLocation.lng() };
         userMarker.position = navState.userLocation;
@@ -2629,7 +2598,7 @@ if (response.status === 401) {
         rerouteHudContainer.classList.remove('active');
         rerouteHud.classList.remove('active');
         navState.isFollowing = true;
-        navState.isInitialSnap = true; // CHANGED: Lock snap after reroute
+        navState.isInitialSnap = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
         navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
@@ -2732,7 +2701,6 @@ if (response.status === 401) {
         console.log('Navigation view re-locked after dismissing camera alert');
       }
     }
-    // FIXED: Added missing checkCameraProximity function
     async function checkCameraProximity() {
       if (!navState.isNavigating || !navState.userLocation || !showTrafficCameras) return;
       const userLatLng = new google.maps.LatLng(navState.userLocation);
@@ -2814,7 +2782,7 @@ if (response.status === 401) {
         }, 3000);
       }
     }
-function handleGeolocationError(error, isInitial = false) {
+    function handleGeolocationError(error, isInitial = false) {
       let message = 'Failed to get location. Please try again later.';
       if (error.code === 1) {
         message = 'Location access denied. Please enable location permissions in your browser settings.';
@@ -2847,7 +2815,7 @@ function handleGeolocationError(error, isInitial = false) {
             enableHighAccuracy: true,
             timeout: 10000,
             maximumAge: 0
-          }
+}
         ), backoff);
       } else if (isInitial) {
         navState.userLocation = { lat: 33.083270, lng: -83.233040 };
