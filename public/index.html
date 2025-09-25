@@ -553,8 +553,7 @@
     const TURN_ZOOM = 19;
     const STRAIGHT_ZOOM = 16.5;
     const TURN_THRESHOLD = 500;
-    const ROUTE_OFFSET = 100;
-    const LOCATION_UPDATE_THRESHOLD = 50; // CHANGED: Reduced to 50ms for smoother tracking
+    const LOCATION_UPDATE_THRESHOLD = 30; // CHANGED: Reduced to 30ms for smoother updates
     const HEADING_CHANGE_THRESHOLD = 15;
     const STATIONARY_SPEED_THRESHOLD = 0.5;
     const ARRIVAL_RADIUS = 50;
@@ -562,12 +561,12 @@
     const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
     const ROUTE_AHEAD_DISTANCE = 2000;
-    const VIEWPORT_EDGE_THRESHOLD = 0.1; // CHANGED: 10% of viewport to trigger re-center
+    const VIEWPORT_EDGE_THRESHOLD = 0.2; // CHANGED: 20% for sensitive re-centering
     let navState = {
       currentRoute: null,
       isNavigating: false,
       isFollowing: localStorage.getItem('isFollowing') === 'true',
-      forceNorthUp: true, // CHANGED: Enforce north-up unless turn detected
+      forceHeadingUp: true, // CHANGED: Enforce heading-up mode
       destination: null,
       userLocation: { lat: 33.083270, lng: -83.233040 },
       previousUserLocation: null,
@@ -595,37 +594,11 @@
       lastValidHeading: 0,
       isInitialSnap: true
     };
-    function loadGoogleMaps() {
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
-      script.async = true;
-      script.defer = true;
-      script.onerror = () => {
-        console.error('Failed to load Google Maps script');
-        showToast('Failed to load map. Check network or API key.');
-      };
-      document.head.appendChild(script);
-    }
-    window.initMap = function() {
-      if (!window.google || !google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
-        console.error('Google Maps libraries not loaded:', {
-          Map: !!google.maps?.Map,
-          AdvancedMarkerElement: !!google.maps?.marker,
-          Autocomplete: !!google.maps?.places,
-          DirectionsService: !!google.maps?.routes,
-          Geometry: !!google.maps?.geometry
-        });
-        showToast('Failed to load map libraries. Retrying...');
-        setTimeout(loadGoogleMaps, 2000);
-        return;
-      }
-      console.log('Google Maps API loaded successfully');
-      initializeMap();
-    };
+    // CHANGED: Use requestAnimationFrame for animations
     function animate() {
       if (typeof TWEEN !== 'undefined') {
-        requestAnimationFrame(animate);
         TWEEN.update();
+        requestAnimationFrame(animate);
       }
     }
     animate();
@@ -700,88 +673,34 @@
       console.log('Smoothed heading:', { newHeading, smoothed: smoothedHeading });
       return smoothedHeading;
     }
-    // FIXED: Enhanced turn detection for reliable heading
-    function getDynamicZoom(currentPos, speed) {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
-        return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
-      }
-      const path = navState.currentRoute.routes[0].overview_path;
-      let closestPoint = null;
-      let minDistance = Infinity;
-      let closestIndex = 0;
-      const currentLatLng = new google.maps.LatLng(currentPos);
-      path.forEach((point, index) => {
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestPoint = point;
-          closestIndex = index;
-        }
-      });
-      let currentStep = null;
-      let nextStep = null;
-      let turnHeading = null;
-      const legs = navState.currentRoute.routes[0].legs[0];
-      for (let i = 0; i < legs.steps.length; i++) {
-        const stepPath = legs.steps[i].path;
-        if (stepPath.some(pt => google.maps.geometry.spherical.computeDistanceBetween(pt, closestPoint) < 20)) {
-          currentStep = legs.steps[i];
-          nextStep = legs.steps[i + 1] || null;
-          break;
-        }
-      }
-      let zoom = STRAIGHT_ZOOM;
-      let tilt = 45;
-      if (nextStep && nextStep.maneuver) {
-        const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
-        if (distanceToTurn < TURN_THRESHOLD) {
-          zoom = TURN_ZOOM;
-          tilt = 60;
-          const turnPoint = new google.maps.LatLng(nextStep.start_location);
-          turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
-          console.log('Turn detected:', { distanceToTurn, turnHeading });
-        }
-      }
-      // CHANGED: Compute weighted heading from multiple future points
-      if (!turnHeading && closestIndex < path.length - 2) {
-        let totalHeading = 0;
-        let weightSum = 0;
-        for (let i = closestIndex; i < Math.min(closestIndex + 3, path.length - 1); i++) {
-          const segmentHeading = google.maps.geometry.spherical.computeHeading(path[i], path[i + 1]);
-          const weight = 1 / (i - closestIndex + 1);
-          totalHeading += segmentHeading * weight;
-          weightSum += weight;
-        }
-        turnHeading = totalHeading / weightSum;
-        console.log('Weighted polyline heading:', turnHeading);
-      }
-      const speedMph = speed ? speed * 2.23694 : 0;
-      if (speedMph > 40) {
-        zoom -= 0.5;
-      } else if (speedMph < 10 && speedMph > 0) {
-        zoom += 0.5;
-      }
-      return { zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), tilt, turnHeading };
+    function loadGoogleMaps() {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
+      script.async = true;
+      script.defer = true;
+      script.onerror = () => {
+        console.error('Failed to load Google Maps script');
+        showToast('Failed to load map. Check network or API key.');
+      };
+      document.head.appendChild(script);
     }
-    // FIXED: Check if user marker is near viewport edge
-    function isMarkerNearViewportEdge(position) {
-      if (!map || !position) return false;
-      const bounds = map.getBounds();
-      if (!bounds) return false;
-      const ne = bounds.getNorthEast();
-      const sw = bounds.getSouthWest();
-      const latSpan = ne.lat() - sw.lat();
-      const lngSpan = ne.lng() - sw.lng();
-      const edgeThresholdLat = latSpan * VIEWPORT_EDGE_THRESHOLD;
-      const edgeThresholdLng = lngSpan * VIEWPORT_EDGE_THRESHOLD;
-      const isNearEdge =
-        position.lat > ne.lat() - edgeThresholdLat ||
-        position.lat < sw.lat() + edgeThresholdLat ||
-        position.lng > ne.lng() - edgeThresholdLng ||
-        position.lng < sw.lng() + edgeThresholdLng;
-      console.log('Viewport edge check:', { position, isNearEdge, edgeThresholdLat, edgeThresholdLng });
-      return isNearEdge;
-    }
+    window.initMap = function() {
+      if (!window.google || !google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
+        console.error('Google Maps libraries not loaded:', {
+          Map: !!google.maps?.Map,
+          AdvancedMarkerElement: !!google.maps?.marker,
+          Autocomplete: !!google.maps?.places,
+          DirectionsService: !!google.maps?.routes,
+          Geometry: !!google.maps?.geometry
+        });
+        showToast('Failed to load map libraries. Retrying...');
+        setTimeout(loadGoogleMaps, 2000);
+        return;
+      }
+      console.log('Google Maps API loaded successfully');
+      initializeMap();
+    };
+    // FIXED: Initialize map with tilt for 3D perspective
     function initializeMap() {
       if (!google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
         console.error('Google Maps libraries not loaded:', {
@@ -798,7 +717,7 @@
         center: navState.userLocation,
         zoom: 15,
         mapId: mapId,
-        tilt: 0,
+        tilt: 45, // CHANGED: Added tilt for 3D perspective
         heading: 0,
         disableDefaultUI: true,
         gestureHandling: 'cooperative',
@@ -1139,7 +1058,7 @@
         cameraAlertShown.clear();
         fetchAndDisplayMarkers(map, navState.userLocation);
       });
-document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
+      document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
         highContrastMode = e.target.checked;
         localStorage.setItem('highContrastMode', highContrastMode);
         if (highContrastMode) {
@@ -1189,7 +1108,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           if (tab.getAttribute('data-tab') === 'account') {
             fetchUserProfile();
           }
-          console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
+console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
         });
       });
       document.querySelectorAll('.alerts-tab').forEach(tab => {
@@ -1272,12 +1191,15 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
             await subscribeToPush();
           } else {
             console.warn('Push notification permission denied');
+            showToast('Notifications blocked. Enable in browser settings for alerts.');
           }
         } catch (err) {
           console.error('Error requesting push permission:', err);
+          showToast('Failed to request notification permission.');
         }
       } else {
         console.warn('Push notifications not supported');
+        showToast('Push notifications not supported by this browser.');
       }
     }
     async function subscribeToPush() {
@@ -1303,6 +1225,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
         console.log('Subscribed to push notifications');
       } catch (err) {
         console.error('Failed to subscribe to push:', err);
+        showToast('Failed to enable notifications.');
       }
     }
     function urlB64ToUint8Array(base64String) {
@@ -1851,6 +1774,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
         console.log('Non-navigation recenter:', navState.userLocation, 'Heading: 0');
       }
     }
+    // FIXED: Enhanced for heading-up mode and turn detection
     function getDynamicZoom(currentPos, speed) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
@@ -1880,17 +1804,22 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           break;
         }
       }
-      let zoom = STRAIGHT_ZOOM; // 16.5
+      let zoom = STRAIGHT_ZOOM;
       let tilt = 45;
       if (nextStep && nextStep.maneuver) {
         const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
-        if (distanceToTurn < TURN_THRESHOLD) { // 500m
-          zoom = TURN_ZOOM; // 19
+        if (distanceToTurn < TURN_THRESHOLD) {
+          zoom = TURN_ZOOM;
           tilt = 60;
           const turnPoint = new google.maps.LatLng(nextStep.start_location);
           turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
           console.log('Turn detected:', { distanceToTurn, turnHeading });
         }
+      }
+      // CHANGED: Fallback to polyline heading for straight segments
+      if (!turnHeading && closestIndex < path.length - 1) {
+        turnHeading = google.maps.geometry.spherical.computeHeading(path[closestIndex], path[closestIndex + 1]);
+        console.log('Polyline heading for straight segment:', turnHeading);
       }
       const speedMph = speed ? speed * 2.23694 : 0;
       if (speedMph > 40) {
@@ -1986,7 +1915,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
       }
       console.log('Route ahead updated:', { points: aheadPath.length, distance: totalDistance });
     }
-    // FIXED: Calculate heading from polyline if GPS/compass unavailable
+    // FIXED: Heading-up mode with smooth transitions
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -2002,7 +1931,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           lastAlertFetchTime = now;
         }
         navState.previousUserLocation = navState.userLocation;
-        let pos = navState.userLocation;
+        let pos = { lat: latitude, lng: longitude };
         let snapped = navState.isInitialSnap;
         let computedHeading = heading;
         if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
@@ -2012,7 +1941,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           const path = navState.currentRoute.routes[0].overview_path;
           let minDistance = Infinity;
           let closestIndex = 0;
-          const currentLatLng = new google.maps.LatLng({ lat: latitude, lng: longitude });
+          const currentLatLng = new google.maps.LatLng(pos);
           path.forEach((point, index) => {
             const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
             if (distance < minDistance) {
@@ -2027,10 +1956,16 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           } else if (navState.isInitialSnap) {
             console.log('Maintaining initial snap position:', pos);
           }
-          // CHANGED: Compute heading from polyline if GPS heading is null
+          // CHANGED: Compute heading for heading-up mode
           if (heading == null && closestIndex < path.length - 1) {
-            computedHeading = google.maps.geometry.spherical.computeHeading(path[closestIndex], path[closestIndex + 1]);
+            computedHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, path[closestIndex + 1]);
             console.log('Computed heading from polyline:', computedHeading);
+          } else if (heading == null && navState.previousUserLocation) {
+            computedHeading = google.maps.geometry.spherical.computeHeading(
+              new google.maps.LatLng(navState.previousUserLocation),
+              currentLatLng
+            );
+            console.log('Computed heading from previous position:', computedHeading);
           }
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || 0);
           console.log('Heading updated:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading });
@@ -2042,7 +1977,6 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           }
         } else {
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || 0);
-          pos = { lat: latitude, lng: longitude };
         }
         navState.userLocation = pos;
         if (userMarker) {
@@ -2072,12 +2006,14 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
         lastPosition = pos;
         if (navState.isNavigating && navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
-          // CHANGED: Force restoreNavigationView on every update
-          restoreNavigationView();
-          console.log('Camera updated via onPositionUpdate:', {
-            center: navState.userLocation,
-            heading: navState.currentHeading
-          });
+          // CHANGED: Force restoreNavigationView for heading-up
+          if (isMarkerNearViewportEdge(navState.userLocation) || true) {
+            restoreNavigationView();
+            console.log('Camera updated via onPositionUpdate:', {
+              center: navState.userLocation,
+              heading: navState.currentHeading
+            });
+          }
           navState.isInitialSnap = false;
         }
         navState.lastKnownPosition = pos;
@@ -2088,6 +2024,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
+    // CHANGED: Use watchPosition for live GPS tracking
     function startGPS() {
       if (!navigator.geolocation) {
         showToast('Geolocation is not supported by this browser.');
@@ -2141,7 +2078,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
               onPositionUpdate,
               (error) => {
                 console.error('Geolocation watch error:', error);
-                showToast('Error getting location: ' + error.message);
+                handleGeolocationError(error);
               },
               {
                 enableHighAccuracy: true,
@@ -2632,16 +2569,12 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
       document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
       document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
-    // FIXED: Enhanced to ensure route stays north-up and user is centered
+    // FIXED: Heading-up mode with centered marker and smooth transitions
     function restoreNavigationView() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         navState.navigationZoom = zoom;
-        const center = google.maps.geometry.spherical.computeOffset(
-          new google.maps.LatLng(navState.userLocation),
-          ROUTE_OFFSET,
-          turnHeading || navState.currentHeading
-        );
+        const heading = navState.forceHeadingUp && !turnHeading ? navState.currentHeading : turnHeading || navState.currentHeading;
         new TWEEN.Tween({
           zoom: map.getZoom(),
           center: map.getCenter().toJSON(),
@@ -2650,10 +2583,10 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
         })
           .to({
             zoom,
-            center: center.toJSON(),
-            heading: turnHeading || navState.currentHeading,
+            center: navState.userLocation, // CHANGED: Center on user for heading-up
+            heading,
             tilt
-          }, 400)
+          }, 300)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
             map.setCenter(obj.center);
@@ -2663,8 +2596,8 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           })
           .start();
         console.log('Navigation view restored:', {
-          center: center.toJSON(),
-          heading: turnHeading || navState.currentHeading,
+          center: navState.userLocation,
+          heading,
           zoom,
           tilt
         });
@@ -2791,12 +2724,15 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
         restoreNavigationView();
         console.log('Navigation view re-locked after dismissing camera alert');
       }
-}
-    // CHANGED: Added viewport edge check to prevent marker going off-screen
+    }
+    // CHANGED: Ensure marker stays centered
     function isMarkerNearViewportEdge(position) {
       if (!map || !position) return false;
       const bounds = map.getBounds();
-      if (!bounds) return false;
+      if (!bounds) {
+        console.warn('Map bounds unavailable, cannot check viewport edge');
+        return false;
+      }
       const ne = bounds.getNorthEast();
       const sw = bounds.getSouthWest();
       const latSpan = ne.lat() - sw.lat();
@@ -2824,7 +2760,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
           cameraAlertShown.delete(`static-${index}`);
         }
       });
-      try {
+try {
         const token = localStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, skipping camera check');
@@ -2892,6 +2828,7 @@ document.getElementById('high-contrast-toggle').addEventListener('change', (e) =
         }, 3000);
       }
     }
+    // CHANGED: Enhanced geolocation error handling for permissions
     function handleGeolocationError(error, isInitial = false) {
       let message = 'Failed to get location. Please try again later.';
       if (error.code === 1) {
