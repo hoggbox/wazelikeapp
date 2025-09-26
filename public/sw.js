@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-app-v1.0.6';
+const CACHE_NAME = 'waze-app-v1.0.7'; // CHANGED: Bumped version to clear old caches
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -37,19 +37,29 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   event.respondWith(
-    caches.match(event.request).then(response => {
-      if (response) {
+    caches.match(event.request).then(cachedResponse => {
+      if (cachedResponse) {
         console.log('Cache hit:', event.request.url);
-        return response;
+        return cachedResponse;
       }
       console.log('Cache miss, fetching:', event.request.url);
       return fetch(event.request).then(networkResponse => {
-        if (networkResponse.ok && event.request.method === 'GET' && 
+        // CHANGED: Clone response immediately to ensure it's not consumed
+        const responseClone = networkResponse.ok && networkResponse.body ? networkResponse.clone() : null;
+        if (responseClone && event.request.method === 'GET' && 
             (event.request.url.includes('/api/markers') || event.request.url.includes('/api/hazards-near-route') || event.request.url.includes('/index.html'))) {
           caches.open(CACHE_NAME).then(cache => {
-            cache.put(event.request, networkResponse.clone());
-            console.log('Cached API response:', event.request.url);
+            cache.put(event.request, responseClone); // FIXED: Use cloned response
+            console.log('Cached API response:', event.request.url, { status: networkResponse.status }); // CHANGED: Added status logging
+          }).catch(err => {
+            console.error('Cache put error:', err, 'URL:', event.request.url);
           });
+        } else if (!responseClone) {
+          console.warn('Skipping cache: Response not clonable or invalid', {
+            url: event.request.url,
+            ok: networkResponse.ok,
+            body: !!networkResponse.body
+          }); // CHANGED: Added warning for non-clonable responses
         }
         return networkResponse;
       }).catch(err => {
