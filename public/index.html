@@ -14,7 +14,15 @@
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
-    #map { height: 100%; width: 100%; position: absolute; top: 0; left: 0; z-index: 0; }
+    #map { 
+      height: 100%; 
+      width: 100%; 
+      position: absolute; 
+      top: 0; 
+      left: 0; 
+      z-index: 0; 
+      overflow: visible; /* CHANGED: Set to visible to prevent marker clipping */
+    }
     #compass {
       position: absolute; top: 10vh; right: 2vw; width: 40px; height: 40px; z-index: 1001;
       background: url('https://i.postimg.cc/YS0h0m7R/compass.png') no-repeat center center;
@@ -777,9 +785,9 @@
       trafficLayer = new google.maps.TrafficLayer({ map: navState.showTraffic ? map : null });
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer({
-        map: map, // CHANGED: Set map initially to ensure rendering
+        map: map,
         suppressMarkers: true,
-        preserveViewport: false, // CHANGED: Disable preserveViewport for full route display
+        preserveViewport: false,
         polylineOptions: {
           strokeColor: navState.mainRouteColor,
           strokeWeight: 6,
@@ -810,6 +818,15 @@
         position: navState.userLocation,
         content: markerElement,
         title: 'Your Location'
+      });
+      // CHANGED: Add location_changed listener for userMarker
+      google.maps.event.addListener(userMarker, 'position_changed', () => {
+        const pos = userMarker.position;
+        if (pos && navState.isNavigating && navState.isFollowing) {
+          map.setCenter(pos);
+          map.setHeading(navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+          console.log('User marker position changed, map recentered:', { lat: pos.lat, lng: pos.lng, heading: navState.currentHeading });
+        }
       });
       if (showTrafficCameras) {
         const trafficCamImage = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
@@ -1079,7 +1096,7 @@
         console.log('Traffic layer toggled:', navState.showTraffic);
       });
       document.getElementById('main-route-color').addEventListener('change', (e) => {
-        navState.mainRouteColor = e.target.value;
+navState.mainRouteColor = e.target.value;
         localStorage.setItem('mainRouteColor', navState.mainRouteColor);
         if (routePolyline) {
           routePolyline.setOptions({
@@ -1097,7 +1114,7 @@
             zIndex: 5
           }
         });
-console.log('Main route color changed to:', navState.mainRouteColor);
+        console.log('Main route color changed to:', navState.mainRouteColor);
       });
       document.getElementById('alt-route-color').addEventListener('change', (e) => {
         navState.altRouteColor = e.target.value;
@@ -2005,7 +2022,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
         }
         return;
       }
-      const path = navState.currentRoute.routes[0].overview_path; // FIXED: Use full overview_path
+      const path = navState.currentRoute.routes[0].overview_path;
       const currentLatLng = new google.maps.LatLng(currentPos);
       let closestIndex = 0;
       let minDistance = Infinity;
@@ -2016,7 +2033,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
           closestIndex = index;
         }
       });
-      const fullPath = path.slice(closestIndex); // CHANGED: Draw full path from current position to destination
+      const fullPath = path.slice(closestIndex);
       if (routePolyline) {
         routePolyline.setPath(fullPath);
       } else {
@@ -2034,7 +2051,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
         offRoadPolyline = null;
         console.log('Off-road polyline cleared: close to target');
       }
-      console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] }); // CHANGED: Log full path details
+      console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
     }
     function updateOffRoadPolyline(rawPos, targetPos) {
       if (!navState.isNavigating || !rawPos || !targetPos) {
@@ -2204,11 +2221,13 @@ console.log('Main route color changed to:', navState.mainRouteColor);
         if (navState.isNavigating && navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
-          map.panTo(navState.userLocation);
-          map.setZoom(zoom);
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          map.setHeading(heading);
-          map.setTilt(tilt);
+          map.moveCamera({
+            center: navState.userLocation,
+            zoom: zoom,
+            heading: heading,
+            tilt: tilt
+          }); // CHANGED: Use moveCamera for smooth navigation updates
           console.log('Camera view updated:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
           navState.isInitialSnap = false;
         }
@@ -2258,7 +2277,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
             navState.userLocation = point;
             console.log('Forced snap to route start:', navState.userLocation);
             userMarker.position = navState.userLocation;
-            calculateAndDisplayRoute(navState.userLocation, navState.destination); // CHANGED: Call calculateAndDisplayRoute to ensure full route
+            calculateAndDisplayRoute(navState.userLocation, navState.destination);
             fetchCurrentAlerts();
             startRerouteCheck();
             navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
@@ -2360,7 +2379,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
       document.getElementById('bottom-hud-container').style.display = 'none';
       document.getElementById('simulate-position-button').style.display = 'none';
       alternativeRenderer.setMap(null);
-      directionsRenderer.setMap(null); // CHANGED: Clear directionsRenderer
+      directionsRenderer.setMap(null);
       trafficLayer.setMap(null);
       if (destMarker) destMarker.setMap(null);
       document.getElementById('start-button').style.display = 'none';
@@ -2372,7 +2391,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
         gestureHandling: 'cooperative',
         mapTypeControl: true
       });
-      map.panTo(navState.userLocation);
+      map.setCenter(navState.userLocation);
       console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, tilt: 0 });
     }
     function calculateAndDisplayRoute(origin, dest, callback) {
@@ -2398,26 +2417,30 @@ console.log('Main route color changed to:', navState.mainRouteColor);
                 lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() }, 
                 destination: dest, 
                 distanceToDest 
-              }); // CHANGED: Added destination validation
+              });
               showToast('Route does not reach destination. Trying alternative...');
               return;
             }
             navState.currentRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
-            directionsRenderer.setDirections(response); // FIXED: Use directionsRenderer for main route
+            directionsRenderer.setDirections(response);
             console.log('Main route calculated:', { 
               pathLength: navState.routePolyline.length, 
               endPoint: navState.routePolyline[navState.routePolyline.length - 1], 
               destination: dest 
-            }); // CHANGED: Log route details
+            });
             updateOffRoadPolyline(rawUserLocation || navState.userLocation, navState.routePolyline[0]);
             updateHUD(response, origin);
             updateBottomHUD(response);
             if (callback) callback();
             if (navState.isFollowing) {
               navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
-              map.panTo(navState.userLocation);
-              map.setZoom(navState.navigationZoom);
+              map.moveCamera({
+                center: navState.userLocation,
+                zoom: navState.navigationZoom,
+                heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
+                tilt: 45
+              });
             }
           } else {
             console.error('Directions request failed:', status);
@@ -2675,7 +2698,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
         const dist = distanceToSegment(hazardPoint, path[i], path[i + 1]);
         minDist = Math.min(minDist, dist);
       }
-      console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
+console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
       return minDist > BUFFER;
     }
     async function checkAlternativeRoute(hazard) {
@@ -2690,7 +2713,7 @@ console.log('Main route color changed to:', navState.mainRouteColor);
         }
         const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
         const tryRoute = (options, attempt) => {
-console.log(`Attempting alternate route calculation, attempt ${attempt}:`, { 
+          console.log(`Attempting alternate route calculation, attempt ${attempt}:`, { 
             origin: navState.userLocation, 
             destination: navState.destination, 
             options 
@@ -2881,9 +2904,12 @@ console.log(`Attempting alternate route calculation, attempt ${attempt}:`, {
           }, 300)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
-            map.panTo(obj.center);
-            map.setZoom(obj.zoom);
-            map.setHeading(obj.heading);
+            map.moveCamera({
+              center: obj.center,
+              zoom: obj.zoom,
+              heading: obj.heading,
+              tilt: obj.tilt
+            });
             updateCompass();
             if (navState.mapOrientation === 'north-up') {
               userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
@@ -2910,7 +2936,7 @@ console.log(`Attempting alternate route calculation, attempt ${attempt}:`, {
         navState.userLocation = point;
         userMarker.position = navState.userLocation;
         console.log('Snapped to new route start after reroute:', navState.userLocation);
-        directionsRenderer.setDirections(navState.currentRoute); // CHANGED: Update directionsRenderer for reroute
+        directionsRenderer.setDirections(navState.currentRoute);
         updateRouteAhead(navState.userLocation);
         updateOffRoadPolyline(rawUserLocation, path[0]);
         alternativeRenderer.setMap(null);
@@ -2953,7 +2979,7 @@ console.log(`Attempting alternate route calculation, attempt ${attempt}:`, {
       if (navState.originalRoute) {
         navState.currentRoute = navState.originalRoute;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
-        directionsRenderer.setDirections(navState.currentRoute); // CHANGED: Restore directionsRenderer for original route
+        directionsRenderer.setDirections(navState.currentRoute);
         const path = navState.routePolyline;
         const { point } = findClosestRoutePoint(navState.userLocation, path, navState.currentHeading, 0);
         navState.userLocation = point;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-app-v1.0.7'; // CHANGED: Bumped version to clear old caches
+const CACHE_NAME = 'waze-app-v1.0.8'; // CHANGED: Bumped version to clear old caches
 
 self.addEventListener('install', event => {
   event.waitUntil(
