@@ -29,7 +29,7 @@
       background-size: contain; transition: transform 0.3s ease;
     }
     #search-container {
-      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1002;
+      position: absolute; top: 0.5vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1002; /* CHANGED: Adjusted top to 0.5vh */
       display: flex; align-items: center; background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
       padding: 0.5rem; border: 1px solid #ccc;
     }
@@ -51,7 +51,7 @@
     .pac-item { padding: 0.5rem; cursor: pointer; color: #333; }
     .pac-item:hover { background: #f0f0f0; }
     #hud-container {
-      position: absolute; top: 12vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 95vw; z-index: 1001; /* CHANGED: Moved to top: 2vh, max-width: 95vw */
       background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
       border: 1px solid #ccc; display: none; flex-direction: column; gap: 0.5vh;
     }
@@ -648,8 +648,8 @@
         element.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
       });
       console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
-      console.log('HUD initialized: { top: 12vh, z-index: 1001 }');
-      console.log('Search container initialized: { top: 2vh, z-index: 1002 }');
+      console.log('HUD initialized: { top: 2vh, z-index: 1001 }');
+      console.log('Search container initialized: { top: 0.5vh, z-index: 1002 }');
     }
     function updateCompass() {
       const compass = document.getElementById('compass');
@@ -776,9 +776,10 @@
         mapId: mapId,
         tilt: 45,
         heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
-        disableDefaultUI: true,
+        disableDefaultUI: true, // CHANGED: Ensured all default UI controls are disabled
         gestureHandling: 'cooperative',
-        mapTypeControl: false,
+        mapTypeControl: false, // CHANGED: Explicitly disabled map type control
+        streetViewControl: false, // CHANGED: Disabled Street View Pegman
         clickableIcons: false
       });
       map.setMapTypeId(navState.mapType);
@@ -907,7 +908,7 @@
           showToast('Invalid address selected. Please try again.');
         }
       });
-document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
+      document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       document.getElementById('main-route-color').value = navState.mainRouteColor;
       document.getElementById('alt-route-color').value = navState.altRouteColor;
       document.getElementById('map-type').value = navState.mapType;
@@ -926,8 +927,8 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       setupEventListeners();
       updateCompass();
       console.log('Button container repositioned and styled: { top: 50%, right: 2vw, z-index: 1001 }');
-      console.log('HUD initialized: { top: 12vh, z-index: 1001 }');
-      console.log('Search container initialized: { top: 2vh, z-index: 1002 }');
+      console.log('HUD initialized: { top: 2vh, z-index: 1001 }');
+      console.log('Search container initialized: { top: 0.5vh, z-index: 1002 }');
     }
     function setupEventListeners() {
       document.getElementById('start-button').addEventListener('click', startGPS);
@@ -956,7 +957,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         navState.alertState = 'IDLE';
         if (navState.isNavigating) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           console.log('Map unlocked for manual report during navigation');
         }
         console.log('Hazard button clicked, report box opened in IDLE state');
@@ -976,7 +977,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         settingsHudContainer.classList.remove('active');
         console.log('Settings HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           restoreNavigationView();
           console.log('Navigation view re-locked after closing settings HUD');
         }
@@ -994,7 +995,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         alertsHudContainer.classList.remove('active');
         console.log('Alerts HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           restoreNavigationView();
           console.log('Navigation view re-locked after closing alerts HUD');
         }
@@ -1011,7 +1012,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         leaderboardHudContainer.classList.remove('active');
         console.log('Leaderboard HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           restoreNavigationView();
           console.log('Navigation view re-locked after closing leaderboard HUD');
         }
@@ -1055,21 +1056,21 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       map.addListener('dragstart', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           console.log('Map unlocked for free roam on dragstart during navigation');
         }
       });
       map.addListener('drag', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           console.log('Map unlocked for free roam on drag during navigation');
         }
       });
       map.addListener('zoom_changed', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           console.log('Map unlocked for free roam on zoom change during navigation');
         }
       });
@@ -1080,7 +1081,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         if (navState.isNavigating) {
           navState.isFollowing = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
           restoreNavigationView();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
         } else {
@@ -1088,7 +1089,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
           console.log('Recenter button clicked, re-centered to user location (non-navigation)');
         }
       });
-      document.getElementById('traffic-layer-toggle').addEventListener('change', (e) => {
+document.getElementById('traffic-layer-toggle').addEventListener('change', (e) => {
         navState.showTraffic = e.target.checked;
         localStorage.setItem('showTraffic', navState.showTraffic);
         trafficLayer.setMap(navState.showTraffic ? map : null);
@@ -1151,10 +1152,10 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         localStorage.setItem('isFollowing', navState.isFollowing);
         console.log('Auto-recenter toggled:', navState.isFollowing);
         if (navState.isFollowing && navState.isNavigating) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           restoreNavigationView();
         } else if (navState.isNavigating) {
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: false });
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         }
       });
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
@@ -1634,7 +1635,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         confirmAlert.classList.remove('active');
         reportOptions.style.display = 'grid';
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           restoreNavigationView();
           console.log('Navigation view re-locked after manual report');
         }
@@ -1660,7 +1661,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
       if (navState.isNavigating && navState.isFollowing) {
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         restoreNavigationView();
         console.log('Navigation view re-locked after cancelling manual report');
       }
@@ -1840,7 +1841,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       }
       alerts.forEach(alert => {
         const dateObj = new Date(alert.timestamp);
-        const now = new Date(); // FIXED: Corrected typo from 'New Date()'
+        const now = new Date();
         const durationMs = now - dateObj;
         const item = document.createElement('div');
         item.className = 'alert-item';
@@ -1894,7 +1895,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       navState.tempAlertData = null;
       console.log('All HUDs closed');
       if (navState.isNavigating && navState.isFollowing) {
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         restoreNavigationView();
         console.log('Navigation view re-locked after closing HUDs');
         if (navState.pendingReroute) {
@@ -2257,7 +2258,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
-      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
       directionsService.route(
         {
           origin: navState.userLocation,
@@ -2386,9 +2387,10 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         zoom: 15,
         tilt: 0,
         heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
-        disableDefaultUI: false,
+        disableDefaultUI: true,
         gestureHandling: 'cooperative',
-        mapTypeControl: true
+        mapTypeControl: false,
+        streetViewControl: false
       });
       map.setCenter(navState.userLocation);
       console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, tilt: 0 });
@@ -2472,7 +2474,7 @@ document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
           closestPoint = point;
         }
       });
-let currentStep = null;
+      let currentStep = null;
       let nextStep = null;
       const legs = route.routes[0].legs[0];
       for (let i = 0; i < legs.steps.length; i++) {
@@ -2682,7 +2684,7 @@ let currentStep = null;
       const proj = projectPointToLine(point, a, b);
       return google.maps.geometry.spherical.computeDistanceBetween(point, proj);
     }
-    function getMinDistanceToPolyline(point, path) {
+function getMinDistanceToPolyline(point, path) {
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const dist = distanceToSegment(point, path[i], path[i + 1]);
@@ -2986,7 +2988,7 @@ let currentStep = null;
         navState.isInitialSnap = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
         navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         restoreNavigationView();
         showToast('Alternative route accepted.');
         console.log('Reroute accepted, navigation view restored:', navState.currentRoute.routes[0].legs[0].distance.text);
@@ -3034,7 +3036,7 @@ let currentStep = null;
       navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
-      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
       restoreNavigationView();
       showToast('Reroute rejected, continuing on original route.');
       console.log('Reroute rejected, navigation view restored:', { center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading });
@@ -3089,7 +3091,7 @@ let currentStep = null;
         console.log('Showing pending reroute HUD after camera alert dismissal');
       }
       if (navState.isNavigating && navState.isFollowing) {
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true });
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         restoreNavigationView();
         console.log('Navigation view re-locked after dismissing camera alert');
       }
