@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-app-v1.0.5'; // CHANGED: Bumped version to clear old caches
+const CACHE_NAME = 'waze-app-v1.0.6'; // CHANGED: Bumped version to clear old caches
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -39,11 +39,11 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request).then(response => {
       if (response) {
-        console.log('Serving from cache:', event.request.url);
+        console.log('Cache hit:', event.request.url); // CHANGED: Enhanced logging
         return response;
       }
+      console.log('Cache miss, fetching:', event.request.url); // CHANGED: Enhanced logging
       return fetch(event.request).then(networkResponse => {
-        // CHANGED: Cache API responses for markers and hazards
         if (networkResponse.ok && event.request.method === 'GET' && 
             (event.request.url.includes('/api/markers') || event.request.url.includes('/api/hazards-near-route') || event.request.url.includes('/index.html'))) {
           caches.open(CACHE_NAME).then(cache => {
@@ -55,10 +55,11 @@ self.addEventListener('fetch', event => {
       }).catch(err => {
         console.error('Fetch error:', err, 'URL:', event.request.url);
         if (event.request.mode === 'navigate') {
+          console.log('Serving cached /index.html for navigation request');
           return caches.match('/index.html');
         }
-        // CHANGED: Fallback to cached markers for offline alert display
         if (event.request.url.includes('/api/markers')) {
+          console.log('Serving cached or empty /api/markers response for offline');
           return caches.match('/api/markers?lat=33.083270&lng=-83.233040&maxDistance=50000') || 
                  new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
