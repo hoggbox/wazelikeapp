@@ -16,7 +16,7 @@ const userSchema = new mongoose.Schema({
   }],
   friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   pendingRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
-  pushSubscription: { type: Object },
+  pushSubscriptions: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PushSubscription' }], // CHANGED: Reference PushSubscription model
   createdAt: { type: Date, default: Date.now }
 });
 

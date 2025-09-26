@@ -29,7 +29,7 @@
       background-size: contain; transition: transform 0.3s ease;
     }
     #search-container {
-      position: absolute; top: 0.5vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1002; /* CHANGED: Adjusted top to 0.5vh */
+      position: absolute; top: 0.5vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1002;
       display: flex; align-items: center; background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
       padding: 0.5rem; border: 1px solid #ccc;
     }
@@ -51,7 +51,7 @@
     .pac-item { padding: 0.5rem; cursor: pointer; color: #333; }
     .pac-item:hover { background: #f0f0f0; }
     #hud-container {
-      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 95vw; z-index: 1001; /* CHANGED: Moved to top: 2vh, max-width: 95vw */
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 95vw; z-index: 1001;
       background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
       border: 1px solid #ccc; display: none; flex-direction: column; gap: 0.5vh;
     }
@@ -453,6 +453,10 @@
           <input type="checkbox" id="traffic-camera-toggle" checked>
         </div>
         <div class="settings-option">
+          <label for="push-notifications-toggle">Push Notifications</label>
+          <input type="checkbox" id="push-notifications-toggle" checked> <!-- NEW: Added push notification toggle -->
+        </div>
+        <div class="settings-option">
           <label for="high-contrast-toggle">High Contrast Mode</label>
           <input type="checkbox" id="high-contrast-toggle">
         </div>
@@ -550,6 +554,7 @@
     let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
     let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
     let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
+    let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false'; // NEW: Added push notification toggle state
     let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up';
     let isInitialized = false;
     let toastTimeout = null;
@@ -776,10 +781,10 @@
         mapId: mapId,
         tilt: 45,
         heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
-        disableDefaultUI: true, // CHANGED: Ensured all default UI controls are disabled
+        disableDefaultUI: true,
         gestureHandling: 'cooperative',
-        mapTypeControl: false, // CHANGED: Explicitly disabled map type control
-        streetViewControl: false, // CHANGED: Disabled Street View Pegman
+        mapTypeControl: false,
+        streetViewControl: false,
         clickableIcons: false
       });
       map.setMapTypeId(navState.mapType);
@@ -915,6 +920,7 @@
       document.getElementById('map-orientation').value = navState.mapOrientation;
       document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
       document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
+      document.getElementById('push-notifications-toggle').checked = pushNotificationsEnabled; // NEW: Initialize push notification toggle
       document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
       document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
       document.getElementById('camera-alert-distance').value = cameraAlertDistance;
@@ -957,7 +963,7 @@
         navState.alertState = 'IDLE';
         if (navState.isNavigating) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for manual report during navigation');
         }
         console.log('Hazard button clicked, report box opened in IDLE state');
@@ -977,7 +983,7 @@
         settingsHudContainer.classList.remove('active');
         console.log('Settings HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           restoreNavigationView();
           console.log('Navigation view re-locked after closing settings HUD');
         }
@@ -995,7 +1001,7 @@
         alertsHudContainer.classList.remove('active');
         console.log('Alerts HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           restoreNavigationView();
           console.log('Navigation view re-locked after closing alerts HUD');
         }
@@ -1012,7 +1018,7 @@
         leaderboardHudContainer.classList.remove('active');
         console.log('Leaderboard HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           restoreNavigationView();
           console.log('Navigation view re-locked after closing leaderboard HUD');
         }
@@ -1022,6 +1028,16 @@
       document.getElementById('recalibrate-compass-button').addEventListener('click', () => {
         recalibrateCompass();
         console.log('Recalibrate Compass button clicked');
+      });
+      document.getElementById('push-notifications-toggle').addEventListener('change', async (e) => { // NEW: Push notification toggle handler
+        pushNotificationsEnabled = e.target.checked;
+        localStorage.setItem('pushNotificationsEnabled', pushNotificationsEnabled);
+        console.log('Push notifications toggled:', pushNotificationsEnabled);
+        if (pushNotificationsEnabled) {
+          await requestPushPermission();
+        } else {
+          await unsubscribeFromPush();
+        }
       });
       document.querySelectorAll('.report-button').forEach(button => {
         button.addEventListener('click', async () => {
@@ -1056,21 +1072,21 @@
       map.addListener('dragstart', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for free roam on dragstart during navigation');
         }
       });
       map.addListener('drag', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for free roam on drag during navigation');
         }
       });
       map.addListener('zoom_changed', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for free roam on zoom change during navigation');
         }
       });
@@ -1081,7 +1097,7 @@
         if (navState.isNavigating) {
           navState.isFollowing = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false }); // CHANGED: Added mapTypeControl, streetViewControl
+          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           restoreNavigationView();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
         } else {
@@ -1172,6 +1188,16 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
           }
         });
         fetchAndDisplayMarkers(map, navState.userLocation);
+      });
+      document.getElementById('push-notifications-toggle').addEventListener('change', async (e) => {
+        pushNotificationsEnabled = e.target.checked;
+        localStorage.setItem('pushNotificationsEnabled', pushNotificationsEnabled);
+        console.log('Push notifications toggled:', pushNotificationsEnabled);
+        if (pushNotificationsEnabled) {
+          await requestPushPermission();
+        } else {
+          await unsubscribeFromPush();
+        }
       });
       document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
         highContrastMode = e.target.checked;
@@ -1298,6 +1324,10 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
       }
     }
     async function requestPushPermission() {
+      if (!pushNotificationsEnabled) {
+        console.log('Push notifications disabled, skipping permission request');
+        return;
+      }
       if ('PushManager' in window) {
         try {
           const permission = await Notification.requestPermission();
@@ -1307,6 +1337,9 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
           } else {
             console.warn('Push notification permission denied');
             showToast('Notifications blocked. Enable in browser settings for alerts.');
+            localStorage.setItem('pushNotificationsEnabled', false);
+            document.getElementById('push-notifications-toggle').checked = false;
+            pushNotificationsEnabled = false;
           }
         } catch (err) {
           console.error('Error requesting push permission:', err);
@@ -1315,9 +1348,16 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
       } else {
         console.warn('Push notifications not supported');
         showToast('Push notifications not supported by this browser.');
+        localStorage.setItem('pushNotificationsEnabled', false);
+        document.getElementById('push-notifications-toggle').checked = false;
+        pushNotificationsEnabled = false;
       }
     }
     async function subscribeToPush() {
+      if (!pushNotificationsEnabled) {
+        console.log('Push notifications disabled, skipping subscription');
+        return;
+      }
       try {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.subscribe({
@@ -1329,7 +1369,7 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
           console.error('Invalid token, cannot subscribe to push');
           return;
         }
-        await fetch('/api/auth/subscribe', {
+        const response = await fetch('/api/auth/subscribe', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1337,10 +1377,39 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
           },
           body: JSON.stringify(sub)
         });
+        if (!response.ok) throw new Error(`Failed to subscribe: ${response.statusText}`);
         console.log('Subscribed to push notifications');
       } catch (err) {
         console.error('Failed to subscribe to push:', err);
         showToast('Failed to enable notifications.');
+      }
+    }
+    async function unsubscribeFromPush() {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          const token = localStorage.getItem('token');
+          if (!token || !token.includes('.') || token === 'undefined') {
+            console.error('Invalid token, cannot unsubscribe from push');
+            return;
+          }
+          await fetch('/api/auth/unsubscribe', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token.trim()}`
+            },
+            body: JSON.stringify(sub)
+          });
+          await sub.unsubscribe();
+          console.log('Unsubscribed from push notifications');
+        } else {
+          console.log('No push subscription to unsubscribe');
+        }
+      } catch (err) {
+        console.error('Failed to unsubscribe from push:', err);
+        showToast('Failed to disable notifications.');
       }
     }
     function urlB64ToUint8Array(base64String) {
@@ -2632,7 +2701,7 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
               console.log('Ignoring previously handled hazard:', hazard._id);
               return false;
             }
-            const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
             const distanceToPolyline = getMinDistanceToPolyline(hazardLatLng, path);
             console.log(`Hazard ${hazard._id}: type=${hazard.type}, distanceToUser=${distanceToHazard}m, distanceToPolyline=${distanceToPolyline}m`);
@@ -2677,14 +2746,14 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
       if (dx === 0 && dy === 0) return a;
       const t = ((lat3 - lat1) * dy + (lng3 - lng1) * dx) / (dx * dx + dy * dy);
       if (t < 0) return a;
-      if (t > 1) return b;
+      if ( t > 1) return b;
       return new google.maps.LatLng(lat1 + t * dy, lng1 + t * dx);
     }
     function distanceToSegment(point, a, b) {
       const proj = projectPointToLine(point, a, b);
       return google.maps.geometry.spherical.computeDistanceBetween(point, proj);
     }
-function getMinDistanceToPolyline(point, path) {
+    function getMinDistanceToPolyline(point, path) {
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const dist = distanceToSegment(point, path[i], path[i + 1]);
@@ -2693,7 +2762,7 @@ function getMinDistanceToPolyline(point, path) {
       return minDist;
     }
     function isHazardAvoided(hazardPoint, path) {
-      const BUFFER = 50; // CHANGED: Reduced from 100m to 50m for less strict avoidance
+      const BUFFER = 50;
       let minDist = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         const dist = distanceToSegment(hazardPoint, path[i], path[i + 1]);
@@ -2714,7 +2783,6 @@ function getMinDistanceToPolyline(point, path) {
         }
         const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
         const tryRoute = (options, attempt) => {
-          // CHANGED: Calculate midpoint for waypoint to force route diversity
           const midpoint = google.maps.geometry.spherical.interpolate(
             new google.maps.LatLng(navState.userLocation),
             new google.maps.LatLng(navState.destination),
@@ -2725,7 +2793,7 @@ function getMinDistanceToPolyline(point, path) {
             destination: navState.destination,
             travelMode: google.maps.TravelMode.DRIVING,
             provideRouteAlternatives: true,
-            waypoints: attempt > 4 ? [{ location: midpoint, stopover: false }] : [], // CHANGED: Add waypoint after 4 attempts
+            waypoints: attempt > 4 ? [{ location: midpoint, stopover: false }] : [],
             ...options
           };
           console.log(`Attempting alternate route calculation, attempt ${attempt}:`, { 
@@ -2755,7 +2823,6 @@ function getMinDistanceToPolyline(point, path) {
                   destLatLng
                 );
                 const altDuration = alt.legs[0].duration.value;
-                // CHANGED: Relaxed destination tolerance to 50m
                 if (distanceToDest > 50) {
                   console.warn(`Route ${i} rejected: Does not reach destination`, { 
                     lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() }, 
@@ -2764,7 +2831,6 @@ function getMinDistanceToPolyline(point, path) {
                   });
                   continue;
                 }
-                // Track fastest route as fallback
                 if (altDuration < fastestDuration) {
                   fastestRoute = alt;
                   fastestDuration = altDuration;
@@ -2776,7 +2842,7 @@ function getMinDistanceToPolyline(point, path) {
                     timeSaved, 
                     avoidsHazard: true, 
                     reachesDestination: true,
-                    distanceToDest // CHANGED: Added for debugging
+                    distanceToDest 
                   });
                   if (timeSaved >= bestTimeSaved) {
                     bestAlt = alt;
@@ -2785,7 +2851,7 @@ function getMinDistanceToPolyline(point, path) {
                 } else {
                   console.log(`Route ${i} rejected: Does not avoid hazard`, { 
                     duration: altDuration,
-                    minDistanceToHazard: getMinDistanceToPolyline(hazardLatLng, altPath) // CHANGED: Added for debugging
+                    minDistanceToHazard: getMinDistanceToPolyline(hazardLatLng, altPath) 
                   });
                 }
               }
@@ -2802,7 +2868,6 @@ function getMinDistanceToPolyline(point, path) {
                 });
                 resolve(timeSavedMin);
               } else if (fastestRoute) {
-                // CHANGED: Fallback to fastest route if no hazard-avoiding route
                 navState.alternativeRoute = {
                   ...response,
                   routes: [fastestRoute]
@@ -2814,7 +2879,7 @@ function getMinDistanceToPolyline(point, path) {
                   endPoint: fastestRoute.overview_path[fastestRoute.overview_path.length - 1] 
                 });
                 resolve(timeSavedMin);
-              } else if (attempt < 8) { // CHANGED: Increased retries to 8
+              } else if (attempt < 8) {
                 console.log(`No valid alternate route found, retrying with new options, attempt ${attempt + 1}`);
                 const newOptions = [
                   { avoidTolls: false, avoidHighways: false, avoidFerries: false },
@@ -2824,7 +2889,7 @@ function getMinDistanceToPolyline(point, path) {
                   { avoidTolls: false, avoidHighways: false, avoidFerries: true },
                   { avoidTolls: true, avoidHighways: false, avoidFerries: true },
                   { avoidTolls: false, avoidHighways: true, avoidFerries: true },
-                  { avoidTolls: true, avoidHighways: true, avoidFerries: true } // CHANGED: Added more combinations
+                  { avoidTolls: true, avoidHighways: true, avoidFerries: true }
                 ][attempt];
                 tryRoute(newOptions, attempt + 1);
               } else {
@@ -2834,7 +2899,7 @@ function getMinDistanceToPolyline(point, path) {
               }
             } else {
               console.error(`Directions request failed, attempt ${attempt}:`, status);
-              if (attempt < 8) { // CHANGED: Increased retries to 8
+              if (attempt < 8) {
                 console.log(`Retrying with new options, attempt ${attempt + 1}`);
                 const newOptions = [
                   { avoidTolls: false, avoidHighways: false, avoidFerries: false },
@@ -2844,7 +2909,7 @@ function getMinDistanceToPolyline(point, path) {
                   { avoidTolls: false, avoidHighways: false, avoidFerries: true },
                   { avoidTolls: true, avoidHighways: false, avoidFerries: true },
                   { avoidTolls: false, avoidHighways: true, avoidFerries: true },
-                  { avoidTolls: true, avoidHighways: true, avoidFerries: true } // CHANGED: Added more combinations
+                  { avoidTolls: true, avoidHighways: true, avoidFerries: true }
                 ][attempt];
                 tryRoute(newOptions, attempt + 1);
               } else {
@@ -3417,6 +3482,23 @@ function getMinDistanceToPolyline(point, path) {
           currentAlerts.push(alert);
           checkHazardsAndOfferReroute();
         }
+        if (pushNotificationsEnabled && document.visibilityState === 'hidden') {
+          const distance = navState.userLocation
+            ? google.maps.geometry.spherical.computeDistanceBetween(
+                new google.maps.LatLng(navState.userLocation),
+                new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0])
+              ) / 1609.34
+            : null;
+          if (!distance || distance <= (isTrafficCamera ? cameraAlertDistance : hazardAlertDistance)) {
+            navigator.serviceWorker.controller?.postMessage({
+              type: 'SHOW_NOTIFICATION',
+              title: `${alert.type} Alert`,
+              body: `${alert.type} reported at ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`}`,
+              alertId: alert._id
+            });
+            console.log('Push notification sent for alert:', { alertId: alert._id, type: alert.type });
+          }
+        }
       });
       socket.on('alertDeleted', (id) => {
         console.log('Alert deleted via socket:', id);
@@ -3444,6 +3526,15 @@ function getMinDistanceToPolyline(point, path) {
           }
           currentAlerts = currentAlerts.filter(a => a._id !== id);
           displayAlertsInHud(currentAlerts);
+          if (pushNotificationsEnabled && document.visibilityState === 'hidden') {
+            navigator.serviceWorker.controller?.postMessage({
+              type: 'SHOW_NOTIFICATION',
+              title: 'Alert Removed',
+              body: `Alert at ${alert?.address || 'unknown location'} has been removed.`,
+              alertId: id
+            });
+            console.log('Push notification sent for alert deletion:', { alertId: id });
+          }
         } catch (error) {
           console.error('Marker removal failed:', { id, reason: error.message });
           showToast('Failed to sync alert deletion. Retrying...');

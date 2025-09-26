@@ -36,6 +36,13 @@ const logger = winston.createLogger({
   ]
 });
 
+// Configure VAPID keys for web-push
+webpush.setVapidDetails(
+  'mailto:support@wazelikeapp.com',
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
+
 // Middleware
 app.use(cors({
   origin: process.env.NODE_ENV === 'production'
@@ -46,7 +53,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// FIXED: Serve fallback favicon to avoid 404s
+// Serve fallback favicon to avoid 404s
 app.get('/favicon.ico', (req, res) => {
   res.redirect('https://i.postimg.cc/jjN0JrPZ/New-Project-5.png');
   logger.info('Served fallback favicon.ico');
@@ -78,6 +85,29 @@ const alertSchema = new mongoose.Schema({
 // Index for geospatial and userId queries
 alertSchema.index({ location: '2dsphere', userId: 1 });
 const Alert = mongoose.model('Alert', alertSchema);
+
+// MongoDB Push Subscription Schema
+const pushSubscriptionSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  endpoint: { type: String, required: true },
+  keys: {
+    p256dh: { type: String, required: true },
+    auth: { type: String, required: true }
+  },
+  lastLocation: {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      default: [0, 0]
+    }
+  }
+});
+pushSubscriptionSchema.index({ userId: 1 });
+const PushSubscription = mongoose.model('PushSubscription', pushSubscriptionSchema);
 
 // Connect to MongoDB Atlas with reconnection logic
 mongoose.connect(process.env.MONGODB_URI, {
@@ -133,7 +163,72 @@ app.post('/api/auth/refresh', authMiddleware, async (req, res) => {
   }
 });
 
-// Save alerts
+// Save push subscription
+app.post('/api/auth/subscribe', authMiddleware, async (req, res) => {
+  try {
+    const subscription = req.body;
+    if (!subscription || !subscription.endpoint || !subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
+      logger.warn('Invalid subscription data:', subscription);
+      return res.status(400).json({ error: 'Invalid subscription data' });
+    }
+    const existingSubscription = await PushSubscription.findOne({ 
+      userId: req.user._id, 
+      endpoint: subscription.endpoint 
+    });
+    let subscriptionId;
+    if (!existingSubscription) {
+      const newSubscription = new PushSubscription({
+        userId: req.user._id,
+        endpoint: subscription.endpoint,
+        keys: subscription.keys,
+        lastLocation: { type: 'Point', coordinates: [0, 0] }
+      });
+      await newSubscription.save();
+      subscriptionId = newSubscription._id;
+      await User.findByIdAndUpdate(req.user._id, {
+        $addToSet: { pushSubscriptions: newSubscription._id }
+      });
+      logger.info('Push subscription saved:', { userId: req.user._id, endpoint: subscription.endpoint, subscriptionId });
+    } else {
+      subscriptionId = existingSubscription._id;
+      logger.info('Push subscription already exists:', { userId: req.user._id, endpoint: subscription.endpoint, subscriptionId });
+    }
+    res.status(201).json({ message: 'Subscription saved', subscriptionId });
+  } catch (error) {
+    logger.error('Error saving push subscription:', error.message);
+    res.status(500).json({ error: 'Failed to save subscription: ' + error.message });
+  }
+});
+
+// Remove push subscription
+app.post('/api/auth/unsubscribe', authMiddleware, async (req, res) => {
+  try {
+    const subscription = req.body;
+    if (!subscription || !subscription.endpoint) {
+      logger.warn('Invalid subscription data for unsubscribe:', subscription);
+      return res.status(400).json({ error: 'Invalid subscription data' });
+    }
+    const result = await PushSubscription.deleteOne({ 
+      userId: req.user._id, 
+      endpoint: subscription.endpoint 
+    });
+    if (result.deletedCount > 0) {
+      await User.findByIdAndUpdate(req.user._id, {
+        $pull: { pushSubscriptions: { $in: [result._id] } }
+      });
+      logger.info('Push subscription removed:', { userId: req.user._id, endpoint: subscription.endpoint });
+      res.status(200).json({ message: 'Subscription removed' });
+    } else {
+      logger.warn('No subscription found to remove:', { userId: req.user._id, endpoint: subscription.endpoint });
+      res.status(404).json({ error: 'Subscription not found' });
+    }
+  } catch (error) {
+    logger.error('Error removing push subscription:', error.message);
+    res.status(500).json({ error: 'Failed to remove subscription: ' + error.message });
+  }
+});
+
+// Save alerts and send push notifications
 app.post('/api/alerts', authMiddleware, async (req, res) => {
   try {
     const { type, location, timestamp, address } = req.body;
@@ -160,7 +255,43 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
     await alert.save();
     const populatedAlert = await Alert.findById(alert._id).populate('userId', 'username');
     logger.info('Alert saved:', { type, userId: req.user._id, location });
+
+    // Send push notifications to nearby subscribed users
+    const maxDistance = type === 'Traffic Camera' ? 0.5 * 1609.34 : 2 * 1609.34; // 0.5 miles for cameras, 2 miles for hazards
+    const users = await User.find({
+      pushSubscriptions: { $exists: true, $ne: [] },
+      'lastLocation.coordinates': {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [lng, lat] },
+          $maxDistance: maxDistance
+        }
+      }
+    }).populate('pushSubscriptions');
+    const notificationPayload = {
+      title: `${type} Alert`,
+      body: `${type} reported at ${address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`}`,
+      alertId: alert._id
+    };
+    for (const user of users) {
+      for (const sub of user.pushSubscriptions) {
+        try {
+          await webpush.sendNotification(sub, JSON.stringify(notificationPayload));
+          logger.info('Push notification sent:', { userId: user._id, endpoint: sub.endpoint, alertId: alert._id });
+        } catch (error) {
+          logger.error('Failed to send push notification:', { userId: user._id, endpoint: sub.endpoint, error: error.message });
+          if (error.statusCode === 410) {
+            await PushSubscription.deleteOne({ _id: sub._id });
+            await User.findByIdAndUpdate(user._id, {
+              $pull: { pushSubscriptions: sub._id }
+            });
+            logger.info('Removed expired subscription:', { userId: user._id, endpoint: sub.endpoint });
+          }
+        }
+      }
+    }
+
     io.emit('alert', populatedAlert);
+    logger.info(`Emitted alert event for: ${alert._id}`);
     res.status(201).json({ alert: populatedAlert });
   } catch (error) {
     logger.error('Error saving alert:', error.message);
@@ -168,7 +299,7 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete alert
+// Delete alert and send push notifications
 app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   try {
     const alert = await Alert.findById(req.params.id);
@@ -178,7 +309,6 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     if (alert.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Unauthorized to delete this alert' });
     }
-    // FIXED: Added retry logic for MongoDB delete
     let retries = 3;
     let success = false;
     while (retries > 0 && !success) {
@@ -195,12 +325,75 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
       }
     }
     logger.info('Alert deleted:', req.params.id);
-    io.emit('alertDeleted', req.params.id); // FIXED: Log emission
-    logger.info(`Emitting alertDeleted for: ${req.params.id}`);
+
+    // Send push notifications for alert deletion
+    const maxDistance = alert.type === 'Traffic Camera' ? 0.5 * 1609.34 : 2 * 1609.34;
+    const users = await User.find({
+      pushSubscriptions: { $exists: true, $ne: [] },
+      'lastLocation.coordinates': {
+        $near: {
+          $geometry: { type: 'Point', coordinates: alert.location.coordinates },
+          $maxDistance: maxDistance
+        }
+      }
+    }).populate('pushSubscriptions');
+    const notificationPayload = {
+      title: 'Alert Removed',
+      body: `Alert at ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`} has been removed.`,
+      alertId: req.params.id
+    };
+    for (const user of users) {
+      for (const sub of user.pushSubscriptions) {
+        try {
+          await webpush.sendNotification(sub, JSON.stringify(notificationPayload));
+          logger.info('Push notification sent for alert deletion:', { userId: user._id, endpoint: sub.endpoint, alertId: req.params.id });
+        } catch (error) {
+          logger.error('Failed to send push notification for deletion:', { userId: user._id, endpoint: sub.endpoint, error: error.message });
+          if (error.statusCode === 410) {
+            await PushSubscription.deleteOne({ _id: sub._id });
+            await User.findByIdAndUpdate(user._id, {
+              $pull: { pushSubscriptions: sub._id }
+            });
+            logger.info('Removed expired subscription:', { userId: user._id, endpoint: sub.endpoint });
+          }
+        }
+      }
+    }
+
+    io.emit('alertDeleted', req.params.id);
+    logger.info(`Emitted alertDeleted for: ${req.params.id}`);
     res.status(200).json({ message: 'Alert deleted' });
   } catch (error) {
     logger.error('Error deleting alert:', error.message);
     res.status(500).json({ error: 'Failed to delete alert: ' + error.message });
+  }
+});
+
+// Update user location for push notifications
+app.post('/api/location', authMiddleware, async (req, res) => {
+  try {
+    const { location } = req.body;
+    if (!location || !Array.isArray(location.coordinates) || location.coordinates.length !== 2) {
+      logger.warn('Invalid location data:', req.body);
+      return res.status(400).json({ error: 'Invalid location data: coordinates must be [longitude, latitude]' });
+    }
+    const [lng, lat] = location.coordinates;
+    if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+      logger.warn('Invalid coordinates values:', location.coordinates);
+      return res.status(400).json({ error: 'Invalid longitude or latitude values' });
+    }
+    await PushSubscription.updateMany(
+      { userId: req.user._id },
+      { lastLocation: { type: 'Point', coordinates: [lng, lat] } }
+    );
+    await User.findByIdAndUpdate(req.user._id, {
+      lastLocation: { type: 'Point', coordinates: [lng, lat] }
+    });
+    logger.info('User location updated for push subscriptions:', { userId: req.user._id, location });
+    res.status(200).json({ message: 'Location updated' });
+  } catch (error) {
+    logger.error('Error updating user location:', error.message);
+    res.status(500).json({ error: 'Failed to update location: ' + error.message });
   }
 });
 
@@ -300,6 +493,18 @@ io.on('connection', (socket) => {
         userId: socket.user.id,
         location: data.location
       });
+      try {
+        await PushSubscription.updateMany(
+          { userId: socket.user.id },
+          { lastLocation: { type: 'Point', coordinates: [data.location.lng, data.location.lat] } }
+        );
+        await User.findByIdAndUpdate(socket.user.id, {
+          lastLocation: { type: 'Point', coordinates: [data.location.lng, data.location.lat] }
+        });
+        logger.info('Socket.IO location updated for push subscriptions:', { userId: socket.user.id, location: data.location });
+      } catch (error) {
+        logger.error('Error updating socket location for push subscriptions:', error.message);
+      }
     }
   });
   socket.on('disconnect', () => {

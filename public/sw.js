@@ -1,109 +1,129 @@
-const CACHE_NAME = 'waze-app-v1.0.8'; // CHANGED: Bumped version to clear old caches
+const CACHE_NAME = 'waze-app-v1.0.7';
+const urlsToCache = [
+  '/',
+  '/index.html',
+  '/manifest.json?v=1.0.3',
+  // '/icon.png', // Uncomment if icon.png is uploaded to /public
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
+  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
+  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3'
+];
 
 self.addEventListener('install', event => {
+  console.log('Service worker installing...');
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll([
-        '/',
-        '/index.html',
-        '/manifest.json?v=1.0.3',
-        // '/icon.png', // FIXED: Commented out until uploaded to /public
-        // '/icon-512.png', // FIXED: Commented out until uploaded to /public
-        'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
-        'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
-        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3'
-      ]).catch(err => {
-        console.error('Cache addAll error:', err);
-        throw err;
-      });
-    })
+    caches.open(CACHE_NAME)
+      .then(cache => {
+        console.log('Service worker caching files');
+        return cache.addAll(urlsToCache);
+      })
+      .then(() => {
+        console.log('Service worker installed:', CACHE_NAME);
+        return self.skipWaiting();
+      })
   );
-  self.skipWaiting();
-  console.log('Service worker installed:', CACHE_NAME);
 });
 
 self.addEventListener('activate', event => {
+  console.log('Service worker activating...');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
-        cacheNames.filter(cacheName => cacheName !== CACHE_NAME)
-          .map(cacheName => caches.delete(cacheName))
+        cacheNames.map(cacheName => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('Deleting old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
       );
-    }).then(() => self.clients.claim())
-      .catch(err => console.error('Cache cleanup error:', err))
+    }).then(() => {
+      console.log('Service worker activated:', CACHE_NAME);
+      return self.clients.claim();
+    })
   );
-  console.log('Service worker activated:', CACHE_NAME);
 });
 
 self.addEventListener('fetch', event => {
   event.respondWith(
-    caches.match(event.request).then(cachedResponse => {
-      if (cachedResponse) {
-        console.log('Cache hit:', event.request.url);
-        return cachedResponse;
-      }
-      console.log('Cache miss, fetching:', event.request.url);
-      return fetch(event.request).then(networkResponse => {
-        // CHANGED: Clone response immediately to ensure it's not consumed
-        const responseClone = networkResponse.ok && networkResponse.body ? networkResponse.clone() : null;
-        if (responseClone && event.request.method === 'GET' && 
-            (event.request.url.includes('/api/markers') || event.request.url.includes('/api/hazards-near-route') || event.request.url.includes('/index.html'))) {
-          caches.open(CACHE_NAME).then(cache => {
-            cache.put(event.request, responseClone); // FIXED: Use cloned response
-            console.log('Cached API response:', event.request.url, { status: networkResponse.status }); // CHANGED: Added status logging
-          }).catch(err => {
-            console.error('Cache put error:', err, 'URL:', event.request.url);
-          });
-        } else if (!responseClone) {
-          console.warn('Skipping cache: Response not clonable or invalid', {
-            url: event.request.url,
-            ok: networkResponse.ok,
-            body: !!networkResponse.body
-          }); // CHANGED: Added warning for non-clonable responses
+    caches.match(event.request)
+      .then(response => {
+        if (response) {
+          console.log('Cache hit:', event.request.url);
+          return response;
         }
-        return networkResponse;
-      }).catch(err => {
-        console.error('Fetch error:', err, 'URL:', event.request.url);
-        if (event.request.mode === 'navigate') {
-          console.log('Serving cached /index.html for navigation request');
-          return caches.match('/index.html');
-        }
-        if (event.request.url.includes('/api/markers')) {
-          console.log('Serving cached or empty /api/markers response for offline');
-          return caches.match('/api/markers?lat=33.083270&lng=-83.233040&maxDistance=50000') || 
-                 new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-        throw err;
-      });
-    })
+        console.log('Cache miss, fetching:', event.request.url);
+        return fetch(event.request).catch(error => {
+          console.error('Fetch failed:', error);
+          if (event.request.url.includes('/api/markers')) {
+            return new Response(JSON.stringify([]), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' }
+            });
+          }
+          return new Response('Offline', { status: 503 });
+        });
+      })
   );
-});
-
-self.addEventListener('push', event => {
-  let data;
-  try {
-    data = event.data.json();
-  } catch (err) {
-    console.error('Push data parse error:', err);
-    return;
-  }
-  const options = {
-    body: data.body,
-    // icon: '/icon.png', // FIXED: Commented out until icon.png is uploaded
-    badge: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
-  };
-  self.registration.showNotification(data.title || 'Waze-Like App', options);
-  console.log('Push notification received:', data);
-});
-
-self.addEventListener('notificationclick', event => {
-  event.notification.close();
-  event.waitUntil(clients.openWindow('/'));
-  console.log('Notification clicked, opening root URL');
 });
 
 self.addEventListener('message', event => {
   if (event.data.type === 'INIT') {
-    console.log('Service worker initialized');
+    console.log('Service worker initialized via message');
+  }
+  // NEW: Handle SHOW_NOTIFICATION messages from client
+  if (event.data.type === 'SHOW_NOTIFICATION') {
+    const { title, body, alertId } = event.data;
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon.png', // Uncomment if icon.png is uploaded
+      badge: '/icon.png', // Uncomment if icon.png is uploaded
+      tag: `alert-${alertId}`,
+      data: { alertId },
+      actions: [
+        { action: 'view', title: 'View Alert' }
+      ]
+    });
+    console.log('Notification displayed:', { title, body, alertId });
+  }
+});
+
+self.addEventListener('push', event => {
+  const data = event.data?.json() || {};
+  const { title = 'Alert', body = 'New alert reported nearby.', alertId } = data;
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/icon.png', // Uncomment if icon.png is uploaded
+      badge: '/icon.png', // Uncomment if icon.png is uploaded
+      tag: `alert-${alertId}`,
+      data: { alertId },
+      actions: [
+        { action: 'view', title: 'View Alert' }
+      ]
+    }).then(() => {
+      console.log('Push notification displayed:', { title, body, alertId });
+    })
+  );
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const { action, notification } = event;
+  console.log('Notification clicked:', { action, alertId: notification.data?.alertId });
+  if (action === 'view') {
+    event.waitUntil(
+      clients.matchAll({ type: 'window', includeUncontrolled: true })
+        .then(clientList => {
+          const client = clientList.find(c => c.url.includes('wazelikeapp') && 'focus' in c);
+          if (client) {
+            return client.focus();
+          } else {
+            return clients.openWindow('/');
+          }
+        })
+        .then(() => {
+          console.log('Client focused or opened for alert:', notification.data?.alertId);
+        })
+    );
   }
 });
