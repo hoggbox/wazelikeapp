@@ -21,7 +21,7 @@
       background-size: contain; transition: transform 0.3s ease;
     }
     #search-container {
-      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
+      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1002;
       display: flex; align-items: center; background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
       padding: 0.5rem; border: 1px solid #ccc;
     }
@@ -36,13 +36,13 @@
     #start-button:hover { background: #45a049; }
     .hidden { display: none !important; }
     .pac-container {
-      z-index: 1002; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); background: white;
+      z-index: 1003; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); background: white;
       font-family: Arial, sans-serif; font-size: 1rem; width: 80% !important; max-width: 90vw; margin-top: 0.5rem;
     }
     .pac-item { padding: 0.5rem; cursor: pointer; color: #333; }
     .pac-item:hover { background: #f0f0f0; }
     #hud-container {
-      position: absolute; top: 2vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
+      position: absolute; top: 12vh; left: 50%; transform: translateX(-50%); width: 80%; max-width: 90vw; z-index: 1001;
       background: white; border-radius: 0.5rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); padding: 1vh;
       border: 1px solid #ccc; display: none; flex-direction: column; gap: 0.5vh;
     }
@@ -211,7 +211,7 @@
     #logout-button:hover { background-color: #b71c1c; }
     #toast {
       position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.7);
-      color: white; padding: 0.8vmin 1.5vmin; border-radius: 0.4rem; z-index: 1002; transition: opacity 0.5s;
+      color: white; padding: 0.8vmin 1.5vmin; border-radius: 0.4rem; z-index: 1003; transition: opacity 0.5s;
       opacity: 0; font-size: clamp(10px, 2vmin, 14px); pointer-events: none; max-width: 90vw; text-align: center;
     }
     #toast.visible-toast { opacity: 1; }
@@ -553,7 +553,7 @@
     let compassHeading = 0;
     let retryCount = 0;
     let rawUserLocation = null;
-    let needsCalibration = false; // CHANGED: Track calibration state
+    let needsCalibration = false;
     const markers = new Map();
     const MAX_RETRIES = 5;
     const REROUTE_CHECK_INTERVAL = 30000;
@@ -580,7 +580,7 @@
     const ROUTE_AHEAD_DISTANCE = 2000;
     const SNAP_BUFFER = 50;
     const MAX_GPS_DISTANCE = 300;
-    const HEADING_VARIANCE_THRESHOLD = 45; // CHANGED: Increased to reduce sensitivity
+    const HEADING_VARIANCE_THRESHOLD = 45;
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -638,6 +638,8 @@
         element.style.maxWidth = currentWidth <= 414 ? 'none' : currentWidth <= 768 ? '320px' : '300px';
       });
       console.log('HUDs adjusted: MaxHeight:', maxHeight, 'Width:', reportBox.style.width, 'Screen:', currentWidth, 'x', currentHeight);
+      console.log('HUD initialized: { top: 12vh, z-index: 1001 }'); // CHANGED: Added for debugging
+      console.log('Search container initialized: { top: 2vh, z-index: 1002 }'); // CHANGED: Added for debugging
     }
     function updateCompass() {
       const compass = document.getElementById('compass');
@@ -674,7 +676,7 @@
           checkHeadingVariance(compassHeading);
         } else {
           console.warn('Device orientation alpha is null');
-          needsCalibration = true; // CHANGED: Flag calibration need, no auto-prompt
+          needsCalibration = true;
         }
       });
     }
@@ -695,8 +697,8 @@
       }, 5000);
     }
     function smoothHeading(newHeading, source = 'unknown', speed = 0) {
-      if (isNaN(newHeading) || newHeading === null) {
-        console.log('Using last valid heading:', navState.lastValidHeading, 'source:', source);
+      if (isNaN(newHeading) || newHeading === null || speed <= STATIONARY_SPEED_THRESHOLD) { // CHANGED: Use last valid heading when stationary
+        console.log('Stationary heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed }); // CHANGED: Added log
         return navState.lastValidHeading;
       }
       headingHistory.push(newHeading);
@@ -704,7 +706,7 @@
         headingHistory.shift();
       }
       const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.7 : 0.2;
-      const compassWeight = needsCalibration ? 0.1 : speed > STATIONARY_SPEED_THRESHOLD ? 0.2 : 0.7;
+      const compassWeight = needsCalibration ? 0.1 : 0.7; // CHANGED: Only use compass if calibrated
       const polylineWeight = needsCalibration ? 0.2 : 0.1;
       let smoothedHeading = headingHistory[0];
       for (let i = 1; i < headingHistory.length; i++) {
@@ -880,7 +882,7 @@
             content: destMarkerElement,
             title: 'Destination'
           });
-          document.getElementById('start-button').style.display = 'block';
+document.getElementById('start-button').style.display = 'block';
         } else {
           console.error('No location for selected place:', place);
           showToast('Invalid address selected. Please try again.');
@@ -905,6 +907,8 @@
       setupEventListeners();
       updateCompass();
       console.log('Button container repositioned and styled: { top: 50%, right: 2vw, z-index: 1001 }');
+      console.log('HUD initialized: { top: 12vh, z-index: 1001 }'); // CHANGED: Added for debugging
+      console.log('Search container initialized: { top: 2vh, z-index: 1002 }'); // CHANGED: Added for debugging
     }
     function setupEventListeners() {
       document.getElementById('start-button').addEventListener('click', startGPS);
@@ -1103,7 +1107,7 @@
           updateCompass();
         }
       });
-document.getElementById('auto-recenter-toggle').addEventListener('change', (e) => {
+      document.getElementById('auto-recenter-toggle').addEventListener('change', (e) => {
         navState.isFollowing = e.target.checked;
         localStorage.setItem('isFollowing', navState.isFollowing);
         console.log('Auto-recenter toggled:', navState.isFollowing);
@@ -2136,17 +2140,17 @@ document.getElementById('auto-recenter-toggle').addEventListener('change', (e) =
               }
             }
           }
-          if (heading == null && index < path.length - 1) {
+          if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && index < path.length - 1) { // CHANGED: Only compute polyline heading if moving
             computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[index + 1]);
             console.log('Computed heading from polyline:', computedHeading);
-          } else if (heading == null && navState.previousUserLocation) {
+          } else if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && navState.previousUserLocation) { // CHANGED: Only compute previous position heading if moving
             computedHeading = google.maps.geometry.spherical.computeHeading(
               new google.maps.LatLng(navState.previousUserLocation),
               new google.maps.LatLng(pos)
             );
             console.log('Computed heading from previous position:', computedHeading);
           }
-          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : needsCalibration ? 'polyline' : 'compass';
+          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : speed <= STATIONARY_SPEED_THRESHOLD ? 'lastValid' : needsCalibration ? 'lastValid' : 'compass'; // CHANGED: Use lastValid when stationary
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
           console.log('Heading stabilized:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading, source, speed });
           try {
@@ -2156,7 +2160,7 @@ document.getElementById('auto-recenter-toggle').addEventListener('change', (e) =
             showToast('Error checking route deviation. Continuing with raw location.');
           }
         } else {
-          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : needsCalibration ? 'previous' : 'compass';
+          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : 'lastValid'; // CHANGED: Use lastValid when stationary
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
         }
         navState.userLocation = pos;
@@ -2432,36 +2436,36 @@ document.getElementById('auto-recenter-toggle').addEventListener('change', (e) =
           break;
         }
       }
-      hudStreet.textContent = currentStep && currentStep.instructions
-        ? `Current street: ${stripHtml(currentStep.instructions)}`
-        : 'Current street: Unknown';
-      hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
-      if (nextStep && nextStep.maneuver) {
-        const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(
-          currentLatLng,
-          new google.maps.LatLng(nextStep.start_location)
-        );
-        if (distanceToTurn <= TURN_THRESHOLD) {
-          const distanceText = distanceToTurn < 1609.34
-            ? `${Math.round(distanceToTurn * 3.28084)} feet`
-            : `${(distanceToTurn / 1609.34).toFixed(1)} miles`;
-          const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
-          hudTurn.textContent = turnText;
-          const now = Date.now();
-          if (turnText !== lastSpokenTurn && now - lastAnnouncementTime > ANNOUNCEMENT_COOLDOWN && 'speechSynthesis' in window) {
-            const utterance = new SpeechSynthesisUtterance(turnText);
-            utterance.lang = 'en-US';
-            speechSynthesis.speak(utterance);
-            lastSpokenTurn = turnText;
-            lastAnnouncementTime = now;
+hudStreet.textContent = currentStep && currentStep.instructions
+          ? `Current street: ${stripHtml(currentStep.instructions)}`
+          : 'Current street: Unknown';
+        hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
+        if (nextStep && nextStep.maneuver) {
+          const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(
+            currentLatLng,
+            new google.maps.LatLng(nextStep.start_location)
+          );
+          if (distanceToTurn <= TURN_THRESHOLD) {
+            const distanceText = distanceToTurn < 1609.34
+              ? `${Math.round(distanceToTurn * 3.28084)} feet`
+              : `${(distanceToTurn / 1609.34).toFixed(1)} miles`;
+            const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
+            hudTurn.textContent = turnText;
+            const now = Date.now();
+            if (turnText !== lastSpokenTurn && now - lastAnnouncementTime > ANNOUNCEMENT_COOLDOWN && 'speechSynthesis' in window) {
+              const utterance = new SpeechSynthesisUtterance(turnText);
+              utterance.lang = 'en-US';
+              speechSynthesis.speak(utterance);
+              lastSpokenTurn = turnText;
+              lastAnnouncementTime = now;
+            }
+          } else {
+            hudTurn.textContent = 'Follow the road';
           }
         } else {
           hudTurn.textContent = 'Follow the road';
         }
-      } else {
-        hudTurn.textContent = 'Follow the road';
       }
-    }
     function updateBottomHUD(route) {
       const hudTime = document.getElementById('bottom-hud-time');
       const hudDistance = document.getElementById('bottom-hud-distance');
@@ -2668,7 +2672,7 @@ document.getElementById('auto-recenter-toggle').addEventListener('change', (e) =
               ...options
             },
             (response, status) => {
-console.log(`Alternative route response, attempt ${attempt}:`, { status, routeCount: response?.routes?.length || 0 });
+              console.log(`Alternative route response, attempt ${attempt}:`, { status, routeCount: response?.routes?.length || 0 });
               if (status === 'OK' && response.routes && response.routes.length > 0) {
                 const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
                 let bestAlt = null;
@@ -3298,7 +3302,7 @@ console.log(`Alternative route response, attempt ${attempt}:`, { status, routeCo
         }
       });
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js?v=1.0.4').then(reg => { // CHANGED: Updated to v1.0.4
+        navigator.serviceWorker.register('/sw.js?v=1.0.4').then(reg => {
           console.log('Service worker registered:', reg);
           reg.addEventListener('updatefound', () => {
             const newWorker = reg.installing;

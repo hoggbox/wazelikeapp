@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-app-v1.0.6'; // CHANGED: Bumped version to clear old caches
+const CACHE_NAME = 'waze-app-v1.0.6';
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -39,10 +39,10 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request).then(response => {
       if (response) {
-        console.log('Cache hit:', event.request.url); // CHANGED: Enhanced logging
+        console.log('Cache hit:', event.request.url);
         return response;
       }
-      console.log('Cache miss, fetching:', event.request.url); // CHANGED: Enhanced logging
+      console.log('Cache miss, fetching:', event.request.url);
       return fetch(event.request).then(networkResponse => {
         if (networkResponse.ok && event.request.method === 'GET' && 
             (event.request.url.includes('/api/markers') || event.request.url.includes('/api/hazards-near-route') || event.request.url.includes('/index.html'))) {
