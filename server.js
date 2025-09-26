@@ -48,7 +48,7 @@ app.use(express.json());
 
 // FIXED: Serve fallback favicon to avoid 404s
 app.get('/favicon.ico', (req, res) => {
-  res.redirect('https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'); // CHANGED: Redirect to traffic camera icon
+  res.redirect('https://i.postimg.cc/jjN0JrPZ/New-Project-5.png');
   logger.info('Served fallback favicon.ico');
 });
 
@@ -75,7 +75,7 @@ const alertSchema = new mongoose.Schema({
   address: { type: String }
 });
 
-// CHANGED: Added index on userId for faster DELETE queries
+// Index for geospatial and userId queries
 alertSchema.index({ location: '2dsphere', userId: 1 });
 const Alert = mongoose.model('Alert', alertSchema);
 
@@ -178,9 +178,25 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     if (alert.userId.toString() !== req.user._id.toString()) {
       return res.status(403).json({ error: 'Unauthorized to delete this alert' });
     }
-    await alert.deleteOne();
+    // FIXED: Added retry logic for MongoDB delete
+    let retries = 3;
+    let success = false;
+    while (retries > 0 && !success) {
+      try {
+        await alert.deleteOne();
+        success = true;
+      } catch (err) {
+        retries--;
+        logger.warn(`MongoDB delete attempt failed for alert ${req.params.id}, retries left: ${retries}`, err);
+        if (retries === 0) {
+          throw new Error(`MongoDB delete failed after retries: ${err.message}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
     logger.info('Alert deleted:', req.params.id);
-    io.emit('alertDeleted', req.params.id);
+    io.emit('alertDeleted', req.params.id); // FIXED: Log emission
+    logger.info(`Emitting alertDeleted for: ${req.params.id}`);
     res.status(200).json({ message: 'Alert deleted' });
   } catch (error) {
     logger.error('Error deleting alert:', error.message);
@@ -195,7 +211,6 @@ app.get('/api/markers', async (req, res) => {
     if (!lat || !lng || !maxDistance) {
       return res.status(400).json({ error: 'Missing required parameters: lat, lng, maxDistance' });
     }
-    // CHANGED: Validate maxDistance
     const maxDistNum = parseFloat(maxDistance);
     if (isNaN(maxDistNum) || maxDistNum <= 0) {
       logger.warn('Invalid maxDistance:', maxDistance);
@@ -228,7 +243,6 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
     if (!polyline || !Array.isArray(polyline) || !maxDistance) {
       return res.status(400).json({ error: 'Invalid request: polyline and maxDistance required' });
     }
-    // CHANGED: Validate maxDistance
     const maxDistNum = parseFloat(maxDistance);
     if (isNaN(maxDistNum) || maxDistNum <= 0) {
       logger.warn('Invalid maxDistance:', maxDistance);
@@ -291,7 +305,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     logger.info(`User disconnected: ${socket.user.id}`);
   });
-  // CHANGED: Log reconnection attempts
   socket.on('reconnect_attempt', () => {
     logger.info(`Socket.IO reconnect attempt for user: ${socket.user.id}`);
   });

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-app-v1.0.4'; // CHANGED: Bumped version to clear old caches
+const CACHE_NAME = 'waze-app-v1.0.5'; // CHANGED: Bumped version to clear old caches
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -6,15 +6,15 @@ self.addEventListener('install', event => {
       return cache.addAll([
         '/',
         '/index.html',
-        '/manifest.json?v=1.0.3', // CHANGED: Kept versioned manifest
+        '/manifest.json?v=1.0.3',
         // '/icon.png', // FIXED: Commented out until uploaded to /public
         // '/icon-512.png', // FIXED: Commented out until uploaded to /public
-        'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3', // CHANGED: Added Socket.IO CDN
-        'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3', // CHANGED: Added TWEEN.js
-        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3' // CHANGED: Added Font Awesome
+        'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
+        'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
+        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3'
       ]).catch(err => {
         console.error('Cache addAll error:', err);
-        throw err; // FIXED: Rethrow to debug cache failures
+        throw err;
       });
     })
   );
@@ -43,18 +43,24 @@ self.addEventListener('fetch', event => {
         return response;
       }
       return fetch(event.request).then(networkResponse => {
-        // CHANGED: Cache dynamic responses for GET requests
-        if (networkResponse.ok && event.request.method === 'GET') {
+        // CHANGED: Cache API responses for markers and hazards
+        if (networkResponse.ok && event.request.method === 'GET' && 
+            (event.request.url.includes('/api/markers') || event.request.url.includes('/api/hazards-near-route') || event.request.url.includes('/index.html'))) {
           caches.open(CACHE_NAME).then(cache => {
             cache.put(event.request, networkResponse.clone());
+            console.log('Cached API response:', event.request.url);
           });
         }
         return networkResponse;
       }).catch(err => {
         console.error('Fetch error:', err, 'URL:', event.request.url);
-        // FIXED: Fallback to index.html for navigation requests
         if (event.request.mode === 'navigate') {
           return caches.match('/index.html');
+        }
+        // CHANGED: Fallback to cached markers for offline alert display
+        if (event.request.url.includes('/api/markers')) {
+          return caches.match('/api/markers?lat=33.083270&lng=-83.233040&maxDistance=50000') || 
+                 new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
         throw err;
       });
@@ -73,7 +79,7 @@ self.addEventListener('push', event => {
   const options = {
     body: data.body,
     // icon: '/icon.png', // FIXED: Commented out until icon.png is uploaded
-    badge: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png' // CHANGED: Fallback to traffic camera icon
+    badge: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
   };
   self.registration.showNotification(data.title || 'Waze-Like App', options);
   console.log('Push notification received:', data);
