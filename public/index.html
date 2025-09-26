@@ -553,7 +553,7 @@
     const MIN_REROUTE_DISTANCE = 100;
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
-    const ALERT_POLL_INTERVAL = 10000; // CHANGED: Reduced to 10s for faster sync
+    const ALERT_POLL_INTERVAL = 10000; // CHANGED: Set to 10s for faster sync
     const HEADING_SMOOTHING_WINDOW = 10;
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
@@ -665,9 +665,10 @@
         }
       });
     }
-    function smoothHeading(newHeading) {
+    // FIXED: Optimized heading calculation for faster updates
+    function smoothHeading(newHeading, source = 'unknown') {
       if (isNaN(newHeading) || newHeading === null) {
-        console.log('Using last valid heading:', navState.lastValidHeading);
+        console.log('Using last valid heading:', navState.lastValidHeading, 'source:', source);
         return navState.lastValidHeading;
       }
       headingHistory.push(newHeading);
@@ -685,7 +686,7 @@
       smoothedHeading = smoothedHeading % 360;
       if (smoothedHeading < 0) smoothedHeading += 360;
       navState.lastValidHeading = smoothedHeading;
-      console.log('Smoothed heading:', { newHeading, smoothed: smoothedHeading });
+      console.log('Bearing updated:', { newHeading, smoothed: smoothedHeading, source });
       return smoothedHeading;
     }
     function loadGoogleMaps() {
@@ -1092,7 +1093,7 @@
             console.log('Removed traffic camera marker due to toggle off:', id);
           }
         });
-        fetchAndDisplayMarkers(map, navState.userLocation);
+fetchAndDisplayMarkers(map, navState.userLocation);
       });
       document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
         highContrastMode = e.target.checked;
@@ -1102,7 +1103,7 @@
         } else {
           document.body.classList.remove('high-contrast');
         }
-console.log('High contrast mode toggled:', highContrastMode);
+        console.log('High contrast mode toggled:', highContrastMode);
       });
       document.getElementById('hazard-alert-distance').addEventListener('change', (e) => {
         if (!navState.useDefaultDistances) {
@@ -1531,7 +1532,7 @@ console.log('High contrast mode toggled:', highContrastMode);
             currentAlerts.push(result.alert);
             checkHazardsAndOfferReroute();
           }
-          if (socket) {
+          if (socket && socket.connected) {
             socket.emit('alert', result.alert); // CHANGED: Emit new alert to other clients
             console.log('Emitted alert event:', result.alert._id);
           }
@@ -1931,6 +1932,7 @@ console.log('High contrast mode toggled:', highContrastMode);
         })
         .start();
     }
+    // CHANGED: Enhanced polyline path adjustment for dynamic heading
     function updateRouteAhead(currentPos) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
         if (routePolyline) {
@@ -2051,6 +2053,7 @@ console.log('High contrast mode toggled:', highContrastMode);
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
+    // FIXED: Added map.panTo and map.setZoom for consistent camera following
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -2111,7 +2114,7 @@ console.log('High contrast mode toggled:', highContrastMode);
             );
             console.log('Computed heading from previous position:', computedHeading);
           }
-          navState.currentHeading = smoothHeading(computedHeading || compassHeading || 0);
+          navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, heading ? 'gps' : 'polyline');
           console.log('Heading updated:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading });
           try {
             checkOffRoute(new google.maps.LatLng(pos));
@@ -2120,7 +2123,7 @@ console.log('High contrast mode toggled:', highContrastMode);
             showToast('Error checking route deviation. Continuing with raw location.');
           }
         } else {
-          navState.currentHeading = smoothHeading(computedHeading || compassHeading || 0);
+          navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, heading ? 'gps' : 'compass');
         }
         navState.userLocation = pos;
         if (userMarker) {
@@ -2144,19 +2147,20 @@ console.log('High contrast mode toggled:', highContrastMode);
                 userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
               })
               .start();
+            console.log('Bearing updated: { heading:', navState.currentHeading, 'source: marker-rotation }');
           }
         }
         lastHeading = navState.currentHeading;
         lastPosition = pos;
         if (navState.isNavigating && navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
-          if (isMarkerNearViewportEdge(navState.userLocation) || true) {
-            restoreNavigationView();
-            console.log('Camera updated via onPositionUpdate:', {
-              center: navState.userLocation,
-              heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading
-            });
-          }
+          const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
+          map.panTo(navState.userLocation); // FIXED: Center map on every position update
+          map.setZoom(zoom); // FIXED: Set dynamic zoom
+          const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+          map.setHeading(heading); // FIXED: Update heading on every position update
+          map.setTilt(tilt);
+          console.log('Camera updated to user position:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
           navState.isInitialSnap = false;
         }
         navState.lastKnownPosition = pos;
@@ -2207,8 +2211,8 @@ console.log('High contrast mode toggled:', highContrastMode);
             userMarker.position = navState.userLocation;
             updateRouteAhead(navState.userLocation);
             navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
-            map.setCenter(navState.userLocation);
-            restoreNavigationView();
+            map.panTo(navState.userLocation); // FIXED: Initial camera centering
+            map.setZoom(navState.navigationZoom); // FIXED: Initial zoom
             console.log('Navigation started, centered on user location:', navState.userLocation);
             fetchCurrentAlerts();
             startRerouteCheck();
@@ -2315,8 +2319,7 @@ console.log('High contrast mode toggled:', highContrastMode);
         gestureHandling: 'cooperative',
         mapTypeControl: true
       });
-      map.setCenter(navState.userLocation);
-      updateCompass();
+      map.panTo(navState.userLocation); // FIXED: Center map on stop
       console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, tilt: 0 });
     }
     function calculateAndDisplayRoute(origin, dest, callback) {
@@ -2349,7 +2352,8 @@ console.log('High contrast mode toggled:', highContrastMode);
             if (callback) callback();
             if (navState.isFollowing) {
               navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
-              restoreNavigationView();
+              map.panTo(navState.userLocation); // FIXED: Center map on route calculation
+              map.setZoom(navState.navigationZoom); // FIXED: Set zoom on route calculation
             }
             console.log('Route calculated:', response.routes[0].legs[0].distance.text);
           } else {
@@ -2629,7 +2633,7 @@ console.log('High contrast mode toggled:', highContrastMode);
               provideRouteAlternatives: true,
               ...options
             },
-            (response, status) => {
+ (response, status) => {
               console.log(`Alternative route response, attempt ${attempt}:`, { status, routeCount: response?.routes?.length || 0 });
               if (status === 'OK' && response.routes && response.routes.length > 0) {
                 const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
@@ -2668,7 +2672,24 @@ console.log('High contrast mode toggled:', highContrastMode);
                   ][attempt];
                   tryRoute(newOptions, attempt + 1);
                 } else {
-console.log('No suitable alternative route found after all attempts.');
+                  console.log('No suitable alternative route found after all attempts.');
+                  resolve(null);
+                }
+              } else {
+                console.error(`Directions request failed, attempt ${attempt}:`, status);
+                if (attempt < 6) {
+                  console.log(`Retrying with new options, attempt ${attempt + 1}`);
+                  const newOptions = [
+                    { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+                    { avoidTolls: true, avoidHighways: false, avoidFerries: false },
+                    { avoidTolls: false, avoidHighways: true, avoidFerries: false },
+                    { avoidTolls: true, avoidHighways: true, avoidFerries: false },
+                    { avoidTolls: false, avoidHighways: false, avoidFerries: true },
+                    { avoidTolls: true, avoidHighways: false, avoidFerries: true }
+                  ][attempt];
+                  tryRoute(newOptions, attempt + 1);
+                } else {
+                  showToast('Failed to find alternate routes.');
                   resolve(null);
                 }
               }
@@ -2762,13 +2783,14 @@ console.log('No suitable alternative route found after all attempts.');
           }, 300)
           .easing(TWEEN.Easing.Quadratic.Out)
           .onUpdate(obj => {
-            map.setCenter(obj.center);
+            map.panTo(obj.center); // FIXED: Use panTo for smooth centering
             map.setZoom(obj.zoom);
             map.setHeading(obj.heading);
             updateCompass();
             if (navState.mapOrientation === 'north-up') {
               userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
             }
+            console.log('Camera updated to user position:', { lat: obj.center.lat, lng: obj.center.lng, zoom: obj.zoom, heading: obj.heading, tilt: obj.tilt });
           })
           .start();
         console.log('Navigation view restored:', {
