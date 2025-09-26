@@ -46,6 +46,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// FIXED: Serve fallback favicon to avoid 404s
+app.get('/favicon.ico', (req, res) => {
+  res.redirect('https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'); // CHANGED: Redirect to traffic camera icon
+  logger.info('Served fallback favicon.ico');
+});
+
 // MongoDB Alert Schema with GeoJSON and TTL
 const alertSchema = new mongoose.Schema({
   type: { 
@@ -69,8 +75,8 @@ const alertSchema = new mongoose.Schema({
   address: { type: String }
 });
 
-// Ensure 2dsphere index for geospatial queries
-alertSchema.index({ location: '2dsphere' });
+// CHANGED: Added index on userId for faster DELETE queries
+alertSchema.index({ location: '2dsphere', userId: 1 });
 const Alert = mongoose.model('Alert', alertSchema);
 
 // Connect to MongoDB Atlas with reconnection logic
@@ -189,11 +195,17 @@ app.get('/api/markers', async (req, res) => {
     if (!lat || !lng || !maxDistance) {
       return res.status(400).json({ error: 'Missing required parameters: lat, lng, maxDistance' });
     }
+    // CHANGED: Validate maxDistance
+    const maxDistNum = parseFloat(maxDistance);
+    if (isNaN(maxDistNum) || maxDistNum <= 0) {
+      logger.warn('Invalid maxDistance:', maxDistance);
+      return res.status(400).json({ error: 'Invalid maxDistance: must be a positive number' });
+    }
     const query = {
       location: {
         $near: {
           $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
-          $maxDistance: parseFloat(maxDistance)
+          $maxDistance: maxDistNum
         }
       }
     };
@@ -216,8 +228,14 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
     if (!polyline || !Array.isArray(polyline) || !maxDistance) {
       return res.status(400).json({ error: 'Invalid request: polyline and maxDistance required' });
     }
+    // CHANGED: Validate maxDistance
+    const maxDistNum = parseFloat(maxDistance);
+    if (isNaN(maxDistNum) || maxDistNum <= 0) {
+      logger.warn('Invalid maxDistance:', maxDistance);
+      return res.status(400).json({ error: 'Invalid maxDistance: must be a positive number' });
+    }
     const lineString = turf.lineString(polyline);
-    const buffered = turf.buffer(lineString, maxDistance / 1000, { units: 'kilometers' });
+    const buffered = turf.buffer(lineString, maxDistNum / 1000, { units: 'kilometers' });
     const hazards = await Alert.find({
       type: { $ne: 'Traffic Camera' },
       location: {
@@ -272,6 +290,10 @@ io.on('connection', (socket) => {
   });
   socket.on('disconnect', () => {
     logger.info(`User disconnected: ${socket.user.id}`);
+  });
+  // CHANGED: Log reconnection attempts
+  socket.on('reconnect_attempt', () => {
+    logger.info(`Socket.IO reconnect attempt for user: ${socket.user.id}`);
   });
 });
 
