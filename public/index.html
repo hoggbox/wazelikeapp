@@ -14,13 +14,13 @@
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
-    #map { 
-      height: 100%; 
-      width: 100%; 
-      position: absolute; 
-      top: 0; 
-      left: 0; 
-      z-index: 0; 
+    #map {
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 0;
       overflow: visible;
     }
     #compass {
@@ -586,6 +586,7 @@
     let lastAnnouncementTime = 0;
     let headingHistory = [];
     let lastLocationUpdate = 0;
+    let lastCameraUpdate = 0; // NEW: Added for camera update debouncing
     let lastAlertFetchTime = 0;
     let lastPosition = null;
     let compassHeading = 0;
@@ -602,7 +603,7 @@
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
     const ALERT_POLL_INTERVAL = 5000;
-    const HEADING_SMOOTHING_WINDOW = 10;
+    const HEADING_SMOOTHING_WINDOW = 15; // CHANGED: Increased from 10 to 15 for smoother heading
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
     const TURN_ZOOM = 19;
@@ -610,6 +611,7 @@
     const TURN_THRESHOLD = 500;
     const LOCATION_UPDATE_THRESHOLD = 30;
     const HEADING_CHANGE_THRESHOLD = 15;
+    const CAMERA_UPDATE_THRESHOLD = 500; // NEW: 500ms debounce for camera updates
     const STATIONARY_SPEED_THRESHOLD = 2.2352;
     const ARRIVAL_RADIUS = 50;
     const ANNOUNCEMENT_COOLDOWN = 10000;
@@ -651,10 +653,10 @@
       isInitialSnap: true
     };
     let mockSimulationInterval = null;
-    let isRegister = false; // Tracks login vs. register mode
+    let isRegister = false;
     function switchAuthMode() {
       isRegister = !isRegister;
-      console.log('Switching auth mode:', isRegister ? 'Register' : 'Login'); // NEW: Debug log
+      console.log('Switching auth mode:', isRegister ? 'Register' : 'Login');
       const authTitle = document.getElementById('auth-title');
       const usernameInput = document.getElementById('username');
       const authSwitch = document.getElementById('auth-switch');
@@ -663,51 +665,51 @@
       authSwitch.innerHTML = isRegister
         ? 'Already have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Login</a>'
         : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
-      console.log('Auth form updated:', { isRegister, title: authTitle.textContent, usernameVisible: usernameInput.style.display }); // NEW: Debug log
+      console.log('Auth form updated:', { isRegister, title: authTitle.textContent, usernameVisible: usernameInput.style.display });
     }
     document.getElementById('auth-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      console.log('Auth form submitted:', { isRegister }); // NEW: Debug log
+      console.log('Auth form submitted:', { isRegister });
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value.trim();
       const username = isRegister ? document.getElementById('username').value.trim() : '';
-      console.log('Form data:', { email, password, username, endpoint: isRegister ? '/api/auth/register' : '/api/auth/login' }); // NEW: Debug log
+      console.log('Form data:', { email, password, username, endpoint: isRegister ? '/api/auth/register' : '/api/auth/login' });
       if (!email || !password || (isRegister && !username)) {
-        console.error('Missing required fields:', { email, password, username }); // NEW: Debug log
+        console.error('Missing required fields:', { email, password, username });
         showToast('Please fill in all required fields.');
         return;
       }
       const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
       const body = isRegister ? { email, password, username } : { email, password };
       try {
-        console.log('Sending fetch request to:', endpoint); // NEW: Debug log
+        console.log('Sending fetch request to:', endpoint);
         const response = await fetch(endpoint, {
           method: 'POST',
-          mode: 'cors', // NEW: Ensure CORS compatibility
-          credentials: 'include', // NEW: Include credentials for cookies
+          mode: 'cors',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
-        console.log('Response received:', { status: response.status, ok: response.ok }); // NEW: Debug log
-        console.log('Response headers:', [...response.headers.entries()]); // NEW: Debug CORS headers
+        console.log('Response received:', { status: response.status, ok: response.ok });
+        console.log('Response headers:', [...response.headers.entries()]);
         const data = await response.json();
-        console.log('Response data:', data); // NEW: Debug log
+        console.log('Response data:', data);
         if (response.ok && data.token && data.user) {
           localStorage.setItem('token', data.token);
-          sessionStorage.setItem('token', data.token); // NEW: Fallback for mobile
+          sessionStorage.setItem('token', data.token);
           localStorage.setItem('userId', data.user.id);
-          sessionStorage.setItem('userId', data.user.id); // NEW: Fallback for mobile
-          console.log('Token and userId saved:', { token: data.token.substring(0, 20) + '...', userId: data.user.id }); // NEW: Debug log
+          sessionStorage.setItem('userId', data.user.id);
+          console.log('Token and userId saved:', { token: data.token.substring(0, 20) + '...', userId: data.user.id });
           document.getElementById('auth-container').style.display = 'none';
           showToast(isRegister ? 'Registration successful!' : 'Login successful!');
           console.log(isRegister ? 'User registered' : 'User logged in', { userId: data.user.id });
           initApp();
         } else {
-          console.error('Auth failed:', { status: response.status, error: data.error || 'No error message' }); // NEW: Debug log
+          console.error('Auth failed:', { status: response.status, error: data.error || 'No error message' });
           showToast(data.error || (isRegister ? 'Registration failed.' : 'Login failed.'));
         }
       } catch (error) {
-        console.error('Fetch error:', error.message); // NEW: Debug log
+        console.error('Fetch error:', error.message);
         showToast('Error: Unable to connect to server. Check your network.');
       }
     });
@@ -742,7 +744,7 @@
     function updateCompass() {
       const compass = document.getElementById('compass');
       if (compass && map) {
-        const mapHeading = map.getHeading() || 0;
+        const mapHeading = navState.mapOrientation === 'north-up' ? 0 : map.getHeading() || 0; // CHANGED: Lock to 0 in north-up mode
         compass.style.transform = `rotate(${-mapHeading}deg)`;
         console.log('Compass updated:', { mapHeading, rotation: -mapHeading });
       }
@@ -796,25 +798,30 @@
     }
     function smoothHeading(newHeading, source = 'unknown', speed = 0) {
       if (isNaN(newHeading) || newHeading === null || speed <= STATIONARY_SPEED_THRESHOLD) {
-        console.log('Stationary heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
+        console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
       }
       headingHistory.push(newHeading);
       if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
         headingHistory.shift();
       }
-      const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.7 : 0.2;
-      const compassWeight = needsCalibration ? 0.1 : 0.7;
-      const polylineWeight = needsCalibration ? 0.2 : 0.1;
-      let smoothedHeading = headingHistory[0];
-      for (let i = 1; i < headingHistory.length; i++) {
+      const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.6 : 0.2; // CHANGED: Adjusted weights for smoother blending
+      const compassWeight = needsCalibration ? 0.1 : 0.6;
+      const polylineWeight = needsCalibration ? 0.3 : 0.2;
+      let smoothedHeading = headingHistory.reduce((sum, h) => sum + h, 0) / headingHistory.length; // CHANGED: Use average for initial value
+      for (let i = 0; i < headingHistory.length; i++) {
         let delta = headingHistory[i] - smoothedHeading;
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
-        smoothedHeading += (source === 'gps' ? gpsWeight : source === 'compass' ? compassWeight : polylineWeight) * delta;
+        smoothedHeading += (source === 'gps' ? gpsWeight : source === 'compass' ? compassWeight : polylineWeight) * delta / headingHistory.length;
       }
       smoothedHeading = smoothedHeading % 360;
       if (smoothedHeading < 0) smoothedHeading += 360;
+      // CHANGED: Filter out minor heading changes
+      if (Math.abs(smoothedHeading - navState.lastValidHeading) < HEADING_CHANGE_THRESHOLD && speed <= STATIONARY_SPEED_THRESHOLD) {
+        console.log('Minor heading change ignored:', { newHeading, smoothed: navState.lastValidHeading, source, speed });
+        return navState.lastValidHeading;
+      }
       navState.lastValidHeading = smoothedHeading;
       console.log('Heading stabilized:', { newHeading, smoothed: smoothedHeading, source, speed, gpsWeight, compassWeight, polylineWeight });
       return smoothedHeading;
@@ -1055,7 +1062,7 @@
       console.log('Search container initialized: { top: 0.5vh, z-index: 1002 }');
       checkURLForAlert();
     }
-function checkURLForAlert() {
+    function checkURLForAlert() {
       const urlParams = new URLSearchParams(window.location.search);
       const alertId = urlParams.get('alertId');
       const lat = parseFloat(urlParams.get('lat'));
@@ -1070,7 +1077,7 @@ function checkURLForAlert() {
           headers: { 'Authorization': `Bearer ${(localStorage.getItem('token') || sessionStorage.getItem('token'))?.trim()}` }
         })
           .then(response => {
-            console.log('Alert fetch response:', { status: response.status, ok: response.ok }); // NEW: Debug log
+            console.log('Alert fetch response:', { status: response.status, ok: response.ok });
             if (!response.ok) throw new Error(`Failed to fetch alert: ${response.statusText}`);
             return response.json();
           })
@@ -1225,7 +1232,7 @@ function checkURLForAlert() {
         button.addEventListener('click', async () => {
           if (navState.alertState === 'IDLE') {
             const alertType = button.getAttribute('data-alert-type');
-            console.log('Report button clicked:', { alertType }); // NEW: Debug log
+            console.log('Report button clicked:', { alertType });
             if (alertType === 'Manual Report' || alertType === 'Manual Traffic Camera') {
               const reportBox = document.getElementById('report-box');
               reportBox.classList.remove('active');
@@ -1233,13 +1240,13 @@ function checkURLForAlert() {
               showToast(`Press a location on the map to place a ${alertType === 'Manual Report' ? 'hazard' : 'traffic camera'} alert.`);
               navState.mapClickListener = google.maps.event.addListener(map, 'click', (event) => {
                 if (navState.alertState === 'PLACING_ALERT' || navState.alertState === 'PLACING_TRAFFIC_CAMERA') {
-                  console.log('Map clicked for alert placement:', { lat: event.latLng.lat(), lng: event.latLng.lng() }); // NEW: Debug log
+                  console.log('Map clicked for alert placement:', { lat: event.latLng.lat(), lng: event.latLng.lng() });
                   confirmAlertLocation(event.latLng, alertType === 'Manual Report' ? 'Manual Report' : 'Traffic Camera');
                 }
               });
             } else {
               const location = new google.maps.LatLng(navState.userLocation);
-              console.log('Placing alert at user location:', { alertType, location: navState.userLocation }); // NEW: Debug log
+              console.log('Placing alert at user location:', { alertType, location: navState.userLocation });
               confirmAlertLocation(location, alertType);
             }
           }
@@ -2358,18 +2365,18 @@ function checkURLForAlert() {
       console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
     }
     function updateOffRoadPolyline(rawPos, targetPos) {
-      if (!rawPos || !targetPos) {
+      if (!rawPos || !targetPos || !navState.isNavigating) {
         if (offRoadPolyline) {
           offRoadPolyline.setMap(null);
           offRoadPolyline = null;
-          console.log('Off-road polyline cleared: no position data');
+          console.log('Off-road polyline cleared: no position data or not navigating');
         }
         return;
       }
       const rawLatLng = new google.maps.LatLng(rawPos);
       const targetLatLng = new google.maps.LatLng(targetPos);
       const distance = google.maps.geometry.spherical.computeDistanceBetween(rawLatLng, targetLatLng);
-      if (distance > 20) {
+      if (distance > 20) { // CHANGED: Use 20m as the snap threshold
         const path = [rawPos, targetPos];
         if (offRoadPolyline) {
           offRoadPolyline.setPath(path);
@@ -2385,10 +2392,12 @@ function checkURLForAlert() {
           });
         }
         console.log('Off-road polyline updated:', { from: rawPos, to: targetPos, distance });
-      } else if (offRoadPolyline) {
-        offRoadPolyline.setMap(null);
-        offRoadPolyline = null;
-        console.log('Off-road polyline cleared: close to target (distance < 20m)');
+      } else {
+        if (offRoadPolyline) {
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+          console.log('Off-road polyline cleared: snapped to route (distance <= 20m)');
+        }
       }
     }
     function findClosestRoutePoint(currentPos, path, heading, speed) {
@@ -2416,7 +2425,7 @@ function checkURLForAlert() {
             bestPoint = { lat: point.lat(), lng: point.lng() };
             closestIndex = i;
           }
-          if (distance < 20) break;
+          if (distance < 20) break; // CHANGED: Stop searching if within snap distance
         }
       }
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
@@ -2476,24 +2485,28 @@ function checkURLForAlert() {
         let pos = rawUserLocation;
         let snapped = navState.isInitialSnap;
         let computedHeading = heading;
+        let closestPoint = null; // NEW: Cache closest point
+        let distanceToRoute = Infinity; // NEW: Track distance to route
         if (navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
           if (navState.isNavigating && checkArrival(pos)) {
             return;
           }
           const path = navState.currentRoute.routes[0].overview_path;
-          const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
-          const distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point));
-          if (distanceToRoute < 20) {
-            pos = point;
+          const closest = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
+          closestPoint = closest.point;
+          closestIndex = closest.index;
+          distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(closestPoint));
+          if (distanceToRoute <= 20) { // CHANGED: Explicit snap threshold
+            pos = closestPoint;
             snapped = true;
             console.log('Snapped to polyline:', pos);
             if (offRoadPolyline) {
               offRoadPolyline.setMap(null);
               offRoadPolyline = null;
-              console.log('Off-road polyline cleared: snapped to route (distance < 20m)');
+              console.log('Off-road polyline cleared: snapped to route (distance <= 20m)');
             }
           }
-          updateOffRoadPolyline(rawUserLocation, path[0]);
+          updateOffRoadPolyline(rawUserLocation, snapped ? null : path[0]); // CHANGED: Pass null if snapped
           if (navState.previousUserLocation) {
             const distance = google.maps.geometry.spherical.computeDistanceBetween(
               new google.maps.LatLng(navState.previousUserLocation),
@@ -2512,8 +2525,8 @@ function checkURLForAlert() {
               }
             }
           }
-          if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && index < path.length - 1) {
-            computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[index + 1]);
+          if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && closestIndex < path.length - 1) {
+            computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[closestIndex + 1]);
             console.log('Computed heading from polyline:', computedHeading);
           } else if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && navState.previousUserLocation) {
             computedHeading = google.maps.geometry.spherical.computeHeading(
@@ -2564,36 +2577,41 @@ function checkURLForAlert() {
         }
         lastHeading = navState.currentHeading;
         lastPosition = pos;
-        if (navState.isFollowing) {
+        if (navState.isFollowing && navState.isNavigating) {
           updateRouteAhead(navState.userLocation);
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
           navState.navigationZoom = zoom;
-          const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          new TWEEN.Tween({
-            center: map.getCenter().toJSON(),
-            zoom: map.getZoom(),
-            heading: map.getHeading(),
-            tilt: map.getTilt()
-          })
-.to({
-              center: navState.userLocation,
-              zoom,
-              heading,
-              tilt
-            }, 300)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(obj => {
-              map.moveCamera({
-                center: obj.center,
-                zoom: obj.zoom,
-                heading: obj.heading,
-                tilt: obj.tilt
-              });
-              updateCompass();
+          const heading = navState.mapOrientation === 'north-up' ? 0 : (turnHeading || navState.currentHeading);
+          if (now - lastCameraUpdate >= CAMERA_UPDATE_THRESHOLD && (Math.abs(heading - map.getHeading()) > HEADING_CHANGE_THRESHOLD || distanceToRoute > 20)) { // CHANGED: Debounce and check heading change
+            lastCameraUpdate = now;
+            new TWEEN.Tween({
+              center: map.getCenter().toJSON(),
+              zoom: map.getZoom(),
+              heading: map.getHeading(),
+              tilt: map.getTilt()
             })
-            .start();
+              .to({
+                center: navState.userLocation,
+                zoom,
+                heading,
+                tilt
+              }, 300)
+              .easing(TWEEN.Easing.Quadratic.Out)
+              .onUpdate(obj => {
+                map.moveCamera({
+                  center: obj.center,
+                  zoom: obj.zoom,
+                  heading: obj.heading,
+                  tilt: obj.tilt
+                });
+                updateCompass();
+              })
+              .start();
+            console.log('Camera view updated:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
+          } else {
+            console.log('Camera update skipped:', { reason: 'debounce or minor heading change', timeSinceLast: now - lastCameraUpdate, headingDiff: Math.abs(heading - map.getHeading()) });
+          }
           ensureMarkerInView(navState.userLocation);
-          console.log('Camera view updated:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
           navState.isInitialSnap = false;
         }
         navState.lastKnownPosition = pos;
@@ -2774,10 +2792,10 @@ function checkURLForAlert() {
             const destLatLng = new google.maps.LatLng(dest);
             const distanceToDest = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(lastPoint), destLatLng);
             if (distanceToDest > 50) {
-              console.warn('Main route does not reach destination:', { 
-                lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() }, 
-                destination: dest, 
-                distanceToDest 
+              console.warn('Main route does not reach destination:', {
+                lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() },
+                destination: dest,
+                distanceToDest
               });
               showToast('Route does not reach destination. Trying alternative...');
               return;
@@ -2785,10 +2803,10 @@ function checkURLForAlert() {
             navState.currentRoute = response;
             navState.routePolyline = response.routes[0].overview_path;
             directionsRenderer.setDirections(response);
-            console.log('Main route calculated:', { 
-              pathLength: navState.routePolyline.length, 
-              endPoint: navState.routePolyline[navState.routePolyline.length - 1], 
-              destination: dest 
+            console.log('Main route calculated:', {
+              pathLength: navState.routePolyline.length,
+              endPoint: navState.routePolyline[navState.routePolyline.length - 1],
+              destination: dest
             });
             updateOffRoadPolyline(rawUserLocation || navState.userLocation, navState.routePolyline[0]);
             updateHUD(response, origin);
@@ -2925,6 +2943,11 @@ function checkURLForAlert() {
         console.log('User off-route detected, recalculating...');
         showToast('You are off-route. Recalculating route...');
         navState.lastRecalculationTime = now;
+        if (offRoadPolyline) { // CHANGED: Clear existing off-road polyline before recalculation
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+          console.log('Off-road polyline cleared before route recalculation');
+        }
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
           showToast('Route recalculated successfully.');
           console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
@@ -3069,9 +3092,9 @@ function checkURLForAlert() {
     async function checkAlternativeRoute(hazard) {
       return new Promise((resolve) => {
         if (!navState.userLocation || !navState.destination) {
-          console.error('Missing userLocation or destination for route calculation', { 
-            userLocation: navState.userLocation, 
-            destination: navState.destination 
+          console.error('Missing userLocation or destination for route calculation', {
+            userLocation: navState.userLocation,
+            destination: navState.destination
           });
           resolve(null);
           return;
@@ -3091,16 +3114,16 @@ function checkURLForAlert() {
             waypoints: attempt > 4 ? [{ location: midpoint, stopover: false }] : [],
             ...options
           };
-          console.log(`Attempting alternate route calculation, attempt ${attempt}:`, { 
-            origin: navState.userLocation, 
-            destination: navState.destination, 
+          console.log(`Attempting alternate route calculation, attempt ${attempt}:`, {
+            origin: navState.userLocation,
+            destination: navState.destination,
             waypoints: request.waypoints,
-            options 
+            options
           });
           directionsService.route(request, (response, status) => {
-            console.log(`Alternative route response, attempt ${attempt}:`, { 
-              status, 
-              routeCount: response?.routes?.length || 0 
+            console.log(`Alternative route response, attempt ${attempt}:`, {
+              status,
+              routeCount: response?.routes?.length || 0
             });
             if (status === 'OK' && response.routes && response.routes.length > 0) {
               const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
@@ -3114,15 +3137,15 @@ function checkURLForAlert() {
                 const lastPoint = altPath[altPath.length - 1];
                 const destLatLng = new google.maps.LatLng(navState.destination);
                 const distanceToDest = google.maps.geometry.spherical.computeDistanceBetween(
-                  new google.maps.LatLng(lastPoint), 
+                  new google.maps.LatLng(lastPoint),
                   destLatLng
                 );
                 const altDuration = alt.legs[0].duration.value;
                 if (distanceToDest > 50) {
-                  console.warn(`Route ${i} rejected: Does not reach destination`, { 
-                    lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() }, 
-                    destination: navState.destination, 
-                    distanceToDest 
+                  console.warn(`Route ${i} rejected: Does not reach destination`, {
+                    lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() },
+                    destination: navState.destination,
+                    distanceToDest
                   });
                   continue;
                 }
@@ -3132,21 +3155,21 @@ function checkURLForAlert() {
                 }
                 if (isHazardAvoided(hazardLatLng, altPath)) {
                   const timeSaved = currentDuration - altDuration;
-                  console.log(`Route ${i}:`, { 
-                    duration: altDuration, 
-                    timeSaved, 
-                    avoidsHazard: true, 
+                  console.log(`Route ${i}:`, {
+                    duration: altDuration,
+                    timeSaved,
+                    avoidsHazard: true,
                     reachesDestination: true,
-                    distanceToDest 
+                    distanceToDest
                   });
                   if (timeSaved >= bestTimeSaved) {
                     bestAlt = alt;
                     bestTimeSaved = timeSaved;
                   }
                 } else {
-                  console.log(`Route ${i} rejected: Does not avoid hazard`, { 
+                  console.log(`Route ${i} rejected: Does not avoid hazard`, {
                     duration: altDuration,
-                    minDistanceToHazard: getMinDistanceToPolyline(hazardLatLng, altPath) 
+                    minDistanceToHazard: getMinDistanceToPolyline(hazardLatLng, altPath)
                   });
                 }
               }
@@ -3156,10 +3179,10 @@ function checkURLForAlert() {
                   routes: [bestAlt]
                 };
                 const timeSavedMin = Math.round(bestTimeSaved / 60);
-                console.log(`Best alternate route found:`, { 
-                  timeSavedMin, 
-                  pathLength: bestAlt.overview_path.length, 
-                  endPoint: bestAlt.overview_path[bestAlt.overview_path.length - 1] 
+                console.log(`Best alternate route found:`, {
+                  timeSavedMin,
+                  pathLength: bestAlt.overview_path.length,
+                  endPoint: bestAlt.overview_path[bestAlt.overview_path.length - 1]
                 });
                 resolve(timeSavedMin);
               } else if (fastestRoute) {
@@ -3168,10 +3191,10 @@ function checkURLForAlert() {
                   routes: [fastestRoute]
                 };
                 const timeSavedMin = Math.round((currentDuration - fastestDuration) / 60);
-                console.log(`Fallback: Using fastest route as alternative:`, { 
-                  timeSavedMin, 
-                  pathLength: fastestRoute.overview_path.length, 
-                  endPoint: fastestRoute.overview_path[fastestRoute.overview_path.length - 1] 
+                console.log(`Fallback: Using fastest route as alternative:`, {
+                  timeSavedMin,
+                  pathLength: fastestRoute.overview_path.length,
+                  endPoint: fastestRoute.overview_path[fastestRoute.overview_path.length - 1]
                 });
                 resolve(timeSavedMin);
               } else if (attempt < 8) {
@@ -3287,7 +3310,7 @@ function checkURLForAlert() {
       if (navState.isFollowing && navState.isNavigating) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         navState.navigationZoom = zoom;
-        const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+        const heading = navState.mapOrientation === 'north-up' ? 0 : (turnHeading || navState.currentHeading);
         new TWEEN.Tween({
           zoom: map.getZoom(),
           center: map.getCenter().toJSON(),
@@ -3309,10 +3332,10 @@ function checkURLForAlert() {
               tilt: obj.tilt
             });
             updateCompass();
-            if (navState.mapOrientation === 'heading-up') {
-              userMarker.content.style.transform = `rotate(0deg)`;
+            if (navState.mapOrientation === 'north-up') {
+              userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`; // CHANGED: Ensure correct marker rotation in north-up mode
             } else {
-              userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
+              userMarker.content.style.transform = `rotate(0deg)`; // CHANGED: Lock marker rotation in heading-up mode
             }
           })
           .onComplete(() => {
@@ -3338,6 +3361,11 @@ function checkURLForAlert() {
         navState.userLocation = point;
         userMarker.position = navState.userLocation;
         console.log('Snapped to new route start after reroute:', navState.userLocation);
+        if (offRoadPolyline) { // CHANGED: Clear off-road polyline on reroute
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+          console.log('Off-road polyline cleared after accepting reroute');
+        }
         directionsRenderer.setDirections(navState.currentRoute);
         updateRouteAhead(navState.userLocation);
         updateOffRoadPolyline(rawUserLocation, path[0]);
@@ -3387,6 +3415,11 @@ function checkURLForAlert() {
         navState.userLocation = point;
         userMarker.position = navState.userLocation;
         console.log('Snapped to original route after reroute rejection:', navState.userLocation);
+        if (offRoadPolyline) { // CHANGED: Clear off-road polyline on reroute rejection
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+          console.log('Off-road polyline cleared after rejecting reroute');
+        }
         updateRouteAhead(navState.userLocation);
         updateOffRoadPolyline(rawUserLocation, path[0]);
         updateBottomHUD(navState.currentRoute);
