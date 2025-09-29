@@ -327,6 +327,29 @@
     }
     @media (orientation: landscape) { #hud-container, #bottom-hud-container { width: 60%; } }
     @media (orientation: portrait) { #hud-container, #bottom-hud-container { width: 80%; } }
+    #auth-container {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8);
+      z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column;
+      color: white; font-family: Arial, sans-serif;
+    }
+    #auth-title { font-size: 2rem; margin-bottom: 1rem; }
+    #auth-form {
+      display: flex; flex-direction: column; gap: 10px; width: 80%; max-width: 300px;
+      padding: 1rem; background: rgba(255, 255, 255, 0.1); border-radius: 0.5rem;
+    }
+    #auth-form input {
+      padding: 0.5rem; border: none; border-radius: 0.3rem; font-size: 1rem;
+      background: #333; color: white; outline: none;
+    }
+    #auth-form input::placeholder { color: #ccc; }
+    #auth-form button {
+      background: #4CAF50; color: white; border: none; padding: 0.5rem; border-radius: 0.3rem;
+      cursor: pointer; font-size: 1rem; transition: background 0.2s;
+    }
+    #auth-form button:hover { background: #45a049; }
+    #auth-switch { margin-top: 1rem; font-size: 0.9rem; }
+    #auth-switch a { color: #4CAF50; text-decoration: none; }
+    #auth-switch a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -531,7 +554,7 @@
   <div id="toast"></div>
   <div id="auth-container" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column; color: white;">
     <h2 id="auth-title">Login</h2>
-    <form id="auth-form" style="display: flex; flex-direction: column; gap: 10px; width: 300px;">
+    <form id="auth-form" style="display: flex; flex-direction: column; gap: 10px; width: 80%; max-width: 300px; padding: 1rem; background: rgba(255, 255, 255, 0.1); border-radius: 0.5rem;">
       <input type="text" id="username" name="username" placeholder="Username" style="display: none;">
       <input type="email" id="email" name="email" placeholder="Email" required>
       <input type="password" id="password" name="password" placeholder="Password" required>
@@ -628,6 +651,66 @@
       isInitialSnap: true
     };
     let mockSimulationInterval = null;
+    let isRegister = false; // Tracks login vs. register mode
+    function switchAuthMode() {
+      isRegister = !isRegister;
+      console.log('Switching auth mode:', isRegister ? 'Register' : 'Login'); // NEW: Debug log
+      const authTitle = document.getElementById('auth-title');
+      const usernameInput = document.getElementById('username');
+      const authSwitch = document.getElementById('auth-switch');
+      authTitle.textContent = isRegister ? 'Register' : 'Login';
+      usernameInput.style.display = isRegister ? 'block' : 'none';
+      authSwitch.innerHTML = isRegister
+        ? 'Already have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Login</a>'
+        : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
+      console.log('Auth form updated:', { isRegister, title: authTitle.textContent, usernameVisible: usernameInput.style.display }); // NEW: Debug log
+    }
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      console.log('Auth form submitted:', { isRegister }); // NEW: Debug log
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value.trim();
+      const username = isRegister ? document.getElementById('username').value.trim() : '';
+      console.log('Form data:', { email, password, username, endpoint: isRegister ? '/api/auth/register' : '/api/auth/login' }); // NEW: Debug log
+      if (!email || !password || (isRegister && !username)) {
+        console.error('Missing required fields:', { email, password, username }); // NEW: Debug log
+        showToast('Please fill in all required fields.');
+        return;
+      }
+      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+      const body = isRegister ? { email, password, username } : { email, password };
+      try {
+        console.log('Sending fetch request to:', endpoint); // NEW: Debug log
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          mode: 'cors', // NEW: Ensure CORS compatibility
+          credentials: 'include', // NEW: Include credentials for cookies
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+        console.log('Response received:', { status: response.status, ok: response.ok }); // NEW: Debug log
+        console.log('Response headers:', [...response.headers.entries()]); // NEW: Debug CORS headers
+        const data = await response.json();
+        console.log('Response data:', data); // NEW: Debug log
+        if (response.ok && data.token && data.user) {
+          localStorage.setItem('token', data.token);
+          sessionStorage.setItem('token', data.token); // NEW: Fallback for mobile
+          localStorage.setItem('userId', data.user.id);
+          sessionStorage.setItem('userId', data.user.id); // NEW: Fallback for mobile
+          console.log('Token and userId saved:', { token: data.token.substring(0, 20) + '...', userId: data.user.id }); // NEW: Debug log
+          document.getElementById('auth-container').style.display = 'none';
+          showToast(isRegister ? 'Registration successful!' : 'Login successful!');
+          console.log(isRegister ? 'User registered' : 'User logged in', { userId: data.user.id });
+          initApp();
+        } else {
+          console.error('Auth failed:', { status: response.status, error: data.error || 'No error message' }); // NEW: Debug log
+          showToast(data.error || (isRegister ? 'Registration failed.' : 'Login failed.'));
+        }
+      } catch (error) {
+        console.error('Fetch error:', error.message); // NEW: Debug log
+        showToast('Error: Unable to connect to server. Check your network.');
+      }
+    });
     function animate() {
       if (typeof TWEEN !== 'undefined') {
         TWEEN.update();
@@ -972,7 +1055,7 @@
       console.log('Search container initialized: { top: 0.5vh, z-index: 1002 }');
       checkURLForAlert();
     }
-    function checkURLForAlert() {
+function checkURLForAlert() {
       const urlParams = new URLSearchParams(window.location.search);
       const alertId = urlParams.get('alertId');
       const lat = parseFloat(urlParams.get('lat'));
@@ -983,8 +1066,14 @@
         map.setZoom(15);
         console.log('Centered map on alert from URL:', { alertId, lat, lng });
         window.history.replaceState({}, document.title, window.location.pathname);
-        fetch(`/api/markers?lat=${lat}&lng=${lng}&maxDistance=100`)
-          .then(response => response.json())
+        fetch(`/api/markers?lat=${lat}&lng=${lng}&maxDistance=100`, {
+          headers: { 'Authorization': `Bearer ${(localStorage.getItem('token') || sessionStorage.getItem('token'))?.trim()}` }
+        })
+          .then(response => {
+            console.log('Alert fetch response:', { status: response.status, ok: response.ok }); // NEW: Debug log
+            if (!response.ok) throw new Error(`Failed to fetch alert: ${response.statusText}`);
+            return response.json();
+          })
           .then(alerts => {
             const alert = alerts.find(a => a._id === alertId);
             if (alert) {
@@ -1015,7 +1104,6 @@
           mockSimulationInterval = null;
           document.getElementById('simulate-position-button').textContent = 'Simulate';
           console.log('Position simulation stopped');
-          // Reset simulation state
           document.getElementById('hud-container').style.display = 'none';
           document.getElementById('bottom-hud-container').style.display = 'none';
           if (routePolyline) {
@@ -1026,7 +1114,7 @@
             offRoadPolyline.setMap(null);
             offRoadPolyline = null;
           }
-          directionsRenderer.setMap(map); // Restore route preview
+          directionsRenderer.setMap(map);
           navState.isFollowing = false;
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           const bounds = new google.maps.LatLngBounds();
@@ -1116,7 +1204,7 @@
           console.log('Navigation view re-locked after closing leaderboard HUD');
         }
       });
-document.getElementById('voice-button').addEventListener('click', startVoiceRecognition);
+      document.getElementById('voice-button').addEventListener('click', startVoiceRecognition);
       document.getElementById('share-button').addEventListener('click', shareRoute);
       document.getElementById('recalibrate-compass-button').addEventListener('click', () => {
         recalibrateCompass();
@@ -1125,6 +1213,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('push-notifications-toggle').addEventListener('change', async (e) => {
         pushNotificationsEnabled = e.target.checked;
         localStorage.setItem('pushNotificationsEnabled', pushNotificationsEnabled);
+        sessionStorage.setItem('pushNotificationsEnabled', pushNotificationsEnabled);
         console.log('Push notifications toggled:', pushNotificationsEnabled);
         if (pushNotificationsEnabled) {
           await requestPushPermission();
@@ -1136,6 +1225,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         button.addEventListener('click', async () => {
           if (navState.alertState === 'IDLE') {
             const alertType = button.getAttribute('data-alert-type');
+            console.log('Report button clicked:', { alertType }); // NEW: Debug log
             if (alertType === 'Manual Report' || alertType === 'Manual Traffic Camera') {
               const reportBox = document.getElementById('report-box');
               reportBox.classList.remove('active');
@@ -1143,11 +1233,13 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
               showToast(`Press a location on the map to place a ${alertType === 'Manual Report' ? 'hazard' : 'traffic camera'} alert.`);
               navState.mapClickListener = google.maps.event.addListener(map, 'click', (event) => {
                 if (navState.alertState === 'PLACING_ALERT' || navState.alertState === 'PLACING_TRAFFIC_CAMERA') {
+                  console.log('Map clicked for alert placement:', { lat: event.latLng.lat(), lng: event.latLng.lng() }); // NEW: Debug log
                   confirmAlertLocation(event.latLng, alertType === 'Manual Report' ? 'Manual Report' : 'Traffic Camera');
                 }
               });
             } else {
               const location = new google.maps.LatLng(navState.userLocation);
+              console.log('Placing alert at user location:', { alertType, location: navState.userLocation }); // NEW: Debug log
               confirmAlertLocation(location, alertType);
             }
           }
@@ -1190,6 +1282,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         if (navState.isNavigating) {
           navState.isFollowing = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           restoreNavigationView();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
@@ -1201,12 +1294,14 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('traffic-layer-toggle').addEventListener('change', (e) => {
         navState.showTraffic = e.target.checked;
         localStorage.setItem('showTraffic', navState.showTraffic);
+        sessionStorage.setItem('showTraffic', navState.showTraffic);
         trafficLayer.setMap(navState.showTraffic ? map : null);
         console.log('Traffic layer toggled:', navState.showTraffic);
       });
       document.getElementById('main-route-color').addEventListener('change', (e) => {
         navState.mainRouteColor = e.target.value;
         localStorage.setItem('mainRouteColor', navState.mainRouteColor);
+        sessionStorage.setItem('mainRouteColor', navState.mainRouteColor);
         if (routePolyline) {
           routePolyline.setOptions({
             strokeColor: navState.mainRouteColor,
@@ -1228,6 +1323,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('alt-route-color').addEventListener('change', (e) => {
         navState.altRouteColor = e.target.value;
         localStorage.setItem('altRouteColor', navState.altRouteColor);
+        sessionStorage.setItem('altRouteColor', navState.altRouteColor);
         alternativeRenderer.setOptions({
           polylineOptions: {
             strokeColor: navState.altRouteColor,
@@ -1244,12 +1340,14 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('map-type').addEventListener('change', (e) => {
         navState.mapType = e.target.value;
         localStorage.setItem('mapType', navState.mapType);
+        sessionStorage.setItem('mapType', navState.mapType);
         map.setMapTypeId(navState.mapType);
         console.log('Map type changed to:', navState.mapType);
       });
       document.getElementById('map-orientation').addEventListener('change', (e) => {
         navState.mapOrientation = e.target.value;
         localStorage.setItem('mapOrientation', navState.mapOrientation);
+        sessionStorage.setItem('mapOrientation', navState.mapOrientation);
         console.log('Map orientation changed to:', navState.mapOrientation);
         if (navState.isNavigating && navState.isFollowing) {
           restoreNavigationView();
@@ -1259,6 +1357,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('auto-recenter-toggle').addEventListener('change', (e) => {
         navState.isFollowing = e.target.checked;
         localStorage.setItem('isFollowing', navState.isFollowing);
+        sessionStorage.setItem('isFollowing', navState.isFollowing);
         console.log('Auto-recenter toggled:', navState.isFollowing);
         if (navState.isFollowing && navState.isNavigating) {
           map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
@@ -1270,6 +1369,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
         showTrafficCameras = e.target.checked;
         localStorage.setItem('showTrafficCameras', showTrafficCameras);
+        sessionStorage.setItem('showTrafficCameras', showTrafficCameras);
         console.log('Traffic camera alerts toggled:', showTrafficCameras);
         cameraPositions = [];
         cameraAlertShown.clear();
@@ -1285,6 +1385,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
         highContrastMode = e.target.checked;
         localStorage.setItem('highContrastMode', highContrastMode);
+        sessionStorage.setItem('highContrastMode', highContrastMode);
         if (highContrastMode) {
           document.body.classList.add('high-contrast');
         } else {
@@ -1296,6 +1397,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         if (!navState.useDefaultDistances) {
           hazardAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
+          sessionStorage.setItem('hazardAlertDistance', hazardAlertDistance);
           document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
           console.log('Hazard alert distance set to:', hazardAlertDistance, 'miles');
         }
@@ -1304,6 +1406,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         if (!navState.useDefaultDistances) {
           cameraAlertDistance = parseFloat(e.target.value);
           localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
+          sessionStorage.setItem('cameraAlertDistance', cameraAlertDistance);
           document.getElementById('camera-distance-value').textContent = `${cameraAlertDistance} miles`;
           console.log('Camera alert distance set to:', cameraAlertDistance, 'miles');
         }
@@ -1311,11 +1414,14 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       document.getElementById('use-default-distances').addEventListener('change', (e) => {
         navState.useDefaultDistances = e.target.checked;
         localStorage.setItem('useDefaultDistances', navState.useDefaultDistances);
+        sessionStorage.setItem('useDefaultDistances', navState.useDefaultDistances);
         if (navState.useDefaultDistances) {
           hazardAlertDistance = 2;
           cameraAlertDistance = 0.5;
           localStorage.setItem('hazardAlertDistance', hazardAlertDistance);
+          sessionStorage.setItem('hazardAlertDistance', hazardAlertDistance);
           localStorage.setItem('cameraAlertDistance', cameraAlertDistance);
+          sessionStorage.setItem('cameraAlertDistance', cameraAlertDistance);
           document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
           document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
           document.getElementById('camera-alert-distance').value = cameraAlertDistance;
@@ -1345,9 +1451,11 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         });
       });
       document.getElementById('logout-button').addEventListener('click', () => {
-        console.log('Logout button clicked, clearing localStorage');
+        console.log('Logout button clicked, clearing localStorage and sessionStorage');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('userId');
         if (socket) socket.disconnect();
         document.getElementById('settings-hud-container').classList.remove('active');
         document.getElementById('auth-container').style.display = 'flex';
@@ -1376,18 +1484,20 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
     }
     async function fetchUserProfile() {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
-          throw new Error('Invalid token format in localStorage');
+          throw new Error('Invalid token format in storage');
         }
-        let response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
+        console.log('Fetching profile with token:', token.substring(0, 20) + '...');
+        let response = await fetch(`/api/auth/profile/${localStorage.getItem('userId') || sessionStorage.getItem('userId')}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Profile fetch response:', { status: response.status, ok: response.ok });
         if (response.status === 401) {
           const refreshed = await refreshToken();
           if (refreshed) {
-            response = await fetch(`/api/auth/profile/${localStorage.getItem('userId')}`, {
-              headers: { 'Authorization': `Bearer ${localStorage.getItem('token').trim()}` }
+            response = await fetch(`/api/auth/profile/${localStorage.getItem('userId') || sessionStorage.getItem('userId')}`, {
+              headers: { 'Authorization': `Bearer ${(localStorage.getItem('token') || sessionStorage.getItem('token')).trim()}` }
             });
           } else {
             throw new Error('Authentication failed');
@@ -1403,6 +1513,8 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         showToast('Failed to load profile data. Please log in again.');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('userId');
         document.getElementById('auth-container').style.display = 'flex';
       }
     }
@@ -1421,6 +1533,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
             console.warn('Push notification permission denied');
             showToast('Notifications blocked. Enable in browser settings for alerts.');
             localStorage.setItem('pushNotificationsEnabled', false);
+            sessionStorage.setItem('pushNotificationsEnabled', false);
             document.getElementById('push-notifications-toggle').checked = false;
             pushNotificationsEnabled = false;
           }
@@ -1432,6 +1545,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         console.warn('Push notifications not supported');
         showToast('Push notifications not supported by this browser.');
         localStorage.setItem('pushNotificationsEnabled', false);
+        sessionStorage.setItem('pushNotificationsEnabled', false);
         document.getElementById('push-notifications-toggle').checked = false;
         pushNotificationsEnabled = false;
       }
@@ -1447,19 +1561,23 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
           userVisibleOnly: true,
           applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)
         });
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, cannot subscribe to push');
           return;
         }
+        console.log('Subscribing to push with token:', token.substring(0, 20) + '...');
         const response = await fetch('/api/auth/subscribe', {
           method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token.trim()}`
           },
           body: JSON.stringify(sub)
         });
+        console.log('Push subscription response:', { status: response.status, ok: response.ok });
         if (!response.ok) throw new Error(`Failed to subscribe: ${response.statusText}`);
         console.log('Subscribed to push notifications');
       } catch (err) {
@@ -1472,13 +1590,16 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
-          const token = localStorage.getItem('token');
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
           if (!token || !token.includes('.') || token === 'undefined') {
             console.error('Invalid token, cannot unsubscribe from push');
             return;
           }
+          console.log('Unsubscribing from push with token:', token.substring(0, 20) + '...');
           await fetch('/api/auth/unsubscribe', {
             method: 'POST',
+            mode: 'cors',
+            credentials: 'include',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token.trim()}`
@@ -1506,18 +1627,22 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       return outputArray;
     }
     async function fetchLeaderboard() {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
         console.error('Invalid token, showing auth form');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('userId');
         document.getElementById('auth-container').style.display = 'flex';
         return;
       }
       try {
+        console.log('Fetching leaderboard with token:', token.substring(0, 20) + '...');
         const response = await fetch('/api/leaderboard', {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Leaderboard fetch response:', { status: response.status, ok: response.ok });
         if (!response.ok) throw new Error(`Leaderboard fetch failed: ${response.status}`);
         const users = await response.json();
         const content = document.getElementById('leaderboard-content');
@@ -1584,18 +1709,23 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
     }
     async function refreshToken() {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
-          throw new Error('Invalid token format in localStorage');
+          throw new Error('Invalid token format in storage');
         }
+        console.log('Refreshing token:', token.substring(0, 20) + '...');
         const response = await fetch('/api/auth/refresh', {
           method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Token refresh response:', { status: response.status, ok: response.ok });
         const data = await response.json();
         if (response.ok) {
           localStorage.setItem('token', data.token);
-          console.log('Token refreshed:', data.token);
+          sessionStorage.setItem('token', data.token);
+          console.log('Token refreshed:', data.token.substring(0, 20) + '...');
           return true;
         } else {
           throw new Error('Token refresh failed: ' + (data.error || 'Unknown error'));
@@ -1605,23 +1735,29 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         showToast('Session expired. Please log in again.');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('userId');
         document.getElementById('auth-container').style.display = 'flex';
         return false;
       }
     }
     async function confirmAlertLocation(location, alertType) {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, showing auth form');
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
+        console.log('Checking nearby alerts with token:', token.substring(0, 20) + '...');
         const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Nearby alerts response:', { status: response.status, ok: response.ok });
         if (!response.ok) {
           console.warn(`Failed to check nearby alerts (status: ${response.status}), proceeding with alert placement`);
           showToast('Server unavailable for nearby alerts check. Proceeding with placement.');
@@ -1662,8 +1798,10 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         timestamp: new Date()
       };
       try {
+        console.log('Reverse geocoding for alert location:', location);
         const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${location.lat()},${location.lng()}&key=${API_KEY}`);
         const data = await response.json();
+        console.log('Reverse geocoding response:', { status: data.status, results: data.results?.length });
         if (data.status === 'OK' && data.results[0]) {
           navState.tempAlertData.address = data.results[0].formatted_address;
           console.log('Reverse geocoding successful:', navState.tempAlertData.address);
@@ -1707,30 +1845,38 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         return;
       }
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, showing auth form');
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
+        console.log('Posting alert with token:', token.substring(0, 20) + '...');
         let response = await fetch('/api/alerts', {
           method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token.trim()}`
           },
           body: JSON.stringify(navState.tempAlertData)
         });
+        console.log('Post alert response:', { status: response.status, ok: response.ok });
         if (response.status === 401) {
           const refreshed = await refreshToken();
           if (refreshed) {
             response = await fetch('/api/alerts', {
               method: 'POST',
+              mode: 'cors',
+              credentials: 'include',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${localStorage.getItem('token').trim()}`
+                'Authorization': `Bearer ${(localStorage.getItem('token') || sessionStorage.getItem('token')).trim()}`
               },
               body: JSON.stringify(navState.tempAlertData)
             });
@@ -1739,7 +1885,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
           }
         }
         const result = await response.json();
-        console.log('Post alert response:', { status: response.status, result });
+        console.log('Post alert result:', result);
         if (response.status === 201 && result.alert) {
           const marker = new google.maps.marker.AdvancedMarkerElement({
             map,
@@ -1820,14 +1966,17 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
     }
     async function deleteAlert(id, item) {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, showing auth form');
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
+        console.log('Deleting alert with token:', token.substring(0, 20) + '...');
         const marker = markers.get(id);
         if (!marker) {
           console.warn('Marker not found for deletion:', id);
@@ -1837,8 +1986,11 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         }
         const response = await fetch(`/api/alerts/${id}`, {
           method: 'DELETE',
+          mode: 'cors',
+          credentials: 'include',
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Delete alert response:', { status: response.status, ok: response.ok });
         if (response.ok) {
           marker.setMap(null);
           markers.delete(id);
@@ -1873,14 +2025,16 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
     async function pollAlerts() {
       if (!navState.userLocation) return;
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, skipping alert poll');
           return;
         }
+        console.log('Polling alerts with token:', token.substring(0, 20) + '...');
         const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=50000`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Poll alerts response:', { status: response.status, ok: response.ok });
         if (!response.ok) throw new Error(`Failed to fetch alerts for polling: ${response.statusText}`);
         const serverAlerts = await response.json();
         const serverAlertIds = new Set(serverAlerts.map(alert => alert._id));
@@ -1903,15 +2057,17 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
     }
     async function fetchAndDisplayMarkers(map, center) {
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, skipping marker fetch');
           return;
         }
+        console.log('Fetching markers with token:', token.substring(0, 20) + '...');
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
         const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Markers fetch response:', { status: response.status, ok: response.ok });
         if (!response.ok) throw new Error(`Failed to fetch markers: ${response.statusText}`);
         const markersData = await response.json();
         markers.forEach((marker, id) => {
@@ -1947,16 +2103,18 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
     }
     function fetchCurrentAlerts() {
       const center = navState.userLocation;
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
         console.error('Invalid token, skipping alert fetch');
         return;
       }
+      console.log('Fetching current alerts with token:', token.substring(0, 20) + '...');
       const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=50000`;
       fetch(url, {
         headers: { 'Authorization': `Bearer ${token.trim()}` }
       })
         .then(response => {
+          console.log('Current alerts fetch response:', { status: response.status, ok: response.ok });
           if (!response.ok) throw new Error(`Failed to fetch alerts: ${response.statusText}`);
           return response.json();
         })
@@ -2005,7 +2163,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
           <div class="alert-field"><strong>User who posted:</strong> ${alert.userId ? alert.userId.username : 'Anonymous'}</div>
           <div class="alert-actions">
             <button class="center-btn" data-lat="${alert.location.coordinates[1]}" data-lng="${alert.location.coordinates[0]}">Center</button>
-            ${alert.userId && alert.userId._id === localStorage.getItem('userId') ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
+            ${alert.userId && alert.userId._id === (localStorage.getItem('userId') || sessionStorage.getItem('userId')) ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
           </div>
         `;
         content.appendChild(item);
@@ -2059,20 +2217,19 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       }
     }
     function recenterNonNavigation() {
-      if (map) {
-        new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({ zoom: 15, center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading }, 500)
-          .easing(TWEEN.Easing.Quadratic.Out)
-          .onUpdate(obj => {
-            map.setCenter(obj.center);
-            map.setZoom(obj.zoom);
-            map.setHeading(obj.heading);
-            updateCompass();
-          })
-          .start();
-        map.setTilt(0);
-        console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
-      }
+      if (!map) return;
+      new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
+        .to({ zoom: 15, center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading }, 500)
+        .easing(TWEEN.Easing.Quadratic.Out)
+        .onUpdate(obj => {
+          map.setCenter(obj.center);
+          map.setZoom(obj.zoom);
+          map.setHeading(obj.heading);
+          updateCompass();
+        })
+        .start();
+      map.setTilt(0);
+      console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
     }
     function getDynamicZoom(currentPos, speed) {
       if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
@@ -2399,7 +2556,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
               .to({ rotation: navState.currentHeading }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => {
-                userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'heading-up' ? 0 : obj.rotation}deg)`;
+                userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? obj.rotation : 0}deg)`;
               })
               .start();
             console.log('Bearing updated: { heading:', navState.currentHeading, 'source: marker-rotation }');
@@ -2418,7 +2575,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
             heading: map.getHeading(),
             tilt: map.getTilt()
           })
-            .to({
+.to({
               center: navState.userLocation,
               zoom,
               heading,
@@ -2469,6 +2626,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
       navState.isFollowing = true;
       navState.isInitialSnap = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
+      sessionStorage.setItem('isFollowing', navState.isFollowing);
       document.getElementById('search-container').classList.add('hidden');
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
@@ -2725,7 +2883,7 @@ document.getElementById('voice-button').addEventListener('click', startVoiceReco
         hudDistance.textContent = '0 miles - Unknown';
         return;
       }
-const leg = route.routes[0].legs[0];
+      const leg = route.routes[0].legs[0];
       const duration = leg.duration.value;
       const distanceM = leg.distance.value;
       const distanceMi = (distanceM / 1609.34).toFixed(1);
@@ -2810,19 +2968,23 @@ const leg = route.routes[0].legs[0];
       const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
       console.log('Checking hazards for polyline:', { points: polyline.length, maxDistance: hazardAlertDistance * 1609.34 });
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, skipping hazard check');
           return;
         }
+        console.log('Checking hazards with token:', token.substring(0, 20) + '...');
         const response = await fetch('/api/hazards-near-route', {
           method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${token.trim()}`
           },
           body: JSON.stringify({ polyline, maxDistance: hazardAlertDistance * 1609.34 })
         });
+        console.log('Hazard check response:', { status: response.status, ok: response.ok });
         if (!response.ok) {
           throw new Error(`HTTP error ${response.status}: ${await response.text()}`);
         }
@@ -3189,6 +3351,7 @@ const leg = route.routes[0].legs[0];
         navState.isFollowing = true;
         navState.isInitialSnap = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
+        sessionStorage.setItem('isFollowing', navState.isFollowing);
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         restoreNavigationView();
         showToast('Alternative route accepted.');
@@ -3237,6 +3400,7 @@ const leg = route.routes[0].legs[0];
       navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
+      sessionStorage.setItem('isFollowing', navState.isFollowing);
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
       restoreNavigationView();
       showToast('Reroute rejected, continuing on original route.');
@@ -3332,14 +3496,16 @@ const leg = route.routes[0].legs[0];
         }
       });
       try {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
         if (!token || !token.includes('.') || token === 'undefined') {
           console.error('Invalid token, skipping camera check');
           return;
         }
+        console.log('Checking traffic cameras with token:', token.substring(0, 20) + '...');
         const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${cameraAlertDistance * 1609.34}&type=Traffic%20Camera`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
+        console.log('Traffic camera fetch response:', { status: response.status, ok: response.ok });
         if (!response.ok) throw new Error(`Failed to fetch traffic camera alerts: ${response.statusText}`);
         const cameras = await response.json();
         cameras.forEach((camera, index) => {
@@ -3459,14 +3625,12 @@ const leg = route.routes[0].legs[0];
         loadGoogleMaps();
       }
     }
-    // NEW: Helper function to calculate speed based on route segment
     function calculateSimulationSpeed(step) {
       const isHighway = step && step.distance.value > 1000;
       const baseSpeed = isHighway ? 15 : 10; // 15 m/s (~33 mph) for highways, 10 m/s (~22 mph) for city
       const variation = Math.random() * 5 - 2.5; // Random variation ±2.5 m/s
       return Math.max(5, Math.min(20, baseSpeed + variation)); // 11-45 mph range
     }
-    // NEW: Helper function to offset position for off-route simulation
     function offsetPosition(pos, heading, distance) {
       const offsetAngle = heading + 90; // Perpendicular to heading
       const offsetLatLng = google.maps.geometry.spherical.computeOffset(
@@ -3576,7 +3740,7 @@ const leg = route.routes[0].legs[0];
     function checkAuth() {
       if (isInitialized) return;
       isInitialized = true;
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       if (token && token.includes('.') && token !== 'undefined') {
         console.log('Token found, initializing app:', token.substring(0, 20) + '...');
         document.getElementById('auth-container').style.display = 'none';
@@ -3585,15 +3749,19 @@ const leg = route.routes[0].legs[0];
         console.log('No valid token found, showing auth form');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('userId');
         document.getElementById('auth-container').style.display = 'flex';
       }
     }
     function initApp() {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
         console.error('Invalid token in initApp, showing auth form');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('userId');
         document.getElementById('auth-container').style.display = 'flex';
         return;
       }
@@ -3609,14 +3777,16 @@ const leg = route.routes[0].legs[0];
         reconnectionDelay: 1000
       });
       socket.on('connect', () => {
-        console.log('Socket.IO connected for user:', localStorage.getItem('userId'));
+        console.log('Socket.IO connected for user:', localStorage.getItem('userId') || sessionStorage.getItem('userId'));
       });
       socket.on('connect_error', (err) => {
         console.error('Socket connection error:', err.message);
         if (err.message.includes('Authentication')) {
-          console.log('Invalid token, clearing localStorage and showing auth form');
+          console.log('Invalid token, clearing storage and showing auth form');
           localStorage.removeItem('token');
           localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
           document.getElementById('auth-container').style.display = 'flex';
         } else {
           showToast('Server connection lost. Attempting to reconnect...');
@@ -3713,7 +3883,7 @@ const leg = route.routes[0].legs[0];
         console.log('Received friend location:', data);
       });
       socket.on('pointsUpdate', (data) => {
-        if (data.userId === localStorage.getItem('userId')) {
+        if (data.userId === (localStorage.getItem('userId') || sessionStorage.getItem('userId'))) {
           fetchUserProfile();
         }
       });
