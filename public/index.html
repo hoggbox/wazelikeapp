@@ -335,7 +335,7 @@
   <div id="search-container">
     <input id="search-input" type="text" placeholder="Enter destination address">
     <button id="start-button">Start</button>
-    <button id="simulate-position-button" style="display: none;">Simulate Position</button>
+    <button id="simulate-position-button" style="display: none;">Simulate</button>
   </div>
   <div id="hud-container">
     <div id="hud-turn">Follow the road</div>
@@ -791,7 +791,7 @@
       trafficLayer = new google.maps.TrafficLayer({ map: navState.showTraffic ? map : null });
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer({
-        map: null, // CHANGED: Start with map null, only show route on start
+        map: null,
         suppressMarkers: true,
         preserveViewport: false,
         polylineOptions: {
@@ -827,7 +827,7 @@
       });
       google.maps.event.addListener(userMarker, 'position_changed', () => {
         const pos = userMarker.position;
-        if (pos && navState.isNavigating && navState.isFollowing) {
+        if (pos && navState.isFollowing) {
           map.moveCamera({
             center: pos,
             heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
@@ -910,7 +910,6 @@
             content: destMarkerElement,
             title: 'Destination'
           });
-          // CHANGED: Calculate route and zoom out to show full route
           directionsService.route(
             {
               origin: navState.userLocation,
@@ -920,7 +919,7 @@
             },
             (response, status) => {
               if (status === 'OK') {
-                navState.currentRoute = response; // Store route but don't start navigation
+                navState.currentRoute = response;
                 directionsRenderer.setMap(map);
                 directionsRenderer.setDirections(response);
                 const bounds = new google.maps.LatLngBounds();
@@ -930,7 +929,7 @@
                 map.fitBounds(bounds);
                 setTimeout(() => {
                   const currentZoom = map.getZoom();
-                  map.setZoom(Math.min(currentZoom, 15)); // Ensure readable zoom level
+                  map.setZoom(Math.min(currentZoom, 15));
                 }, 100);
                 console.log('Route preview displayed:', { pathLength: response.routes[0].overview_path.length, bounds });
                 document.getElementById('start-button').style.display = 'block';
@@ -1014,8 +1013,31 @@
         if (mockSimulationInterval) {
           clearInterval(mockSimulationInterval);
           mockSimulationInterval = null;
-          document.getElementById('simulate-position-button').textContent = 'Simulate Position';
+          document.getElementById('simulate-position-button').textContent = 'Simulate';
           console.log('Position simulation stopped');
+          // Reset simulation state
+          document.getElementById('hud-container').style.display = 'none';
+          document.getElementById('bottom-hud-container').style.display = 'none';
+          if (routePolyline) {
+            routePolyline.setMap(null);
+            routePolyline = null;
+          }
+          if (offRoadPolyline) {
+            offRoadPolyline.setMap(null);
+            offRoadPolyline = null;
+          }
+          directionsRenderer.setMap(map); // Restore route preview
+          navState.isFollowing = false;
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+          const bounds = new google.maps.LatLngBounds();
+          bounds.extend(navState.userLocation);
+          bounds.extend(navState.destination);
+          navState.currentRoute.routes[0].overview_path.forEach(point => bounds.extend(point));
+          map.fitBounds(bounds);
+          setTimeout(() => {
+            map.setZoom(Math.min(map.getZoom(), 15));
+          }, 100);
+          console.log('Simulation stopped, route preview restored');
         } else {
           startPositionSimulation();
           document.getElementById('simulate-position-button').textContent = 'Stop Simulation';
@@ -1094,7 +1116,7 @@
           console.log('Navigation view re-locked after closing leaderboard HUD');
         }
       });
-      document.getElementById('voice-button').addEventListener('click', startVoiceRecognition);
+document.getElementById('voice-button').addEventListener('click', startVoiceRecognition);
       document.getElementById('share-button').addEventListener('click', shareRoute);
       document.getElementById('recalibrate-compass-button').addEventListener('click', () => {
         recalibrateCompass();
@@ -1110,7 +1132,7 @@
           await unsubscribeFromPush();
         }
       });
-document.querySelectorAll('.report-button').forEach(button => {
+      document.querySelectorAll('.report-button').forEach(button => {
         button.addEventListener('click', async () => {
           if (navState.alertState === 'IDLE') {
             const alertType = button.getAttribute('data-alert-type');
@@ -2053,7 +2075,7 @@ document.querySelectorAll('.report-button').forEach(button => {
       }
     }
     function getDynamicZoom(currentPos, speed) {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
+      if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
       }
       const path = navState.currentRoute.routes[0].overview_path;
@@ -2141,7 +2163,7 @@ document.querySelectorAll('.report-button').forEach(button => {
         .start();
     }
     function updateRouteAhead(currentPos) {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes[0]) {
+      if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
         if (routePolyline) {
           routePolyline.setMap(null);
           routePolyline = null;
@@ -2179,11 +2201,11 @@ document.querySelectorAll('.report-button').forEach(button => {
       console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
     }
     function updateOffRoadPolyline(rawPos, targetPos) {
-      if (!navState.isNavigating || !rawPos || !targetPos) {
+      if (!rawPos || !targetPos) {
         if (offRoadPolyline) {
           offRoadPolyline.setMap(null);
           offRoadPolyline = null;
-          console.log('Off-road polyline cleared: navigation inactive or no position data');
+          console.log('Off-road polyline cleared: no position data');
         }
         return;
       }
@@ -2244,7 +2266,7 @@ document.querySelectorAll('.report-button').forEach(button => {
       return { point: bestPoint, index: closestIndex };
     }
     function ensureMarkerInView(position) {
-      if (!map || !position || !navState.isNavigating || !navState.isFollowing) return;
+      if (!map || !position || !navState.isFollowing) return;
       const bounds = map.getBounds();
       if (!bounds) {
         console.warn('Map bounds unavailable, cannot check viewport');
@@ -2277,10 +2299,10 @@ document.querySelectorAll('.report-button').forEach(button => {
         console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
       }
     }
-    function onPositionUpdate(position) {
+    function onPositionUpdate(position, isSimulation = false) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
-        console.log('Location update received:', { lat: latitude, lng: longitude, speed, gpsHeading: heading });
+        console.log('Location update received:', { lat: latitude, lng: longitude, speed, gpsHeading: heading, isSimulation });
         console.log('Navigation state:', { isNavigating: navState.isNavigating, isFollowing: navState.isFollowing });
         const now = Date.now();
         if (now - lastLocationUpdate < LOCATION_UPDATE_THRESHOLD) {
@@ -2297,8 +2319,8 @@ document.querySelectorAll('.report-button').forEach(button => {
         let pos = rawUserLocation;
         let snapped = navState.isInitialSnap;
         let computedHeading = heading;
-        if (navState.isNavigating && navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
-          if (checkArrival(pos)) {
+        if (navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
+          if (navState.isNavigating && checkArrival(pos)) {
             return;
           }
           const path = navState.currentRoute.routes[0].overview_path;
@@ -2308,7 +2330,6 @@ document.querySelectorAll('.report-button').forEach(button => {
             pos = point;
             snapped = true;
             console.log('Snapped to polyline:', pos);
-            // CHANGED: Explicitly clear off-road polyline when snapped
             if (offRoadPolyline) {
               offRoadPolyline.setMap(null);
               offRoadPolyline = null;
@@ -2347,11 +2368,13 @@ document.querySelectorAll('.report-button').forEach(button => {
           const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : speed <= STATIONARY_SPEED_THRESHOLD ? 'lastValid' : needsCalibration ? 'lastValid' : 'compass';
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
           console.log('Heading stabilized:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading, source, speed });
-          try {
-            checkOffRoute(new google.maps.LatLng(pos));
-          } catch (error) {
-            console.error('checkOffRoute failed:', error);
-            showToast('Error checking route deviation. Continuing with raw location.');
+          if (navState.isNavigating) {
+            try {
+              checkOffRoute(new google.maps.LatLng(pos));
+            } catch (error) {
+              console.error('checkOffRoute failed:', error);
+              showToast('Error checking route deviation. Continuing with raw location.');
+            }
           }
         } else {
           const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : 'lastValid';
@@ -2384,7 +2407,7 @@ document.querySelectorAll('.report-button').forEach(button => {
         }
         lastHeading = navState.currentHeading;
         lastPosition = pos;
-        if (navState.isNavigating && navState.isFollowing) {
+        if (navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
           navState.navigationZoom = zoom;
@@ -2417,12 +2440,15 @@ document.querySelectorAll('.report-button').forEach(button => {
           navState.isInitialSnap = false;
         }
         navState.lastKnownPosition = pos;
-        if (socket && socket.connected) {
+        if (!isSimulation && socket && socket.connected) {
           socket.emit('locationUpdate', { location: navState.userLocation });
           console.log('Emitted locationUpdate:', navState.userLocation);
         }
         updateHUD(navState.currentRoute, navState.userLocation);
         updateCompass();
+        if (isSimulation && showTrafficCameras) {
+          checkCameraProximity();
+        }
       } catch (error) {
         console.error('Error in position update:', error);
         showToast('Error updating location. Please ensure GPS is enabled.');
@@ -2447,7 +2473,6 @@ document.querySelectorAll('.report-button').forEach(button => {
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-      // CHANGED: Use existing route from destination selection
       if (navState.currentRoute) {
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
@@ -2456,7 +2481,7 @@ document.querySelectorAll('.report-button').forEach(button => {
         navState.userLocation = point;
         console.log('Forced snap to route start:', navState.userLocation);
         userMarker.position = navState.userLocation;
-        directionsRenderer.setMap(map); // Ensure renderer is active
+        directionsRenderer.setMap(map);
         directionsRenderer.setDirections(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
         updateBottomHUD(navState.currentRoute);
@@ -2505,7 +2530,7 @@ document.querySelectorAll('.report-button').forEach(button => {
       if (mockSimulationInterval) {
         clearInterval(mockSimulationInterval);
         mockSimulationInterval = null;
-        document.getElementById('simulate-position-button').textContent = 'Simulate Position';
+        document.getElementById('simulate-position-button').textContent = 'Simulate';
         console.log('Position simulation stopped');
       }
       if (navState.rerouteCheckTimeout) {
@@ -3294,7 +3319,7 @@ const leg = route.routes[0].legs[0];
       return isNearEdge;
     }
     async function checkCameraProximity() {
-      if (!navState.isNavigating || !navState.userLocation || !showTrafficCameras) return;
+      if (!navState.userLocation || !showTrafficCameras) return;
       const userLatLng = new google.maps.LatLng(navState.userLocation);
       cameraPositions.forEach((cameraPos, index) => {
         const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, new google.maps.LatLng(cameraPos));
@@ -3377,7 +3402,7 @@ const leg = route.routes[0].legs[0];
     function handleGeolocationError(error, isInitial = false) {
       let message = 'Failed to get location. Please try again later.';
       if (error.code === 1) {
-        message = 'Location access denied. Please enable location permissions in your browser settings.';
+        message = 'Location access denied. Please enable location permissions in browser settings.';
       } else if (error.code === 2) {
         message = 'Location unavailable. Ensure location services enabled and try again.';
       } else if (error.code === 3) {
@@ -3434,83 +3459,120 @@ const leg = route.routes[0].legs[0];
         loadGoogleMaps();
       }
     }
+    // NEW: Helper function to calculate speed based on route segment
+    function calculateSimulationSpeed(step) {
+      const isHighway = step && step.distance.value > 1000;
+      const baseSpeed = isHighway ? 15 : 10; // 15 m/s (~33 mph) for highways, 10 m/s (~22 mph) for city
+      const variation = Math.random() * 5 - 2.5; // Random variation ±2.5 m/s
+      return Math.max(5, Math.min(20, baseSpeed + variation)); // 11-45 mph range
+    }
+    // NEW: Helper function to offset position for off-route simulation
+    function offsetPosition(pos, heading, distance) {
+      const offsetAngle = heading + 90; // Perpendicular to heading
+      const offsetLatLng = google.maps.geometry.spherical.computeOffset(
+        new google.maps.LatLng(pos),
+        distance,
+        offsetAngle
+      );
+      return { lat: offsetLatLng.lat(), lng: offsetLatLng.lng() };
+    }
     function startPositionSimulation() {
-      if (!navState.isNavigating || !navState.destination) {
-        console.error('Cannot start simulation: Not navigating or no destination');
-        showToast('Please start navigation to use simulation.');
+      if (!navState.currentRoute || !navState.currentRoute.routes[0] || !navState.destination) {
+        console.error('Cannot start simulation: No route or destination');
+        showToast('Please select a destination to simulate.');
         return;
       }
-      let simLat = navState.userLocation.lat;
-      const simPath = [
-        { lat: simLat, lng: navState.userLocation.lng, speed: 3, heading: 90 },
-        { lat: simLat + 0.001, lng: navState.userLocation.lng, speed: 3, heading: 90 },
-        { lat: simLat + 0.002, lng: navState.userLocation.lng, speed: 3, heading: 90 },
-        { lat: simLat + 0.003, lng: navState.userLocation.lng, speed: 3, heading: 90 }
-      ];
+      navState.isFollowing = true;
+      document.getElementById('search-container').classList.add('hidden');
+      document.getElementById('hud-container').style.display = 'flex';
+      document.getElementById('bottom-hud-container').style.display = 'flex';
+      const path = navState.currentRoute.routes[0].overview_path;
+      const legs = navState.currentRoute.routes[0].legs[0];
       let simIndex = 0;
+      let isPaused = false;
+      let pauseTimeout = null;
+      let isOffRoute = false;
+      let offRouteCounter = 0;
+      const SIM_INTERVAL = 1000; // Update every 1s
+      const OFF_ROUTE_INTERVAL = 5; // Go off-route every 5 updates
+      const OFF_ROUTE_DURATION = 3; // Stay off-route for 3 updates
+      const STOP_DURATION = 3000; // Pause 3s at turns
       mockSimulationInterval = setInterval(() => {
-        if (simIndex >= simPath.length) {
-          simIndex = 0;
+        if (simIndex >= path.length) {
+          clearInterval(mockSimulationInterval);
+          mockSimulationInterval = null;
+          document.getElementById('simulate-position-button').textContent = 'Simulate';
+          document.getElementById('hud-container').style.display = 'none';
+          document.getElementById('bottom-hud-container').style.display = 'none';
+          if (routePolyline) {
+            routePolyline.setMap(null);
+            routePolyline = null;
+          }
+          if (offRoadPolyline) {
+            offRoadPolyline.setMap(null);
+            offRoadPolyline = null;
+          }
+          directionsRenderer.setMap(map);
+          navState.isFollowing = false;
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+          const bounds = new google.maps.LatLngBounds();
+          bounds.extend(navState.userLocation);
+          bounds.extend(navState.destination);
+          path.forEach(point => bounds.extend(point));
+          map.fitBounds(bounds);
+          setTimeout(() => {
+            map.setZoom(Math.min(map.getZoom(), 15));
+          }, 100);
+          console.log('Simulation completed, route preview restored');
+          return;
         }
-        const pos = simPath[simIndex];
+        if (isPaused) return;
+        const currentPoint = path[simIndex];
+        let currentStep = null;
+        for (let i = 0; i < legs.steps.length; i++) {
+          const stepPath = legs.steps[i].path;
+          if (stepPath.some(pt => google.maps.geometry.spherical.computeDistanceBetween(pt, currentPoint) < 20)) {
+            currentStep = legs.steps[i];
+            break;
+          }
+        }
+        const speed = calculateSimulationSpeed(currentStep);
+        let pos = { lat: currentPoint.lat(), lng: currentPoint.lng() };
+        let heading = simIndex < path.length - 1
+          ? google.maps.geometry.spherical.computeHeading(currentPoint, path[simIndex + 1])
+          : navState.currentHeading;
+        offRouteCounter++;
+        if (offRouteCounter >= OFF_ROUTE_INTERVAL && !isOffRoute) {
+          isOffRoute = true;
+          offRouteCounter = 0;
+          pos = offsetPosition(pos, heading, 50); // 50m offset
+          console.log('Simulating off-route:', pos);
+        } else if (isOffRoute && offRouteCounter >= OFF_ROUTE_DURATION) {
+          isOffRoute = false;
+          offRouteCounter = 0;
+          console.log('Returning to route:', pos);
+        }
+        if (currentStep && currentStep.maneuver && !isOffRoute) {
+          isPaused = true;
+          console.log('Pausing at turn for 3s:', currentStep.maneuver);
+          pauseTimeout = setTimeout(() => {
+            isPaused = false;
+            clearTimeout(pauseTimeout);
+            console.log('Resuming after turn pause');
+          }, STOP_DURATION);
+        }
         onPositionUpdate({
           coords: {
             latitude: pos.lat,
             longitude: pos.lng,
-            speed: pos.speed,
-            heading: pos.heading
+            speed,
+            heading
           }
-        });
-        console.log('Simulated position update:', pos);
-        simIndex++;
-      }, 2000);
+        }, true);
+        console.log('Simulated position update:', { pos, speed, heading, simIndex });
+        if (!isPaused) simIndex++;
+      }, SIM_INTERVAL);
     }
-    let isRegister = false;
-    function switchAuthMode() {
-      isRegister = !isRegister;
-      const usernameInput = document.getElementById('username');
-      document.getElementById('auth-title').textContent = isRegister ? 'Register' : 'Login';
-      usernameInput.style.display = isRegister ? 'block' : 'none';
-      usernameInput.required = isRegister;
-      document.getElementById('auth-switch').innerHTML = isRegister
-        ? 'Already have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Login</a>'
-        : 'Don\'t have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a>';
-      console.log('Switched auth mode, isRegister:', isRegister, 'Username required:', usernameInput.required);
-    }
-    document.getElementById('auth-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      console.log('Form submitted, isRegister:', isRegister);
-      const email = document.getElementById('email').value;
-      const password = document.getElementById('password').value;
-      const username = document.getElementById('username').value;
-      console.log('Form data:', { email, password, username });
-      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-      const body = isRegister ? { username, email, password } : { email, password };
-      console.log('Sending to endpoint:', endpoint, 'Body:', body);
-      try {
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        console.log('Response status:', response.status);
-        const data = await response.json();
-        console.log('Response data:', data);
-        if (response.ok) {
-          localStorage.setItem('token', data.token);
-          localStorage.setItem('userId', data.user.id);
-          document.getElementById('auth-container').style.display = 'none';
-          console.log('Authentication successful, token:', data.token, 'userId:', data.user.id);
-          initApp();
-        } else {
-          console.error('Server error response:', data.error);
-          showToast(data.error || 'Authentication failed');
-        }
-      } catch (error) {
-        console.error('Fetch error:', error.message);
-        showToast('Error: ' + error.message);
-      }
-    });
     function checkAuth() {
       if (isInitialized) return;
       isInitialized = true;
