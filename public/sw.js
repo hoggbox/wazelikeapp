@@ -1,31 +1,31 @@
-const CACHE_NAME = 'waze-app-v1.0.11'; // CHANGED: Bumped to v1.0.11 for updated index.html
+const CACHE_NAME = 'waze-app-v1.0.12'; // CHANGED: Bumped version to ensure updated index.html is cached
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json?v=1.0.3',
-  // '/icon.png', // Uncomment if icon.png is uploaded to /public
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
-  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3'
+  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
+  'https://i.postimg.cc/YS0h0m7R/compass.png',
+  'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
 ];
 
 self.addEventListener('install', event => {
-  console.log('Service worker installing...');
+  console.log('Service Worker installing...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Service worker caching files');
+        console.log('Caching app shell');
         return cache.addAll(urlsToCache);
       })
-      .then(() => {
-        console.log('Service worker installed:', CACHE_NAME);
-        return self.skipWaiting();
+      .catch(error => {
+        console.error('Cache installation failed:', error);
       })
   );
 });
 
 self.addEventListener('activate', event => {
-  console.log('Service worker activating...');
+  console.log('Service Worker activating...');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
@@ -36,115 +36,99 @@ self.addEventListener('activate', event => {
           }
         })
       );
-    }).then(() => {
-      console.log('Service worker activated:', CACHE_NAME);
+    })
+    .then(() => {
+      console.log('Service Worker activated');
       return self.clients.claim();
+    })
+    .catch(error => {
+      console.error('Activation failed:', error);
     })
   );
 });
 
 self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) {
+    console.log('Network request for:', url.pathname);
+    event.respondWith(fetch(event.request));
+    return;
+  }
   event.respondWith(
     caches.match(event.request)
       .then(response => {
         if (response) {
-          console.log('Cache hit:', event.request.url);
+          console.log('Serving from cache:', event.request.url);
           return response;
         }
-        console.log('Cache miss, fetching:', event.request.url);
-        return fetch(event.request).catch(error => {
-          console.error('Fetch failed:', error);
-          if (event.request.url.includes('/api/markers')) {
-            return new Response(JSON.stringify([]), {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' }
-            });
+        console.log('Fetching from network:', event.request.url);
+        return fetch(event.request).then(networkResponse => {
+          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+            return networkResponse;
           }
-          return new Response('Offline', { status: 503 });
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME)
+            .then(cache => {
+              cache.put(event.request, responseToCache);
+              console.log('Cached:', event.request.url);
+            })
+            .catch(error => {
+              console.error('Cache put failed:', error);
+            });
+          return networkResponse;
         });
+      })
+      .catch(error => {
+        console.error('Fetch failed:', error);
+        return caches.match('/index.html');
       })
   );
 });
 
-self.addEventListener('message', event => {
-  if (event.data.type === 'INIT') {
-    console.log('Service worker initialized via message');
-  }
-  if (event.data.type === 'SHOW_NOTIFICATION') {
-    const { title, body, alertId, lat, lng } = event.data;
-    self.registration.showNotification(title, {
-      body,
-      icon: '/icon.png', // Uncomment if icon.png is uploaded
-      badge: '/icon.png', // Uncomment if icon.png is uploaded
-      tag: `alert-${alertId}`,
-      data: { alertId, lat, lng },
-      actions: [
-        { action: 'view', title: 'View Alert' }
-      ]
-    });
-    console.log('Notification displayed:', { title, body, alertId, lat, lng });
-  }
-});
-
 self.addEventListener('push', event => {
-  const data = event.data?.json() || {};
-  const { title = 'Alert', body = 'New alert reported nearby.', alertId, lat, lng } = data;
+  console.log('Push notification received:', event);
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (error) {
+      console.error('Error parsing push data:', error);
+      data = { title: 'Notification', body: 'New alert received.' };
+    }
+  } else {
+    data = { title: 'Notification', body: 'New alert received.' };
+  }
+  const options = {
+    body: data.body,
+    icon: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png',
+    badge: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png',
+    data: {
+      url: data.url || '/'
+    }
+  };
   event.waitUntil(
-    self.registration.showNotification(title, {
-      body,
-      icon: '/icon.png', // Uncomment if icon.png is uploaded
-      badge: '/icon.png', // Uncomment if icon.png is uploaded
-      tag: `alert-${alertId}`,
-      data: { alertId, lat, lng },
-      actions: [
-        { action: 'view', title: 'View Alert' }
-      ]
-    }).then(() => {
-      console.log('Push notification displayed:', { title, body, alertId, lat, lng });
-    })
+    self.registration.showNotification(data.title || 'Notification', options)
+      .then(() => console.log('Push notification shown:', data.title))
+      .catch(error => console.error('Error showing notification:', error))
   );
 });
 
 self.addEventListener('notificationclick', event => {
+  console.log('Notification clicked:', event.notification);
   event.notification.close();
-  const { action, notification } = event;
-  console.log('Notification clicked:', { action, alertId: notification.data?.alertId, lat: notification.data?.lat, lng: notification.data?.lng });
-  if (action === 'view') {
-    event.waitUntil(
-      clients.matchAll({ type: 'window', includeUncontrolled: true })
-        .then(clientList => {
-          const url = new URL('/', self.location.origin);
-          if (notification.data?.alertId && !isNaN(notification.data?.lat) && !isNaN(notification.data?.lng)) {
-            url.searchParams.set('alertId', notification.data.alertId);
-            url.searchParams.set('lat', notification.data.lat);
-            url.searchParams.set('lng', notification.data.lng);
-          } else {
-            console.warn('Incomplete alert data, opening root URL:', notification.data);
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(clientList => {
+        const url = event.notification.data.url || '/';
+        for (const client of clientList) {
+          if (client.url === url && 'focus' in client) {
+            return client.focus();
           }
-          const client = clientList.find(c => c.url.includes('wazelikeapp') && 'focus' in c);
-          if (client) {
-            client.focus();
-            client.postMessage({
-              type: 'NAVIGATE_TO_ALERT',
-              alertId: notification.data?.alertId,
-              lat: notification.data?.lat,
-              lng: notification.data?.lng
-            });
-            console.log('Client focused for alert:', { alertId: notification.data?.alertId, lat: notification.data?.lat, lng: notification.data?.lng });
-            return;
-          }
-          return clients.openWindow(url.toString()).then(windowClient => {
-            if (windowClient) {
-              windowClient.postMessage({
-                type: 'NAVIGATE_TO_ALERT',
-                alertId: notification.data?.alertId,
-                lat: notification.data?.lat,
-                lng: notification.data?.lng
-              });
-              console.log('Client opened for alert:', { alertId: notification.data?.alertId, lat: notification.data?.lat, lng: notification.data?.lng });
-            }
-          });
-        })
-    );
-  }
+        }
+        if (clients.openWindow) {
+          return clients.openWindow(url);
+        }
+      })
+      .catch(error => console.error('Error handling notification click:', error))
+  );
 });
