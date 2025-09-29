@@ -214,7 +214,7 @@ app.post('/api/auth/unsubscribe', authMiddleware, async (req, res) => {
     });
     if (result.deletedCount > 0) {
       await User.findByIdAndUpdate(req.user._id, {
-        $pull: { pushSubscriptions: { $in: [result._id] } }
+        $pull: { pushSubscriptions: result._id }
       });
       logger.info('Push subscription removed:', { userId: req.user._id, endpoint: subscription.endpoint });
       res.status(200).json({ message: 'Subscription removed' });
@@ -256,21 +256,22 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
     const populatedAlert = await Alert.findById(alert._id).populate('userId', 'username');
     logger.info('Alert saved:', { type, userId: req.user._id, location });
 
-    // Send push notifications to nearby subscribed users
-    const maxDistance = type === 'Traffic Camera' ? 0.5 * 1609.34 : 2 * 1609.34; // 0.5 miles for cameras, 2 miles for hazards
+    // Send push notifications to users within 15 miles
+    const maxDistance = 15 * 1609.34; // 15 miles in meters
     const users = await User.find({
       pushSubscriptions: { $exists: true, $ne: [] },
-      'lastLocation.coordinates': {
-        $near: {
-          $geometry: { type: 'Point', coordinates: [lng, lat] },
-          $maxDistance: maxDistance
+      lastLocation: {
+        $geoWithin: {
+          $centerSphere: [[lng, lat], maxDistance / 6378137] // Earth radius in meters
         }
       }
     }).populate('pushSubscriptions');
     const notificationPayload = {
       title: `${type} Alert`,
       body: `${type} reported at ${address || `${lat.toFixed(4)}, ${lng.toFixed(4)}`}`,
-      alertId: alert._id
+      alertId: alert._id,
+      lat: lat,
+      lng: lng
     };
     for (const user of users) {
       for (const sub of user.pushSubscriptions) {
@@ -327,20 +328,21 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     logger.info('Alert deleted:', req.params.id);
 
     // Send push notifications for alert deletion
-    const maxDistance = alert.type === 'Traffic Camera' ? 0.5 * 1609.34 : 2 * 1609.34;
+    const maxDistance = 15 * 1609.34; // 15 miles in meters
     const users = await User.find({
       pushSubscriptions: { $exists: true, $ne: [] },
-      'lastLocation.coordinates': {
-        $near: {
-          $geometry: { type: 'Point', coordinates: alert.location.coordinates },
-          $maxDistance: maxDistance
+      lastLocation: {
+        $geoWithin: {
+          $centerSphere: [[alert.location.coordinates[0], alert.location.coordinates[1]], maxDistance / 6378137]
         }
       }
     }).populate('pushSubscriptions');
     const notificationPayload = {
       title: 'Alert Removed',
       body: `Alert at ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`} has been removed.`,
-      alertId: req.params.id
+      alertId: req.params.id,
+      lat: alert.location.coordinates[1],
+      lng: alert.location.coordinates[0]
     };
     for (const user of users) {
       for (const sub of user.pushSubscriptions) {

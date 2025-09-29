@@ -454,7 +454,7 @@
         </div>
         <div class="settings-option">
           <label for="push-notifications-toggle">Push Notifications</label>
-          <input type="checkbox" id="push-notifications-toggle" checked> <!-- NEW: Added push notification toggle -->
+          <input type="checkbox" id="push-notifications-toggle" checked>
         </div>
         <div class="settings-option">
           <label for="high-contrast-toggle">High Contrast Mode</label>
@@ -554,7 +554,7 @@
     let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
     let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
     let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
-    let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false'; // NEW: Added push notification toggle state
+    let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false';
     let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up';
     let isInitialized = false;
     let toastTimeout = null;
@@ -828,8 +828,13 @@
       google.maps.event.addListener(userMarker, 'position_changed', () => {
         const pos = userMarker.position;
         if (pos && navState.isNavigating && navState.isFollowing) {
-          map.setCenter(pos);
-          map.setHeading(navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+          // CHANGED: Ensure map follows user marker in navigation
+          map.moveCamera({
+            center: pos,
+            heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
+            zoom: navState.navigationZoom,
+            tilt: 45
+          });
           console.log('User marker position changed, map recentered:', { lat: pos.lat, lng: pos.lng, heading: navState.currentHeading });
         }
       });
@@ -920,7 +925,7 @@
       document.getElementById('map-orientation').value = navState.mapOrientation;
       document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
       document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
-      document.getElementById('push-notifications-toggle').checked = pushNotificationsEnabled; // NEW: Initialize push notification toggle
+      document.getElementById('push-notifications-toggle').checked = pushNotificationsEnabled;
       document.getElementById('hazard-alert-distance').value = hazardAlertDistance;
       document.getElementById('hazard-distance-value').textContent = `${hazardAlertDistance} miles`;
       document.getElementById('camera-alert-distance').value = cameraAlertDistance;
@@ -935,6 +940,41 @@
       console.log('Button container repositioned and styled: { top: 50%, right: 2vw, z-index: 1001 }');
       console.log('HUD initialized: { top: 2vh, z-index: 1001 }');
       console.log('Search container initialized: { top: 0.5vh, z-index: 1002 }');
+      checkURLForAlert();
+    }
+    function checkURLForAlert() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const alertId = urlParams.get('alertId');
+      const lat = parseFloat(urlParams.get('lat'));
+      const lng = parseFloat(urlParams.get('lng'));
+      if (alertId && !isNaN(lat) && !isNaN(lng) && map) {
+        const position = { lat, lng };
+        map.setCenter(position);
+        map.setZoom(15);
+        console.log('Centered map on alert from URL:', { alertId, lat, lng });
+        window.history.replaceState({}, document.title, window.location.pathname);
+        fetch(`/api/markers?lat=${lat}&lng=${lng}&maxDistance=100`)
+          .then(response => response.json())
+          .then(alerts => {
+            const alert = alerts.find(a => a._id === alertId);
+            if (alert) {
+              const isTrafficCamera = alert.type === 'Traffic Camera';
+              if (isTrafficCamera && !showTrafficCameras) return;
+              const marker = new google.maps.marker.AdvancedMarkerElement({
+                map,
+                position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
+                content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+                title: `${alert.type} Alert`
+              });
+              markers.set(alertId, marker);
+              console.log('Alert marker placed from URL:', { alertId, position });
+            }
+          })
+          .catch(error => {
+            console.error('Error fetching alert for URL centering:', error);
+            showToast('Failed to load alert details.');
+          });
+      }
     }
     function setupEventListeners() {
       document.getElementById('start-button').addEventListener('click', startGPS);
@@ -1029,7 +1069,7 @@
         recalibrateCompass();
         console.log('Recalibrate Compass button clicked');
       });
-      document.getElementById('push-notifications-toggle').addEventListener('change', async (e) => { // NEW: Push notification toggle handler
+      document.getElementById('push-notifications-toggle').addEventListener('change', async (e) => {
         pushNotificationsEnabled = e.target.checked;
         localStorage.setItem('pushNotificationsEnabled', pushNotificationsEnabled);
         console.log('Push notifications toggled:', pushNotificationsEnabled);
@@ -1060,7 +1100,7 @@
           }
         });
       });
-      document.getElementById('post-alert-button').addEventListener('click', postAlert);
+document.getElementById('post-alert-button').addEventListener('click', postAlert);
       document.getElementById('cancel-alert-button').addEventListener('click', cancelAlert);
       document.getElementById('reroute-close').addEventListener('click', rejectReroute);
       document.getElementById('accept-reroute-button').addEventListener('click', acceptReroute);
@@ -1105,7 +1145,7 @@
           console.log('Recenter button clicked, re-centered to user location (non-navigation)');
         }
       });
-document.getElementById('traffic-layer-toggle').addEventListener('change', (e) => {
+      document.getElementById('traffic-layer-toggle').addEventListener('change', (e) => {
         navState.showTraffic = e.target.checked;
         localStorage.setItem('showTraffic', navState.showTraffic);
         trafficLayer.setMap(navState.showTraffic ? map : null);
@@ -1910,7 +1950,7 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
       }
       alerts.forEach(alert => {
         const dateObj = new Date(alert.timestamp);
-        const now = new Date();
+        const now = Date.now();
         const durationMs = now - dateObj;
         const item = document.createElement('div');
         item.className = 'alert-item';
@@ -2186,6 +2226,41 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
+    // NEW: Ensure user marker stays within viewport
+    function ensureMarkerInView(position) {
+      if (!map || !position || !navState.isNavigating || !navState.isFollowing) return;
+      const bounds = map.getBounds();
+      if (!bounds) {
+        console.warn('Map bounds unavailable, cannot check viewport');
+        return;
+      }
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const latSpan = ne.lat() - sw.lat();
+      const lngSpan = ne.lng() - sw.lng();
+      const edgeThresholdLat = latSpan * 0.2;
+      const edgeThresholdLng = lngSpan * 0.2;
+      const isNearEdge =
+        position.lat > ne.lat() - edgeThresholdLat ||
+        position.lat < sw.lat() + edgeThresholdLat ||
+        position.lng > ne.lng() - edgeThresholdLng ||
+        position.lng < sw.lng() + edgeThresholdLng;
+      if (isNearEdge) {
+        new TWEEN.Tween({ center: map.getCenter().toJSON(), heading: map.getHeading() })
+          .to({
+            center: position,
+            heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading
+          }, 300)
+          .easing(TWEEN.Easing.Quadratic.Out)
+          .onUpdate(obj => {
+            map.setCenter(obj.center);
+            map.setHeading(obj.heading);
+            updateCompass();
+          })
+          .start();
+        console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
+      }
+    }
     function onPositionUpdate(position) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -2276,7 +2351,7 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
           userMarker.setMap(map);
           if (Math.abs(navState.currentHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
             new TWEEN.Tween({ rotation: lastHeading })
-              .to({ rotation: navState.mapOrientation === 'north-up' ? navState.currentHeading : 0 }, 300)
+              .to({ rotation: navState.currentHeading }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => {
                 userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
@@ -2290,18 +2365,41 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
         if (navState.isNavigating && navState.isFollowing) {
           updateRouteAhead(navState.userLocation);
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
+          navState.navigationZoom = zoom;
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          map.moveCamera({
-            center: navState.userLocation,
-            zoom: zoom,
-            heading: heading,
-            tilt: tilt
-          });
+          // CHANGED: Ensure camera follows user marker in heading-up mode
+          new TWEEN.Tween({
+            center: map.getCenter().toJSON(),
+            zoom: map.getZoom(),
+            heading: map.getHeading(),
+            tilt: map.getTilt()
+          })
+            .to({
+              center: navState.userLocation,
+              zoom,
+              heading,
+              tilt
+            }, 300)
+            .easing(TWEEN.Easing.Quadratic.Out)
+            .onUpdate(obj => {
+              map.moveCamera({
+                center: obj.center,
+                zoom: obj.zoom,
+                heading: obj.heading,
+                tilt: obj.tilt
+              });
+              updateCompass();
+            })
+            .start();
+          ensureMarkerInView(navState.userLocation);
           console.log('Camera view updated:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
           navState.isInitialSnap = false;
         }
         navState.lastKnownPosition = pos;
-        if (socket && socket.connected) socket.emit('locationUpdate', { location: navState.userLocation });
+        if (socket && socket.connected) {
+          socket.emit('locationUpdate', { location: navState.userLocation });
+          console.log('Emitted locationUpdate:', navState.userLocation);
+        }
         updateHUD(navState.currentRoute, navState.userLocation);
         updateCompass();
       } catch (error) {
@@ -2482,7 +2580,7 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
             const lastPoint = response.routes[0].overview_path[response.routes[0].overview_path.length - 1];
             const destLatLng = new google.maps.LatLng(dest);
             const distanceToDest = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(lastPoint), destLatLng);
-            if (distanceToDest > 20) {
+            if (distanceToDest > 50) {
               console.warn('Main route does not reach destination:', { 
                 lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() }, 
                 destination: dest, 
@@ -2602,7 +2700,7 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
       hudTime.textContent = `${Math.round(duration / 60)} Mins`;
       hudDistance.textContent = `${distanceMi} miles - ${formattedTime}`;
     }
-    function stripHtml(html) {
+function stripHtml(html) {
       const div = document.createElement('div');
       div.innerHTML = html;
       return div.textContent || div.innerText || 'Unknown';
@@ -2701,7 +2799,7 @@ document.getElementById('traffic-layer-toggle').addEventListener('change', (e) =
               console.log('Ignoring previously handled hazard:', hazard._id);
               return false;
             }
-const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+            const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
             const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
             const distanceToPolyline = getMinDistanceToPolyline(hazardLatLng, path);
             console.log(`Hazard ${hazard._id}: type=${hazard.type}, distanceToUser=${distanceToHazard}m, distanceToPolyline=${distanceToPolyline}m`);
@@ -2746,7 +2844,7 @@ const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], haza
       if (dx === 0 && dy === 0) return a;
       const t = ((lat3 - lat1) * dy + (lng3 - lng1) * dx) / (dx * dx + dy * dy);
       if (t < 0) return a;
-      if ( t > 1) return b;
+      if (t > 1) return b;
       return new google.maps.LatLng(lat1 + t * dy, lng1 + t * dx);
     }
     function distanceToSegment(point, a, b) {
@@ -2993,6 +3091,7 @@ const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], haza
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         navState.navigationZoom = zoom;
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+        // CHANGED: Ensure heading-up mode locks camera to user with correct heading
         new TWEEN.Tween({
           zoom: map.getZoom(),
           center: map.getCenter().toJSON(),
@@ -3014,18 +3113,23 @@ const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], haza
               tilt: obj.tilt
             });
             updateCompass();
-            if (navState.mapOrientation === 'north-up') {
+            // CHANGED: Rotate user marker to match heading in heading-up mode
+            if (navState.mapOrientation === 'heading-up') {
+              userMarker.content.style.transform = `rotate(0deg)`;
+            } else {
               userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
             }
-            console.log('Camera view updated:', { lat: obj.center.lat, lng: obj.center.lng, zoom: obj.zoom, heading: obj.heading, tilt: obj.tilt });
+          })
+          .onComplete(() => {
+            console.log('Navigation view restored:', {
+              center: navState.userLocation,
+              heading,
+              zoom,
+              tilt
+            });
+            ensureMarkerInView(navState.userLocation);
           })
           .start();
-        console.log('Navigation view restored:', {
-          center: navState.userLocation,
-          heading,
-          zoom,
-          tilt
-        });
       }
     }
     function acceptReroute() {
@@ -3052,7 +3156,6 @@ const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], haza
         navState.isFollowing = true;
         navState.isInitialSnap = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
-        navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
         map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         restoreNavigationView();
         showToast('Alternative route accepted.');
@@ -3268,7 +3371,7 @@ const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], haza
       if (error.code === 1) {
         message = 'Location access denied. Please enable location permissions in your browser settings.';
       } else if (error.code === 2) {
-        message = 'Location unavailable. Ensure location services are enabled and try again.';
+        message = 'Location unavailable. Ensure location services enabled and try again.';
       } else if (error.code === 3) {
         message = 'Weak GPS signal, using last known position...';
         if (navState.lastKnownPosition && navState.isNavigating) {
@@ -3478,26 +3581,19 @@ const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], haza
             lng: alert.location.coordinates[0]
           });
         }
-        if (navState.isNavigating && !isTrafficCamera) {
+        if (navState.isNavigating) {
           currentAlerts.push(alert);
           checkHazardsAndOfferReroute();
-        }
-        if (pushNotificationsEnabled && document.visibilityState === 'hidden') {
-          const distance = navState.userLocation
-            ? google.maps.geometry.spherical.computeDistanceBetween(
-                new google.maps.LatLng(navState.userLocation),
-                new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0])
-              ) / 1609.34
-            : null;
-          if (!distance || distance <= (isTrafficCamera ? cameraAlertDistance : hazardAlertDistance)) {
-            navigator.serviceWorker.controller?.postMessage({
-              type: 'SHOW_NOTIFICATION',
-              title: `${alert.type} Alert`,
-              body: `${alert.type} reported at ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`}`,
-              alertId: alert._id
-            });
-            console.log('Push notification sent for alert:', { alertId: alert._id, type: alert.type });
-          }
+        } else if (pushNotificationsEnabled) {
+          navigator.serviceWorker.controller?.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title: `${alert.type} Alert`,
+            body: `${alert.type} reported at ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`}`,
+            alertId: alert._id,
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          });
+          console.log('Push notification sent for alert:', { alertId: alert._id, type: alert.type });
         }
       });
       socket.on('alertDeleted', (id) => {
@@ -3526,12 +3622,14 @@ const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], haza
           }
           currentAlerts = currentAlerts.filter(a => a._id !== id);
           displayAlertsInHud(currentAlerts);
-          if (pushNotificationsEnabled && document.visibilityState === 'hidden') {
+          if (pushNotificationsEnabled && !navState.isNavigating) {
             navigator.serviceWorker.controller?.postMessage({
               type: 'SHOW_NOTIFICATION',
               title: 'Alert Removed',
               body: `Alert at ${alert?.address || 'unknown location'} has been removed.`,
-              alertId: id
+              alertId: id,
+              lat: alert?.location.coordinates[1],
+              lng: alert?.location.coordinates[0]
             });
             console.log('Push notification sent for alert deletion:', { alertId: id });
           }
