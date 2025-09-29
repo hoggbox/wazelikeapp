@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-app-v1.0.8'; // CHANGED: Bumped version to force refresh
+const CACHE_NAME = 'waze-app-v1.0.9'; // CHANGED: Bumped to v1.0.9 for index.html alignment
 const urlsToCache = [
   '/',
   '/index.html',
@@ -114,7 +114,6 @@ self.addEventListener('notificationclick', event => {
       clients.matchAll({ type: 'window', includeUncontrolled: true })
         .then(clientList => {
           const url = new URL('/', self.location.origin);
-          // CHANGED: Fallback to root URL if alert data is incomplete
           if (notification.data?.alertId && !isNaN(notification.data?.lat) && !isNaN(notification.data?.lng)) {
             url.searchParams.set('alertId', notification.data.alertId);
             url.searchParams.set('lat', notification.data.lat);

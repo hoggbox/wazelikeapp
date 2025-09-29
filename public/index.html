@@ -791,7 +791,7 @@
       trafficLayer = new google.maps.TrafficLayer({ map: navState.showTraffic ? map : null });
       directionsService = new google.maps.DirectionsService();
       directionsRenderer = new google.maps.DirectionsRenderer({
-        map: map,
+        map: null, // CHANGED: Start with map null, only show route on start
         suppressMarkers: true,
         preserveViewport: false,
         polylineOptions: {
@@ -828,7 +828,6 @@
       google.maps.event.addListener(userMarker, 'position_changed', () => {
         const pos = userMarker.position;
         if (pos && navState.isNavigating && navState.isFollowing) {
-          // CHANGED: Ensure map follows user marker in navigation
           map.moveCamera({
             center: pos,
             heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
@@ -911,8 +910,40 @@
             content: destMarkerElement,
             title: 'Destination'
           });
-          document.getElementById('start-button').style.display = 'block';
-          document.getElementById('simulate-position-button').style.display = 'block';
+          // CHANGED: Calculate route and zoom out to show full route
+          directionsService.route(
+            {
+              origin: navState.userLocation,
+              destination: navState.destination,
+              travelMode: google.maps.TravelMode.DRIVING,
+              provideRouteAlternatives: true
+            },
+            (response, status) => {
+              if (status === 'OK') {
+                navState.currentRoute = response; // Store route but don't start navigation
+                directionsRenderer.setMap(map);
+                directionsRenderer.setDirections(response);
+                const bounds = new google.maps.LatLngBounds();
+                bounds.extend(navState.userLocation);
+                bounds.extend(navState.destination);
+                response.routes[0].overview_path.forEach(point => bounds.extend(point));
+                map.fitBounds(bounds);
+                setTimeout(() => {
+                  const currentZoom = map.getZoom();
+                  map.setZoom(Math.min(currentZoom, 15)); // Ensure readable zoom level
+                }, 100);
+                console.log('Route preview displayed:', { pathLength: response.routes[0].overview_path.length, bounds });
+                document.getElementById('start-button').style.display = 'block';
+                document.getElementById('simulate-position-button').style.display = 'block';
+              } else {
+                console.error('Route preview failed:', status);
+                showToast('Failed to display route preview: ' + status);
+                if (status === 'REQUEST_DENIED') {
+                  showToast('API key invalid or restricted. Check Google Cloud Console.');
+                }
+              }
+            }
+          );
         } else {
           console.error('No location for selected place:', place);
           showToast('Invalid address selected. Please try again.');
@@ -1079,7 +1110,7 @@
           await unsubscribeFromPush();
         }
       });
-      document.querySelectorAll('.report-button').forEach(button => {
+document.querySelectorAll('.report-button').forEach(button => {
         button.addEventListener('click', async () => {
           if (navState.alertState === 'IDLE') {
             const alertType = button.getAttribute('data-alert-type');
@@ -1100,7 +1131,7 @@
           }
         });
       });
-document.getElementById('post-alert-button').addEventListener('click', postAlert);
+      document.getElementById('post-alert-button').addEventListener('click', postAlert);
       document.getElementById('cancel-alert-button').addEventListener('click', cancelAlert);
       document.getElementById('reroute-close').addEventListener('click', rejectReroute);
       document.getElementById('accept-reroute-button').addEventListener('click', acceptReroute);
@@ -1228,16 +1259,6 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
           }
         });
         fetchAndDisplayMarkers(map, navState.userLocation);
-      });
-      document.getElementById('push-notifications-toggle').addEventListener('change', async (e) => {
-        pushNotificationsEnabled = e.target.checked;
-        localStorage.setItem('pushNotificationsEnabled', pushNotificationsEnabled);
-        console.log('Push notifications toggled:', pushNotificationsEnabled);
-        if (pushNotificationsEnabled) {
-          await requestPushPermission();
-        } else {
-          await unsubscribeFromPush();
-        }
       });
       document.getElementById('high-contrast-toggle').addEventListener('change', (e) => {
         highContrastMode = e.target.checked;
@@ -2155,11 +2176,6 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
           map: map
         });
       }
-      if (minDistance <= 20 && offRoadPolyline) {
-        offRoadPolyline.setMap(null);
-        offRoadPolyline = null;
-        console.log('Off-road polyline cleared: close to target');
-      }
       console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
     }
     function updateOffRoadPolyline(rawPos, targetPos) {
@@ -2167,6 +2183,7 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
         if (offRoadPolyline) {
           offRoadPolyline.setMap(null);
           offRoadPolyline = null;
+          console.log('Off-road polyline cleared: navigation inactive or no position data');
         }
         return;
       }
@@ -2192,7 +2209,7 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
       } else if (offRoadPolyline) {
         offRoadPolyline.setMap(null);
         offRoadPolyline = null;
-        console.log('Off-road polyline cleared: close to target');
+        console.log('Off-road polyline cleared: close to target (distance < 20m)');
       }
     }
     function findClosestRoutePoint(currentPos, path, heading, speed) {
@@ -2226,7 +2243,6 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
-    // NEW: Ensure user marker stays within viewport
     function ensureMarkerInView(position) {
       if (!map || !position || !navState.isNavigating || !navState.isFollowing) return;
       const bounds = map.getBounds();
@@ -2292,6 +2308,12 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
             pos = point;
             snapped = true;
             console.log('Snapped to polyline:', pos);
+            // CHANGED: Explicitly clear off-road polyline when snapped
+            if (offRoadPolyline) {
+              offRoadPolyline.setMap(null);
+              offRoadPolyline = null;
+              console.log('Off-road polyline cleared: snapped to route (distance < 20m)');
+            }
           }
           updateOffRoadPolyline(rawUserLocation, path[0]);
           if (navState.previousUserLocation) {
@@ -2354,7 +2376,7 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
               .to({ rotation: navState.currentHeading }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => {
-                userMarker.content.style.transform = `rotate(${obj.rotation}deg)`;
+                userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'heading-up' ? 0 : obj.rotation}deg)`;
               })
               .start();
             console.log('Bearing updated: { heading:', navState.currentHeading, 'source: marker-rotation }');
@@ -2367,7 +2389,6 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
           navState.navigationZoom = zoom;
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          // CHANGED: Ensure camera follows user marker in heading-up mode
           new TWEEN.Tween({
             center: map.getCenter().toJSON(),
             zoom: map.getZoom(),
@@ -2426,65 +2447,54 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
       document.getElementById('hud-container').style.display = 'flex';
       document.getElementById('bottom-hud-container').style.display = 'flex';
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-      directionsService.route(
-        {
-          origin: navState.userLocation,
-          destination: navState.destination,
-          travelMode: google.maps.TravelMode.DRIVING,
-          provideRouteAlternatives: true
-        },
-        (response, status) => {
-          if (status === 'OK') {
-            const startLocation = response.routes[0].legs[0].start_location;
-            navState.currentRoute = response;
-            navState.originalRoute = response;
-            navState.routePolyline = response.routes[0].overview_path;
-            updateOffRoadPolyline(rawUserLocation || navState.userLocation, startLocation);
-            const { point } = findClosestRoutePoint(navState.userLocation, navState.routePolyline, navState.currentHeading, 0);
-            navState.userLocation = point;
-            console.log('Forced snap to route start:', navState.userLocation);
-            userMarker.position = navState.userLocation;
-            calculateAndDisplayRoute(navState.userLocation, navState.destination);
-            fetchCurrentAlerts();
-            startRerouteCheck();
-            navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
-            if (showTrafficCameras) {
-              cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
-            }
-            alertPollInterval = setInterval(pollAlerts, ALERT_POLL_INTERVAL);
-            if (watchId) {
-              navigator.geolocation.clearWatch(watchId);
-            }
-            watchId = navigator.geolocation.watchPosition(
-              onPositionUpdate,
-              (error) => {
-                console.error('Geolocation watch error:', error);
-                handleGeolocationError(error);
-              },
-              {
-                enableHighAccuracy: true,
-                maximumAge: 0,
-                timeout: 10000
-              }
-            );
-            console.log('GPS tracking started, watchId:', watchId);
-            onPositionUpdate({
-              coords: {
-                latitude: navState.userLocation.lat,
-                longitude: navState.userLocation.lng,
-                speed: 0,
-                heading: navState.currentHeading
-              }
-            });
-          } else {
-            console.error('Directions request failed:', status);
-            showToast('Directions request failed: ' + status);
-            if (status === 'REQUEST_DENIED') {
-              showToast('API key invalid or restricted. Check Google Cloud Console.');
-            }
-          }
+      // CHANGED: Use existing route from destination selection
+      if (navState.currentRoute) {
+        const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
+        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        updateOffRoadPolyline(rawUserLocation || navState.userLocation, startLocation);
+        const { point } = findClosestRoutePoint(navState.userLocation, navState.routePolyline, navState.currentHeading, 0);
+        navState.userLocation = point;
+        console.log('Forced snap to route start:', navState.userLocation);
+        userMarker.position = navState.userLocation;
+        directionsRenderer.setMap(map); // Ensure renderer is active
+        directionsRenderer.setDirections(navState.currentRoute);
+        updateHUD(navState.currentRoute, navState.userLocation);
+        updateBottomHUD(navState.currentRoute);
+        fetchCurrentAlerts();
+        startRerouteCheck();
+        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, HAZARD_CHECK_INTERVAL);
+        if (showTrafficCameras) {
+          cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
         }
-      );
+        alertPollInterval = setInterval(pollAlerts, ALERT_POLL_INTERVAL);
+        if (watchId) {
+          navigator.geolocation.clearWatch(watchId);
+        }
+        watchId = navigator.geolocation.watchPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Geolocation watch error:', error);
+            handleGeolocationError(error);
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 10000
+          }
+        );
+        console.log('GPS tracking started, watchId:', watchId);
+        onPositionUpdate({
+          coords: {
+            latitude: navState.userLocation.lat,
+            longitude: navState.userLocation.lng,
+            speed: 0,
+            heading: navState.currentHeading
+          }
+        });
+      } else {
+        console.error('No route available to start navigation');
+        showToast('No route available. Please select a destination again.');
+      }
     }
     function stopGPS() {
       if (watchId) {
@@ -2601,7 +2611,7 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
             updateHUD(response, origin);
             updateBottomHUD(response);
             if (callback) callback();
-            if (navState.isFollowing) {
+            if (navState.isFollowing && navState.isNavigating) {
               navState.navigationZoom = getDynamicZoom(navState.userLocation, 0).zoom;
               map.moveCamera({
                 center: navState.userLocation,
@@ -2690,7 +2700,7 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
         hudDistance.textContent = '0 miles - Unknown';
         return;
       }
-      const leg = route.routes[0].legs[0];
+const leg = route.routes[0].legs[0];
       const duration = leg.duration.value;
       const distanceM = leg.distance.value;
       const distanceMi = (distanceM / 1609.34).toFixed(1);
@@ -2700,7 +2710,7 @@ document.getElementById('post-alert-button').addEventListener('click', postAlert
       hudTime.textContent = `${Math.round(duration / 60)} Mins`;
       hudDistance.textContent = `${distanceMi} miles - ${formattedTime}`;
     }
-function stripHtml(html) {
+    function stripHtml(html) {
       const div = document.createElement('div');
       div.innerHTML = html;
       return div.textContent || div.innerText || 'Unknown';
@@ -3091,7 +3101,6 @@ function stripHtml(html) {
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         navState.navigationZoom = zoom;
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-        // CHANGED: Ensure heading-up mode locks camera to user with correct heading
         new TWEEN.Tween({
           zoom: map.getZoom(),
           center: map.getCenter().toJSON(),
@@ -3113,7 +3122,6 @@ function stripHtml(html) {
               tilt: obj.tilt
             });
             updateCompass();
-            // CHANGED: Rotate user marker to match heading in heading-up mode
             if (navState.mapOrientation === 'heading-up') {
               userMarker.content.style.transform = `rotate(0deg)`;
             } else {
