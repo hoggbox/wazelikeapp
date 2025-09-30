@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-app-v1.0.13'; // CHANGED: Bumped version for updated index.html
+const CACHE_NAME = 'waze-app-v1.0.14'; // CHANGED: Bumped version for updated index.html
 const urlsToCache = [
   '/',
   '/index.html',
