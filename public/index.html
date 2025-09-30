@@ -576,7 +576,7 @@
     let positionHistory = [];
     let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
     let hazardAlertDistance = parseFloat(localStorage.getItem('hazardAlertDistance')) || 2;
-    let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
+    let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance') || 0.5);
     let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
     let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
     let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false';

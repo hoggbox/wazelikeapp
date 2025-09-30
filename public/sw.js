@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'waze-like-app-v1.0.4';
+const CACHE_NAME = 'waze-like-app-v1.0.5';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -110,6 +110,7 @@ self.addEventListener('push', event => {
       body: data.body,
       icon: '/icon.png',
       badge: '/icon.png',
+      vibrate: [200, 100, 200], // Added vibration for mobile feedback
       data: {
         alertId: data.alertId,
         lat: data.lat,
@@ -150,6 +151,22 @@ self.addEventListener('notificationclick', event => {
   );
 });
 
+// Sync event: Handle background sync for offline location updates
+self.addEventListener('sync', event => {
+  if (event.tag === 'sync-location') {
+    console.log('[Service Worker] Background sync for location triggered');
+    event.waitUntil(syncLocationUpdates());
+  }
+});
+
+// Function to sync offline location updates (example, expand as needed)
+async function syncLocationUpdates() {
+  // Logic to sync queued location updates to /api/location when online
+  // Use IndexedDB or local storage to queue updates if offline
+  console.log('[Service Worker] Syncing queued location updates...');
+  // Implement queuing if not already done in index.html
+}
+
 // Message event: Handle messages from index.html
 self.addEventListener('message', event => {
   console.log('[Service Worker] Message received:', event.data);
@@ -160,6 +177,7 @@ self.addEventListener('message', event => {
       body: event.data.body,
       icon: '/icon.png',
       badge: '/icon.png',
+      vibrate: [200, 100, 200],
       data: {
         alertId: event.data.alertId,
         lat: event.data.lat,
