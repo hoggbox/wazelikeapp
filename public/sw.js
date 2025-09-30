@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'waze-like-app-v1.0.6'; // Updated cache version
+const CACHE_NAME = 'waze-like-app-v1.0'; // Updated cache version
 const urlsToCache = [
   '/',
   '/index.html',
