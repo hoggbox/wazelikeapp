@@ -1,13 +1,16 @@
 // sw.js
-const CACHE_NAME = 'waze-like-app-v1.0.5';
+const CACHE_NAME = 'waze-like-app-v1.0.6'; // Updated cache version
 const urlsToCache = [
   '/',
   '/index.html',
   '/icon.png',
+  '/manifest.json?v=1.0.3',
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css',
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js',
   'https://cdn.socket.io/4.7.5/socket.io.min.js',
-  'https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=2666b5bd496d9c6026f43f82&v=beta&libraries=places,geometry,marker,routes&loading=async'
+  'https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=2666b5bd496d9c6026f43f82&v=beta&libraries=places,geometry,marker,routes&loading=async',
+  'https://i.postimg.cc/YS0h0m7R/compass.png', // Added compass image
+  'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png' // Added traffic camera marker image
 ];
 
 // Install event: Cache essential assets
@@ -17,6 +20,12 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('[Service Worker] Caching app shell and assets');
+        // Check network conditions before caching
+        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (connection && connection.effectiveType === '2g') {
+          console.log('[Service Worker] Slow connection detected, caching minimal assets only');
+          return cache.addAll(['/', '/index.html', '/icon.png']);
+        }
         return cache.addAll(urlsToCache);
       })
       .then(() => {
@@ -71,7 +80,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Cache-first strategy for static assets
+  // Cache-first strategy for static assets, with network condition check
   event.respondWith(
     caches.match(event.request).then(cachedResponse => {
       if (cachedResponse) {
@@ -79,8 +88,14 @@ self.addEventListener('fetch', event => {
         return cachedResponse;
       }
       console.log('[Service Worker] Fetching from network:', url.pathname);
-      return fetch(event.request).then(networkResponse => {
+      return fetch(event.request).then(async networkResponse => {
         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+          return networkResponse;
+        }
+        // Check battery level before caching
+        const battery = await navigator.getBattery?.();
+        if (battery && battery.level < 0.2) {
+          console.log('[Service Worker] Low battery, skipping cache update:', url.pathname);
           return networkResponse;
         }
         const responseToCache = networkResponse.clone();
@@ -185,24 +200,47 @@ async function syncLocationUpdates() {
       console.error('[Service Worker] No valid token for location sync');
       return;
     }
+    let retryCount = 0;
+    const maxRetries = 3;
+    const baseBackoff = 5000;
+
     for (const loc of queuedLocations) {
-      try {
-        const response = await fetch('/api/location', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(loc)
-        });
-        if (response.ok) {
-          console.log('[Service Worker] Synced location:', loc);
-          await store.delete(loc.id);
-        } else {
-          console.warn('[Service Worker] Failed to sync location:', response.status);
+      let success = false;
+      while (retryCount < maxRetries && !success) {
+        try {
+          const response = await fetch('/api/location', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(loc)
+          });
+          if (response.ok) {
+            console.log('[Service Worker] Synced location:', loc);
+            await store.delete(loc.id);
+            success = true;
+          } else {
+            console.warn('[Service Worker] Failed to sync location:', response.status);
+            retryCount++;
+            if (retryCount < maxRetries) {
+              const backoff = baseBackoff * Math.pow(2, retryCount);
+              console.log(`[Service Worker] Retrying location sync in ${backoff}ms`);
+              await new Promise(resolve => setTimeout(resolve, backoff));
+            }
+          }
+        } catch (error) {
+          console.error('[Service Worker] Location sync failed:', error.message, error.stack);
+          retryCount++;
+          if (retryCount < maxRetries) {
+            const backoff = baseBackoff * Math.pow(2, retryCount);
+            console.log(`[Service Worker] Retrying location sync in ${backoff}ms`);
+            await new Promise(resolve => setTimeout(resolve, backoff));
+          }
         }
-      } catch (error) {
-        console.error('[Service Worker] Location sync failed:', error.message, error.stack);
+      }
+      if (!success) {
+        console.error('[Service Worker] Max retries reached for location sync:', loc);
       }
     }
     await tx.done;

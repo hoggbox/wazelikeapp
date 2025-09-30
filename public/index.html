@@ -611,7 +611,6 @@
     const TURN_ZOOM = 19;
     const STRAIGHT_ZOOM = 16.5;
     const TURN_THRESHOLD = 300;
-    const LOCATION_UPDATE_THRESHOLD = 100;
     const HEADING_CHANGE_THRESHOLD = 15;
     const MIN_HEADING_CHANGE = 8;
     const CAMERA_UPDATE_THRESHOLD = 50; // Reduced from 200 to 50ms
@@ -658,6 +657,9 @@
     };
     let mockSimulationInterval = null;
     let isRegister = false;
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    const LOCATION_UPDATE_THRESHOLD = isMobile ? 500 : 100;
+    let isProgrammaticUpdate = false;
     function switchAuthMode() {
       isRegister = !isRegister;
       console.log('Switching auth mode:', isRegister ? 'Register' : 'Login');
@@ -890,7 +892,9 @@
           gestureHandling: 'cooperative',
           mapTypeControl: false,
           streetViewControl: false,
-          clickableIcons: false
+          clickableIcons: false,
+          zoomControl: false,
+          disableDoubleClickZoom: true
         });
         console.log('Map initialized:', { center: navState.userLocation, zoom: navState.navigationZoom, mapId });
         map.setMapTypeId(navState.mapType);
@@ -1058,7 +1062,6 @@
         setTimeout(initializeMap, 2000);
       }
     }
-
     function checkURLForAlert() {
       const urlParams = new URLSearchParams(window.location.search);
       const alertId = urlParams.get('alertId');
@@ -1101,7 +1104,6 @@
         console.log('No valid URL alert parameters or map not initialized:', { alertId, lat, lng, map: !!map });
       }
     }
-
     function setupEventListeners() {
       console.log('Setting up event listeners...');
       document.getElementById('start-button').addEventListener('click', startGPS);
@@ -1151,10 +1153,7 @@
         confirmAlert.classList.remove('active');
         navState.alertState = 'IDLE';
         if (navState.isNavigating) {
-          navState.isFollowing = false;
-          localStorage.setItem('isFollowing', navState.isFollowing);
-          sessionStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+          unlockNavigation();
           console.log('Map unlocked for manual report during navigation');
         }
         console.log('Hazard button clicked, report box opened in IDLE state');
@@ -1174,8 +1173,7 @@
         settingsHudContainer.classList.remove('active');
         console.log('Settings HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
           console.log('Navigation view re-locked after closing settings HUD');
         }
       });
@@ -1192,8 +1190,7 @@
         alertsHudContainer.classList.remove('active');
         console.log('Alerts HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
           console.log('Navigation view re-locked after closing alerts HUD');
         }
       });
@@ -1209,8 +1206,7 @@
         leaderboardHudContainer.classList.remove('active');
         console.log('Leaderboard HUD closed');
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
           console.log('Navigation view re-locked after closing leaderboard HUD');
         }
       });
@@ -1264,30 +1260,34 @@
       document.getElementById('dismiss-camera-button').addEventListener('click', dismissCameraAlert);
       document.getElementById('arrival-close').addEventListener('click', endArrival);
       document.getElementById('arrival-ok-button').addEventListener('click', endArrival);
+      let dragStartTime;
+      let dragTimer;
       map.addListener('dragstart', () => {
-        if (navState.isNavigating && navState.isFollowing) {
-          navState.isFollowing = false;
-          localStorage.setItem('isFollowing', navState.isFollowing);
-          sessionStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          console.log('Map unlocked for free roam on dragstart during navigation');
+        if (navState.isNavigating && navState.isFollowing && !isProgrammaticUpdate) {
+          dragStartTime = Date.now();
+          dragTimer = setTimeout(() => {
+            unlockNavigation();
+            console.log('Map unlocked for free roam on debounced dragstart during navigation');
+          }, 150);
         }
       });
       map.addListener('drag', () => {
-        if (navState.isNavigating && navState.isFollowing) {
-          navState.isFollowing = false;
-          localStorage.setItem('isFollowing', navState.isFollowing);
-          sessionStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          console.log('Map unlocked for free roam on drag during navigation');
+        if (navState.isNavigating && navState.isFollowing && !isProgrammaticUpdate && dragStartTime) {
+          const dragDuration = Date.now() - dragStartTime;
+          if (dragDuration < 150) {
+            clearTimeout(dragTimer);
+          }
         }
       });
+      map.addListener('dragend', () => {
+        if (dragTimer) {
+          clearTimeout(dragTimer);
+        }
+        dragStartTime = null;
+      });
       map.addListener('zoom_changed', () => {
-        if (navState.isNavigating && navState.isFollowing) {
-          navState.isFollowing = false;
-          localStorage.setItem('isFollowing', navState.isFollowing);
-          sessionStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+        if (navState.isNavigating && navState.isFollowing && !isProgrammaticUpdate) {
+          unlockNavigation();
           console.log('Map unlocked for free roam on zoom change during navigation');
         }
       });
@@ -1296,11 +1296,7 @@
       });
       document.getElementById('recenter-button').addEventListener('click', () => {
         if (navState.isNavigating) {
-          navState.isFollowing = true;
-          localStorage.setItem('isFollowing', navState.isFollowing);
-          sessionStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
           console.log('Recenter button clicked, locking navigation, camera auto-follow resumed');
         } else {
           recenterNonNavigation();
@@ -1376,10 +1372,9 @@
         sessionStorage.setItem('isFollowing', navState.isFollowing);
         console.log('Auto-recenter toggled:', navState.isFollowing);
         if (navState.isFollowing && navState.isNavigating) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
         } else if (navState.isNavigating) {
-          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+          unlockNavigation();
         }
       });
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
@@ -1496,8 +1491,13 @@
           showToast('No alerts to center on.');
         }
       });
+      window.addEventListener('orientationchange', () => {
+        adjustHud();
+        if (navState.isFollowing) {
+          restoreNavigationView();
+        }
+      });
     }
-
     async function fetchUserProfile() {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -1534,7 +1534,6 @@
         document.getElementById('auth-container').style.display = 'flex';
       }
     }
-
     async function requestPushPermission() {
       if (!pushNotificationsEnabled) {
         console.log('Push notifications disabled, skipping permission request');
@@ -1567,7 +1566,6 @@
         pushNotificationsEnabled = false;
       }
     }
-
     async function subscribeToPush() {
       if (!pushNotificationsEnabled) {
         console.log('Push notifications disabled, skipping subscription');
@@ -1603,7 +1601,6 @@
         showToast('Failed to enable notifications.');
       }
     }
-
     async function unsubscribeFromPush() {
       try {
         const reg = await navigator.serviceWorker.ready;
@@ -1635,7 +1632,6 @@
         showToast('Failed to disable notifications.');
       }
     }
-
     function urlB64ToUint8Array(base64String) {
       const padding = '='.repeat((4 - base64String.length % 4) % 4);
       const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -1646,7 +1642,6 @@
       }
       return outputArray;
     }
-
     async function fetchLeaderboard() {
       const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
@@ -1683,7 +1678,6 @@
         showToast('Failed to load leaderboard.');
       }
     }
-
     function startVoiceRecognition() {
       if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
         console.warn('Speech recognition not supported');
@@ -1714,7 +1708,6 @@
       speechRecognition.start();
       console.log('Speech recognition started');
     }
-
     function shareRoute() {
       if (navigator.share && navState.currentRoute) {
         navigator.share({
@@ -1730,7 +1723,6 @@
         showToast('Sharing not supported');
       }
     }
-
     async function refreshToken() {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -1765,7 +1757,6 @@
         return false;
       }
     }
-
     async function confirmAlertLocation(location, alertType) {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -1853,7 +1844,6 @@
       reportBox.classList.add('active');
       console.log(`Confirming ${alertType} alert at`, navState.tempAlertData.location);
     }
-
     async function postAlert() {
       if (!navState.tempAlertData || !navState.tempMarker) {
         console.error('No alert data or marker to post');
@@ -1915,10 +1905,7 @@
         if (response.status === 201 && result.alert) {
           const marker = new google.maps.marker.AdvancedMarkerElement({
             map,
-            position: {
-              lat: navState.tempAlertData.location.coordinates[1],
-              lng: navState.tempAlertData.location.coordinates[0]
-            },
+            position: { lat: navState.tempAlertData.location.coordinates[1], lng: navState.tempAlertData.location.coordinates[0] },
             content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
             title: `${navState.tempAlertData.type} Alert`
           });
@@ -1959,13 +1946,11 @@
         confirmAlert.classList.remove('active');
         reportOptions.style.display = 'grid';
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
           console.log('Navigation view re-locked after manual report');
         }
       }
     }
-
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.setMap(null);
@@ -1986,12 +1971,10 @@
       showToast('Alert placement cancelled.');
       console.log('Alert placement cancelled');
       if (navState.isNavigating && navState.isFollowing) {
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-        restoreNavigationView();
+        lockNavigation();
         console.log('Navigation view re-locked after cancelling manual report');
       }
     }
-
     async function deleteAlert(id, item) {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -2050,7 +2033,6 @@
         setTimeout(() => pollAlerts(), 1000);
       }
     }
-
     async function pollAlerts() {
       if (!navState.userLocation) return;
       try {
@@ -2084,7 +2066,6 @@
         showToast('Failed to sync alerts.');
       }
     }
-
     async function fetchAndDisplayMarkers(map, center) {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -2131,7 +2112,6 @@
         showToast('Failed to load alerts.');
       }
     }
-
     function fetchCurrentAlerts() {
       const center = navState.userLocation;
       const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -2163,7 +2143,6 @@
           showToast('Failed to load current alerts.');
         });
     }
-
     function formatDuration(ms) {
       const seconds = Math.floor(ms / 1000);
       const minutes = Math.floor(seconds / 60);
@@ -2174,7 +2153,6 @@
       if (minutes > 0) return `${minutes} minutes`;
       return `${seconds} seconds`;
     }
-
     function displayAlertsInHud(alerts) {
       const content = document.getElementById('information');
       content.innerHTML = '';
@@ -2218,7 +2196,6 @@
         });
       });
     }
-
     function closeAllHuds() {
       document.getElementById('report-box').classList.remove('active');
       document.getElementById('reroute-hud-container').classList.remove('active');
@@ -2239,8 +2216,7 @@
       navState.tempAlertData = null;
       console.log('All HUDs closed');
       if (navState.isNavigating && navState.isFollowing) {
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-        restoreNavigationView();
+        lockNavigation();
         console.log('Navigation view re-locked after closing HUDs');
         if (navState.pendingReroute) {
           const { hazard, timeSaved } = navState.pendingReroute;
@@ -2250,7 +2226,6 @@
         }
       }
     }
-
     function recenterNonNavigation() {
       if (!map) return;
       requestAnimationFrame(() => {
@@ -2262,7 +2237,6 @@
         updateCompass();
       });
     }
-
     function getDynamicZoom(currentPos, speed) {
       if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
@@ -2312,7 +2286,6 @@
         }
         return { zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), tilt, turnHeading };
       }
-
       function checkArrival(currentPos) {
         if (!navState.isNavigating || !navState.destination) {
           return false;
@@ -2335,7 +2308,6 @@
         }
         return false;
       }
-
       function endArrival() {
         document.getElementById('arrival-hud-container').classList.remove('active');
         document.getElementById('arrival-hud').classList.remove('active');
@@ -2347,7 +2319,6 @@
           console.log('Navigation ended after arrival');
         });
       }
-
       function updateRouteAhead(currentPos) {
         if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
           if (routePolyline) {
@@ -2386,7 +2357,6 @@
         }
         console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
       }
-
       function updateOffRoadPolyline(rawPos, targetPos) {
         if (!rawPos || !targetPos || !navState.isNavigating) {
           if (offRoadPolyline) {
@@ -2423,7 +2393,6 @@
           }
         }
       }
-
       function findClosestRoutePoint(currentPos, path, heading, speed) {
         if (!path || path.length < 2) return { point: currentPos, index: 0 };
         const currentLatLng = new google.maps.LatLng(currentPos);
@@ -2455,7 +2424,6 @@
         console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
         return { point: bestPoint, index: closestIndex };
       }
-
       function ensureMarkerInView(position) {
         if (!map || !position || !navState.isFollowing) return;
         const bounds = map.getBounds();
@@ -2481,7 +2449,6 @@
           });
         }
       }
-
       function checkCameraProximity() {
         if (!showTrafficCameras || !navState.userLocation) return;
         const now = Date.now();
@@ -2515,7 +2482,6 @@
           }
         }
       }
-
       function getLookaheadPoint(currentPos, heading, distance = 50) {
         return google.maps.geometry.spherical.computeOffset(
           new google.maps.LatLng(currentPos),
@@ -2523,7 +2489,6 @@
           heading
         );
       }
-
       async function updateServerLocation(position) {
         try {
           const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -2555,7 +2520,6 @@
           console.error('Error updating server location:', error);
         }
       }
-
       function onPositionUpdate(position, isSimulation = false) {
         try {
           const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -2655,13 +2619,23 @@
             const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
             const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
             requestAnimationFrame(() => {
-              map.panTo(lookaheadPoint);
+              isProgrammaticUpdate = true;
+              if (isMobile && typeof TWEEN !== 'undefined') {
+                new TWEEN.Tween(map.getCenter())
+                  .to(lookaheadPoint, 300)
+                  .easing(TWEEN.Easing.Quadratic.Out)
+                  .onUpdate(() => map.setCenter(lookaheadPoint))
+                  .start();
+              } else {
+                map.panTo(lookaheadPoint);
+              }
               map.setZoom(zoom);
               map.setHeading(heading);
               map.setTilt(tilt);
               console.log('Camera view updated:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
               userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
               ensureMarkerInView(navState.userLocation);
+              setTimeout(() => { isProgrammaticUpdate = false; }, 100);
             });
           } else {
             console.log('Camera update skipped:', { isFollowing: navState.isFollowing, isNavigating: navState.isNavigating });
@@ -2682,7 +2656,21 @@
           showToast('Error updating location. Please ensure GPS is enabled.');
         }
       }
-
+      function lockNavigation() {
+        navState.isFollowing = true;
+        localStorage.setItem('isFollowing', navState.isFollowing);
+        sessionStorage.setItem('isFollowing', navState.isFollowing);
+        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+        restoreNavigationView();
+        console.log('Navigation locked');
+      }
+      function unlockNavigation() {
+        navState.isFollowing = false;
+        localStorage.setItem('isFollowing', navState.isFollowing);
+        sessionStorage.setItem('isFollowing', navState.isFollowing);
+        map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+        console.log('Navigation unlocked');
+      }
       function startGPS() {
         if (!navigator.geolocation) {
           showToast('Geolocation is not supported by this browser.');
@@ -2702,7 +2690,7 @@
         document.getElementById('search-container').classList.add('hidden');
         document.getElementById('hud-container').style.display = 'flex';
         document.getElementById('bottom-hud-container').style.display = 'flex';
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+        lockNavigation();
         if (navState.currentRoute) {
           const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
           navState.routePolyline = navState.currentRoute.routes[0].overview_path;
@@ -2775,7 +2763,6 @@
           document.getElementById('bottom-hud-container').style.display = 'none';
         }
       }
-
       function handleGeolocationError(error, isInitial = false) {
         let message;
         switch (error.code) {
@@ -2842,7 +2829,6 @@
           loadGoogleMaps();
         }
       }
-
       function stopGPS() {
         if (watchId) {
           navigator.geolocation.clearWatch(watchId);
@@ -2921,7 +2907,6 @@
           console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, tilt: 0 });
         });
       }
-
       function calculateAndDisplayRoute(origin, dest, callback) {
         if (!origin || !dest) {
           console.error('Invalid origin or destination:', origin, dest);
@@ -2987,7 +2972,6 @@
           }
         );
       }
-
       function updateHUD(route, currentPos) {
         const hudTurn = document.getElementById('hud-turn');
         const hudStreet = document.getElementById('hud-street');
@@ -3050,7 +3034,6 @@
           hudTurn.textContent = 'Follow the road';
         }
       }
-
       function updateBottomHUD(route) {
         const hudTime = document.getElementById('bottom-hud-time');
         const hudDistance = document.getElementById('bottom-hud-distance');
@@ -3069,13 +3052,11 @@
         hudTime.textContent = `${Math.round(duration / 60)} Mins`;
         hudDistance.textContent = `${distanceMi} miles - ${formattedTime}`;
       }
-
       function stripHtml(html) {
         const div = document.createElement('div');
         div.innerHTML = html;
         return div.textContent || div.innerText || 'Unknown';
       }
-
       function startRerouteCheck() {
         if (navState.rerouteCheckTimeout) {
           clearTimeout(navState.rerouteCheckTimeout);
@@ -3088,7 +3069,6 @@
           startRerouteCheck();
         }, REROUTE_CHECK_INTERVAL);
       }
-
       function checkOffRoute(userLatLng) {
         if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
           console.log('checkOffRoute skipped: Not navigating or no route data');
@@ -3109,7 +3089,6 @@
         console.log('User on route');
         return false;
       }
-
       async function checkHazardsAndOfferReroute() {
         console.log('Checking for hazards...');
         if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') {
@@ -3203,7 +3182,6 @@
           showToast('Unable to check for hazards. Please try again.');
         }
       }
-
       function projectPointToLine(p, a, b) {
         const lat1 = a.lat();
         const lng1 = a.lng();
@@ -3219,12 +3197,10 @@
         if (t > 1) return b;
         return new google.maps.LatLng(lat1 + t * dy, lng1 + t * dx);
       }
-
       function distanceToSegment(point, a, b) {
         const proj = projectPointToLine(point, a, b);
         return google.maps.geometry.spherical.computeDistanceBetween(point, proj);
       }
-
       function getMinDistanceToPolyline(point, path) {
         let minDist = Infinity;
         for (let i = 0; i < path.length - 1; i++) {
@@ -3233,7 +3209,6 @@
         }
         return minDist;
       }
-
       function isHazardAvoided(hazardPoint, path) {
         const BUFFER = 50;
         let minDist = Infinity;
@@ -3244,7 +3219,6 @@
         console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
         return minDist > BUFFER;
       }
-
       async function checkAlternativeRoute(hazard) {
         return new Promise((resolve) => {
           if (!navState.userLocation || !navState.destination) {
@@ -3397,7 +3371,6 @@
           tryRoute({ avoidTolls: false, avoidHighways: false, avoidFerries: false }, 1);
         });
       }
-
       function showRerouteHud(hazard, timeSaved) {
         const cameraHudContainer = document.getElementById('camera-hud-container');
         if (cameraHudContainer.classList.contains('active')) {
@@ -3459,7 +3432,6 @@
         document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
         document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
       }
-
       function restoreNavigationView() {
         if (navState.isFollowing && navState.isNavigating) {
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
@@ -3467,7 +3439,16 @@
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
           const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
           requestAnimationFrame(() => {
-            map.panTo(lookaheadPoint);
+            isProgrammaticUpdate = true;
+            if (isMobile && typeof TWEEN !== 'undefined') {
+                new TWEEN.Tween(map.getCenter())
+                  .to(lookaheadPoint, 300)
+                  .easing(TWEEN.Easing.Quadratic.Out)
+                  .onUpdate(() => map.setCenter(lookaheadPoint))
+                  .start();
+              } else {
+                map.panTo(lookaheadPoint);
+              }
             map.setZoom(zoom);
             map.setHeading(heading);
             map.setTilt(tilt);
@@ -3480,10 +3461,10 @@
               orientation: navState.mapOrientation
             });
             updateCompass();
+            setTimeout(() => { isProgrammaticUpdate = false; }, 100);
           });
         }
       }
-
       function acceptReroute() {
         if (navState.alternativeRoute && navState.currentHazard) {
           navState.ignoredHazards.push(navState.currentHazard._id);
@@ -3512,8 +3493,7 @@
           navState.isInitialSnap = true;
           localStorage.setItem('isFollowing', navState.isFollowing);
           sessionStorage.setItem('isFollowing', navState.isFollowing);
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
           showToast('Alternative route accepted.');
           console.log('Reroute accepted, navigation view restored:', navState.currentRoute.routes[0].legs[0].distance.text);
           navState.alertState = 'IDLE';
@@ -3534,7 +3514,6 @@
           );
         }
       }
-
       function rejectReroute() {
         if (navState.currentHazard) {
           navState.ignoredHazards.push(navState.currentHazard._id);
@@ -3564,8 +3543,7 @@
         navState.isFollowing = true;
         localStorage.setItem('isFollowing', navState.isFollowing);
         sessionStorage.setItem('isFollowing', navState.isFollowing);
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-        restoreNavigationView();
+        lockNavigation();
         showToast('Reroute rejected, continuing on original route.');
         console.log('Reroute rejected, navigation view restored:', { center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, orientation: navState.mapOrientation });
         navState.alertState = 'IDLE';
@@ -3573,7 +3551,6 @@
         navState.currentHazard = null;
         navState.pendingReroute = null;
       }
-
       function showCameraHud() {
         if (!showTrafficCameras) return;
         const cameraHudContainer = document.getElementById('camera-hud-container');
@@ -3607,7 +3584,6 @@
         document.getElementById('dismiss-camera-button').addEventListener('click', clearCountdown, { once: true });
         document.getElementById('camera-close').addEventListener('click', clearCountdown, { once: true });
       }
-
       function dismissCameraAlert() {
         const cameraHudContainer = document.getElementById('camera-hud-container');
         const cameraHud = document.getElementById('camera-hud');
@@ -3621,12 +3597,10 @@
           console.log('Showing pending reroute HUD after camera alert dismissal');
         }
         if (navState.isNavigating && navState.isFollowing) {
-          map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-          restoreNavigationView();
+          lockNavigation();
           console.log('Navigation view re-locked after dismissing camera alert');
         }
       }
-
       function createAlertContent() {
         const alertContent = document.createElement('div');
         alertContent.style.cssText = `
@@ -3644,14 +3618,12 @@
         alertContent.textContent = '!';
         return alertContent;
       }
-
       function createTrafficCameraContent() {
         const cameraContent = document.createElement('img');
         cameraContent.src = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
         cameraContent.className = 'traffic-cam-marker';
         return cameraContent;
       }
-
       function showToast(message) {
         const toast = document.getElementById('toast');
         if (toastTimeout) {
@@ -3671,14 +3643,12 @@
         }
         console.log('Toast shown:', message);
       }
-
       function calculateSimulationSpeed(step) {
         const isHighway = step && step.distance.value > 1000;
         const baseSpeed = isHighway ? 15 : 10; // 15 m/s (~33 mph) for highways, 10 m/s (~22 mph) for city
         const variation = Math.random() * 5 - 2.5; // Random variation ±2.5 m/s
         return Math.max(5, Math.min(20, baseSpeed + variation)); // 11-45 mph range
       }
-
       function offsetPosition(pos, heading, distance) {
         const offsetAngle = heading + 90; // Perpendicular to heading
         const offsetLatLng = google.maps.geometry.spherical.computeOffset(
@@ -3688,7 +3658,6 @@
         );
         return { lat: offsetLatLng.lat(), lng: offsetLatLng.lng() };
       }
-
       function startPositionSimulation() {
         if (!navState.currentRoute || !navState.currentRoute.routes[0] || !navState.destination) {
           console.error('Cannot start simulation: No route or destination');
@@ -3702,7 +3671,7 @@
         document.getElementById('search-container').classList.add('hidden');
         document.getElementById('hud-container').style.display = 'flex';
         document.getElementById('bottom-hud-container').style.display = 'flex';
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+        lockNavigation();
         const path = navState.currentRoute.routes[0].overview_path;
         const legs = navState.currentRoute.routes[0].legs[0];
         let simIndex = 0;
@@ -3790,7 +3759,6 @@
           if (!isPaused) simIndex++;
         }, SIM_INTERVAL);
       }
-
       function checkAuth() {
         if (isInitialized) return;
         isInitialized = true;
@@ -3808,7 +3776,6 @@
           document.getElementById('auth-container').style.display = 'flex';
         }
       }
-
       function initApp() {
         console.log('Initializing app...');
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -3944,7 +3911,7 @@
           }
         });
         if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('/sw.js?v=1.0.5').then(reg => {
+          navigator.serviceWorker.register('/sw.js?v=1.0.').then(reg => {
             console.log('Service worker registered:', reg);
             reg.addEventListener('updatefound', () => {
               const newWorker = reg.installing;
@@ -3988,8 +3955,12 @@
           showToast('Geolocation is not supported by this browser.');
           handleGeolocationError({ code: 0 }, true);
         }
+        const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        if (connection && connection.effectiveType === '2g') {
+          trafficLayer.setMap(null);
+          showToast('Slow connection detected. Traffic layer disabled.');
+        }
       }
-
       window.addEventListener('load', () => {
         console.log('Window loaded, checking auth...');
         if (typeof io === 'undefined') {
