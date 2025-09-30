@@ -1374,7 +1374,11 @@
         if (navState.isFollowing && navState.isNavigating) {
           lockNavigation();
         } else if (navState.isNavigating) {
-          unlockNavigation();
+          map.setOptions({ 
+            gestureHandling: 'cooperative', 
+            zoomControl: false, 
+            disableDoubleClickZoom: true 
+          });
         }
       });
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
@@ -2462,7 +2466,7 @@
           const cameraLatLng = new google.maps.LatLng(camera);
           const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
           const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
-          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
+          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey) ) {
             showCameraHud();
             cameraAlertShown.add(cameraKey);
             console.log('Traffic camera alert triggered:', { distance, camera });
@@ -2554,10 +2558,11 @@
               if (offRoadPolyline) {
                 offRoadPolyline.setMap(null);
                 offRoadPolyline = null;
-                console.log('Off-road polyline cleared: snapped to route (distance <= SNAP_BUFFER)');
+                console.log('Off-road polyline cleared: snapped to route');
               }
+            } else {
+              updateOffRoadPolyline(rawUserLocation, point);
             }
-            updateOffRoadPolyline(rawUserLocation, path[index]);
             if (navState.previousUserLocation) {
               const distance = google.maps.geometry.spherical.computeDistanceBetween(
                 new google.maps.LatLng(navState.previousUserLocation),
