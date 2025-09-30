@@ -371,7 +371,7 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   }
 });
 
-// Update user location for push notifications
+// Update user location for push notifications with retry logic
 app.post('/api/location', authMiddleware, async (req, res) => {
   try {
     const { location } = req.body;
@@ -384,14 +384,28 @@ app.post('/api/location', authMiddleware, async (req, res) => {
       logger.warn('Invalid coordinates values:', location.coordinates);
       return res.status(400).json({ error: 'Invalid longitude or latitude values' });
     }
-    await PushSubscription.updateMany(
-      { userId: req.user._id },
-      { lastLocation: { type: 'Point', coordinates: [lng, lat] } }
-    );
-    await User.findByIdAndUpdate(req.user._id, {
-      lastLocation: { type: 'Point', coordinates: [lng, lat] }
-    });
-    logger.info('User location updated for push subscriptions:', { userId: req.user._id, location });
+    let retries = 3;
+    let success = false;
+    while (retries > 0 && !success) {
+      try {
+        await PushSubscription.updateMany(
+          { userId: req.user._id },
+          { lastLocation: { type: 'Point', coordinates: [lng, lat] } }
+        );
+        await User.findByIdAndUpdate(req.user._id, {
+          lastLocation: { type: 'Point', coordinates: [lng, lat] }
+        });
+        success = true;
+        logger.info('User location updated for push subscriptions:', { userId: req.user._id, location });
+      } catch (error) {
+        retries--;
+        logger.warn(`Location update attempt failed, retries left: ${retries}`, error);
+        if (retries === 0) {
+          throw new Error(`Location update failed after retries: ${error.message}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
     res.status(200).json({ message: 'Location updated' });
   } catch (error) {
     logger.error('Error updating user location:', error.message);
