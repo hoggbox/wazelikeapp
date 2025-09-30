@@ -1,9 +1,9 @@
-const CACHE_NAME = 'waze-app-v1.0.17'; // CHANGED: Bumped version to match index.html updates
+const CACHE_NAME = 'waze-app-v1.0.17'; // Matches index.html version
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json?v=1.0.3',
-  '/icon.png', // NEW: Added for notification and manifest icon
+  '/icon.png', // For notifications and manifest
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
   'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
@@ -23,7 +23,7 @@ self.addEventListener('install', event => {
         console.error('Cache installation failed:', error);
       })
   );
-  self.skipWaiting(); // NEW: Force immediate activation
+  self.skipWaiting(); // Force immediate activation
 });
 
 self.addEventListener('activate', event => {
@@ -113,18 +113,18 @@ self.addEventListener('push', event => {
   }
   const options = {
     body: data.body,
-    icon: '/icon.png', // CHANGED: Use local icon for consistency
-    badge: '/icon.png', // CHANGED: Use local icon
+    icon: '/icon.png',
+    badge: '/icon.png',
     data: {
       url: data.alertId && data.lat && data.lng
         ? `/?alertId=${data.alertId}&lat=${data.lat}&lng=${data.lng}`
-        : '/', // NEW: Support alert-specific URLs
+        : '/',
       alertId: data.alertId || null,
       lat: data.lat || null,
       lng: data.lng || null
     },
-    vibrate: [200, 100, 200], // NEW: Vibration pattern for alerts
-    requireInteraction: true // NEW: Keep notification until user interacts
+    vibrate: [200, 100, 200],
+    requireInteraction: true
   };
   event.waitUntil(
     self.registration.showNotification(data.title || 'Notification', options)
@@ -158,16 +158,16 @@ self.addEventListener('message', event => {
     const { title, body, alertId, lat, lng } = event.data;
     const options = {
       body,
-      icon: '/icon.png', // CHANGED: Use local icon
-      badge: '/icon.png', // CHANGED: Use local icon
+      icon: '/icon.png',
+      badge: '/icon.png',
       data: {
         url: alertId && lat && lng ? `/?alertId=${alertId}&lat=${lat}&lng=${lng}` : '/',
         alertId,
         lat,
         lng
       },
-      vibrate: [200, 100, 200], // NEW: Vibration pattern
-      requireInteraction: true // NEW: Keep notification until interaction
+      vibrate: [200, 100, 200],
+      requireInteraction: true
     };
     event.waitUntil(
       self.registration.showNotification(title, options)

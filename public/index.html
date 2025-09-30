@@ -1,3 +1,4 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -15,14 +16,14 @@
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
     #map {
-      height: 100vh; /* CHANGED: Ensure full viewport height */
+      height: 100vh;
       width: 100%;
       position: absolute;
       top: 0;
       left: 0;
       z-index: 0;
       overflow: visible;
-      background: #f0f0f0; /* CHANGED: Fallback background for visibility */
+      background: #f0f0f0;
     }
     #compass {
       position: absolute; top: 10vh; right: 2vw; width: 40px; height: 40px; z-index: 1001;
@@ -330,7 +331,7 @@
     @media (orientation: portrait) { #hud-container, #bottom-hud-container { width: 80%; } }
     #auth-container {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8);
-      z-index: 10000; display: flex; justify-content: center; align-items: center; flex-direction: column;
+      z-index: 10000; display: none; justify-content: center; align-items: center; flex-direction: column;
       color: white; font-family: Arial, sans-serif;
     }
     #auth-title { font-size: 2rem; margin-bottom: 1rem; }
@@ -553,7 +554,7 @@
     <div id="leaderboard-content" class="leaderboard-tab-content"></div>
   </div>
   <div id="toast"></div>
-  <div id="auth-container" style="display: none;"> <!-- CHANGED: Hidden by default -->
+  <div id="auth-container" style="display: none;">
     <h2 id="auth-title">Login</h2>
     <form id="auth-form" style="display: flex; flex-direction: column; gap: 10px; width: 80%; max-width: 300px; padding: 1rem; background: rgba(255, 255, 255, 0.1); border-radius: 0.5rem;">
       <input type="text" id="username" name="username" placeholder="Username" style="display: none;">
@@ -584,6 +585,7 @@
     let isInitialized = false;
     let toastTimeout = null;
     let lastHeading = 0;
+    let lastStableHeading = 0;
     let lastSpokenTurn = '';
     let lastAnnouncementTime = 0;
     let headingHistory = [];
@@ -594,33 +596,35 @@
     let retryCount = 0;
     let rawUserLocation = null;
     let needsCalibration = false;
-    let lastStableHeading = 0; // NEW: For spin prevention
+    let lastCameraUpdate = 0;
     const markers = new Map();
-    const MAX_RETRIES = 5; // CHANGED: Increased retries for geolocation
-    const REROUTE_CHECK_INTERVAL = 2000; // MODIFIED: Faster rerouting
-    const OFF_ROUTE_TOLERANCE = 50; // MODIFIED: Tighter tolerance
+    const MAX_RETRIES = 5;
+    const REROUTE_CHECK_INTERVAL = 2000;
+    const OFF_ROUTE_TOLERANCE = 50;
     const MIN_REROUTE_DISTANCE = 100;
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
     const ALERT_POLL_INTERVAL = 5000;
-    const HEADING_SMOOTHING_WINDOW = 10;
+    const HEADING_SMOOTHING_WINDOW = 15;
     const POSITION_HISTORY_WINDOW = 5;
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
     const TURN_ZOOM = 19;
     const STRAIGHT_ZOOM = 16.5;
-    const TURN_THRESHOLD = 500; // MODIFIED: Increased for smoother zoom transitions
+    const TURN_THRESHOLD = 300;
     const LOCATION_UPDATE_THRESHOLD = 30;
     const HEADING_CHANGE_THRESHOLD = 15;
-    const MIN_HEADING_CHANGE = 8; // NEW: For spin prevention
+    const MIN_HEADING_CHANGE = 8;
+    const CAMERA_UPDATE_THRESHOLD = 500;
     const STATIONARY_SPEED_THRESHOLD = 2.2352;
     const ARRIVAL_RADIUS = 50;
     const ANNOUNCEMENT_COOLDOWN = 10000;
     const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
-    const SNAP_BUFFER = 20; // MODIFIED: Tighter snapping
+    const SNAP_BUFFER = 20;
     const MAX_GPS_DISTANCE = 300;
     const HEADING_VARIANCE_THRESHOLD = 45;
+    const SIGNIFICANT_TURN_THRESHOLD = 30;
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -650,7 +654,8 @@
       showTraffic: localStorage.getItem('showTraffic') === 'true',
       useDefaultDistances: useDefaultDistances,
       lastValidHeading: 0,
-      isInitialSnap: true
+      isInitialSnap: true,
+      lastCameraUpdate: 0
     };
     let mockSimulationInterval = null;
     let isRegister = false;
@@ -742,7 +747,7 @@
     function updateCompass() {
       const compass = document.getElementById('compass');
       if (compass && map) {
-        const mapHeading = map.getHeading() || 0;
+        const mapHeading = navState.mapOrientation === 'north-up' ? 0 : map.getHeading() || navState.currentHeading;
         compass.style.transform = `rotate(${-mapHeading}deg)`;
         console.log('Compass updated:', { mapHeading, rotation: -mapHeading });
       }
@@ -796,7 +801,7 @@
     }
     function smoothHeading(newHeading, source = 'unknown', speed = 0) {
       if (isNaN(newHeading) || newHeading === null || speed <= STATIONARY_SPEED_THRESHOLD) {
-        console.log('Stationary heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
+        console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
       }
       const headingDiff = Math.abs(((newHeading - lastStableHeading + 180) % 360) - 180);
@@ -808,15 +813,15 @@
       if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
         headingHistory.shift();
       }
+      let smoothedHeading = headingHistory.reduce((sum, h) => sum + h, 0) / headingHistory.length;
       const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.7 : 0.2;
-      const compassWeight = needsCalibration ? 0.1 : 0.7;
-      const polylineWeight = needsCalibration ? 0.2 : 0.1;
-      let smoothedHeading = headingHistory[0];
-      for (let i = 1; i < headingHistory.length; i++) {
+      const compassWeight = needsCalibration ? 0.1 : 0.6;
+      const polylineWeight = needsCalibration ? 0.2 : 0.2;
+      for (let i = 0; i < headingHistory.length; i++) {
         let delta = headingHistory[i] - smoothedHeading;
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
-        smoothedHeading += (source === 'gps' ? gpsWeight : source === 'compass' ? compassWeight : polylineWeight) * delta;
+        smoothedHeading += (source === 'gps' ? gpsWeight : source === 'compass' ? compassWeight : polylineWeight) * delta / headingHistory.length;
       }
       smoothedHeading = smoothedHeading % 360;
       if (smoothedHeading < 0) smoothedHeading += 360;
@@ -826,7 +831,7 @@
       return smoothedHeading;
     }
     function loadGoogleMaps() {
-      console.log('Loading Google Maps API...'); // CHANGED: Debug log
+      console.log('Loading Google Maps API...');
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
       script.async = true;
@@ -834,7 +839,7 @@
       script.onerror = () => {
         console.error('Failed to load Google Maps script');
         showToast('Failed to load map. Check network or API key.');
-        setTimeout(loadGoogleMaps, 2000); // Retry after 2s
+        setTimeout(loadGoogleMaps, 2000);
       };
       script.onload = () => {
         console.log('Google Maps script loaded successfully');
@@ -842,7 +847,7 @@
       document.head.appendChild(script);
     }
     window.initMap = function() {
-      console.log('initMap called'); // CHANGED: Debug log
+      console.log('initMap called');
       if (!window.google || !google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
         console.error('Google Maps libraries not loaded:', {
           Map: !!google.maps?.Map,
@@ -859,7 +864,7 @@
       initializeMap();
     };
     function initializeMap() {
-      console.log('Initializing map...'); // CHANGED: Debug log
+      console.log('Initializing map...');
       if (!google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
         console.error('Google Maps libraries not loaded:', {
           Map: !!google.maps?.Map,
@@ -925,14 +930,17 @@
         });
         google.maps.event.addListener(userMarker, 'position_changed', () => {
           const pos = userMarker.position;
-          if (pos && navState.isFollowing) {
+          if (pos && navState.isFollowing && navState.isNavigating) {
+            const { zoom, tilt, turnHeading } = getDynamicZoom(pos, 0);
+            const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
             map.moveCamera({
               center: pos,
-              heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
-              zoom: navState.navigationZoom,
-              tilt: 45
+              zoom,
+              heading,
+              tilt
             });
-            console.log('User marker position changed, map recentered:', { lat: pos.lat, lng: pos.lng, heading: navState.currentHeading });
+            console.log('User marker position changed, map recentered:', { lat: pos.lat, lng: pos.lng, heading, zoom, tilt });
+            updateCompass();
           }
         });
         if (showTrafficCameras) {
@@ -1018,6 +1026,7 @@
               (response, status) => {
                 if (status === 'OK') {
                   navState.currentRoute = response;
+                  navState.routePolyline = response.routes[0].overview_path;
                   directionsRenderer.setMap(map);
                   directionsRenderer.setDirections(response);
                   const bounds = new google.maps.LatLngBounds();
@@ -1101,7 +1110,7 @@
                 map,
                 position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
                 content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-title: `${alert.type} Alert`
+                title: `${alert.type} Alert`
               });
               markers.set(alertId, marker);
               console.log('Alert marker placed from URL:', { alertId, position });
@@ -1116,7 +1125,7 @@ title: `${alert.type} Alert`
       }
     }
     function setupEventListeners() {
-      console.log('Setting up event listeners...'); // CHANGED: Debug log
+      console.log('Setting up event listeners...');
       document.getElementById('start-button').addEventListener('click', startGPS);
       document.getElementById('bottom-hud-stop').addEventListener('click', stopGPS);
       document.getElementById('simulate-position-button').addEventListener('click', () => {
@@ -1137,6 +1146,8 @@ title: `${alert.type} Alert`
           }
           directionsRenderer.setMap(map);
           navState.isFollowing = false;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           if (navState.currentRoute && navState.destination) {
             const bounds = new google.maps.LatLngBounds();
@@ -1151,6 +1162,7 @@ title: `${alert.type} Alert`
           } else {
             console.log('No route or destination for preview after simulation stop');
           }
+
         } else {
           startPositionSimulation();
           document.getElementById('simulate-position-button').textContent = 'Stop Simulation';
@@ -1169,6 +1181,8 @@ title: `${alert.type} Alert`
         navState.alertState = 'IDLE';
         if (navState.isNavigating) {
           navState.isFollowing = false;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for manual report during navigation');
         }
@@ -1282,6 +1296,8 @@ title: `${alert.type} Alert`
       map.addListener('dragstart', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for free roam on dragstart during navigation');
         }
@@ -1289,6 +1305,8 @@ title: `${alert.type} Alert`
       map.addListener('drag', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for free roam on drag during navigation');
         }
@@ -1296,6 +1314,8 @@ title: `${alert.type} Alert`
       map.addListener('zoom_changed', () => {
         if (navState.isNavigating && navState.isFollowing) {
           navState.isFollowing = false;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           console.log('Map unlocked for free roam on zoom change during navigation');
         }
@@ -2483,6 +2503,39 @@ title: `${alert.type} Alert`
         console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
       }
     }
+    function checkCameraProximity() {
+      if (!showTrafficCameras || !navState.userLocation) return;
+      const now = Date.now();
+      if (now - navState.lastCameraUpdate < CAMERA_UPDATE_THRESHOLD) {
+        console.log('Skipping camera proximity check due to throttle');
+        return;
+      }
+      navState.lastCameraUpdate = now;
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      for (const camera of cameraPositions) {
+        const cameraLatLng = new google.maps.LatLng(camera);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
+        const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
+          showCameraHud();
+          cameraAlertShown.add(cameraKey);
+          console.log('Traffic camera alert triggered:', { distance, camera });
+          break;
+        }
+      }
+      for (const alert of currentAlerts) {
+        if (alert.type !== 'Traffic Camera') continue;
+        const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
+        const alertKey = `mongo-${alert._id}`;
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(alertKey)) {
+          showCameraHud();
+          cameraAlertShown.add(alertKey);
+          console.log('MongoDB traffic camera alert triggered:', { distance, alertId: alert._id });
+          break;
+        }
+      }
+    }
     function onPositionUpdate(position, isSimulation = false) {
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -2591,37 +2644,40 @@ title: `${alert.type} Alert`
         }
         lastHeading = navState.currentHeading;
         lastPosition = pos;
-        if (navState.isFollowing) {
+        if (navState.isFollowing && navState.isNavigating) {
           updateRouteAhead(navState.userLocation);
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
           navState.navigationZoom = zoom;
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          new TWEEN.Tween({
-            center: map.getCenter().toJSON(),
-            zoom: map.getZoom(),
-            heading: map.getHeading(),
-            tilt: map.getTilt()
-          })
-            .to({
-              center: navState.userLocation,
-              zoom,
-              heading,
-              tilt
-            }, 300)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(obj => {
-              map.moveCamera({
-                center: obj.center,
-                zoom: obj.zoom,
-                heading: obj.heading,
-                tilt: obj.tilt
-              });
-              updateCompass();
+          if (now - navState.lastCameraUpdate > CAMERA_UPDATE_THRESHOLD) {
+            new TWEEN.Tween({
+              center: map.getCenter().toJSON(),
+              zoom: map.getZoom(),
+              heading: map.getHeading(),
+              tilt: map.getTilt()
             })
-            .start();
-          ensureMarkerInView(navState.userLocation);
-          console.log('Camera view updated:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
-          navState.isInitialSnap = false;
+              .onUpdate(obj => {
+                map.moveCamera({
+                  center: obj.center,
+                  zoom: obj.zoom,
+                  heading: obj.heading,
+                  tilt: obj.tilt
+                });
+                updateCompass();
+                userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+                console.log('Camera update in progress:', { center: obj.center, zoom: obj.zoom, heading: obj.heading, tilt: obj.tilt });
+              })
+              .onComplete(() => {
+                console.log('Camera view updated:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
+                navState.lastCameraUpdate = now;
+              })
+              .start();
+            ensureMarkerInView(navState.userLocation);
+          } else {
+            console.log('Camera update skipped due to throttle:', { lastCameraUpdate: navState.lastCameraUpdate, now });
+          }
+        } else {
+          console.log('Camera update skipped:', { isFollowing: navState.isFollowing, isNavigating: navState.isNavigating });
         }
         navState.lastKnownPosition = pos;
         if (!isSimulation && socket && socket.connected) {
@@ -2630,7 +2686,7 @@ title: `${alert.type} Alert`
         }
         updateHUD(navState.currentRoute, navState.userLocation);
         updateCompass();
-        if (isSimulation && showTrafficCameras) {
+        if (showTrafficCameras) {
           checkCameraProximity();
         }
       } catch (error) {
@@ -2649,7 +2705,8 @@ title: `${alert.type} Alert`
         console.error('No destination selected');
         return;
       }
-navState.isNavigating = true;
+
+      navState.isNavigating = true;
       navState.isFollowing = true;
       navState.isInitialSnap = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
@@ -2672,7 +2729,7 @@ navState.isNavigating = true;
         updateBottomHUD(navState.currentRoute);
         fetchCurrentAlerts();
         startRerouteCheck();
-        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 10000); // MODIFIED: Aligned with HAZARD_CHECK_INTERVAL
+        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 10000);
         if (showTrafficCameras) {
           cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
         }
@@ -3651,6 +3708,8 @@ navState.isNavigating = true;
           directionsRenderer.setMap(map);
           navState.isFollowing = false;
           navState.isNavigating = false;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
           const bounds = new google.maps.LatLngBounds();
           bounds.extend(navState.userLocation);
