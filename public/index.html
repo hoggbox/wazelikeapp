@@ -562,98 +562,114 @@
     </form>
     <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
   </div>
-  <script>
-    const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
-    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
-    const mapId = '2666b5bd496d9c6026f43f82';
-    let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline, offRoadPolyline;
-    let currentAlerts = [];
-    let cameraCheckInterval = null;
-    let alertPollInterval = null;
-    let cameraPositions = [];
-    let cameraAlertShown = new Set();
-    let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
-    let hazardAlertDistance = parseFloat(localStorage.getItem('hazardAlertDistance')) || 2;
-    let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
-    let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
-    let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
-    let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false';
-    let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up';
-    let isInitialized = false;
-    let toastTimeout = null;
-    let lastHeading = 0;
-    let lastSpokenTurn = '';
-    let lastAnnouncementTime = 0;
-    let headingHistory = [];
-    let lastLocationUpdate = 0;
-    let lastAlertFetchTime = 0;
-    let lastPosition = null;
-    let compassHeading = 0;
-    let retryCount = 0;
-    let rawUserLocation = null;
-    let needsCalibration = false;
-    const markers = new Map();
-    const MAX_RETRIES = 5;
-    const REROUTE_CHECK_INTERVAL = 30000;
-    const OFF_ROUTE_TOLERANCE = 100;
-    const RECALC_COOLDOWN = 30000;
-    const HAZARD_CHECK_INTERVAL = 5000;
-    const MIN_REROUTE_DISTANCE = 100;
-    const MIN_ALERT_DISTANCE = 152.4;
-    const CAMERA_CHECK_INTERVAL = 10000;
-    const ALERT_POLL_INTERVAL = 5000;
-    const HEADING_SMOOTHING_WINDOW = 15; // CHANGED: Increased from 10 to 15 for smoother heading
-    const MIN_ZOOM = 16;
-    const MAX_ZOOM = 19;
-    const TURN_ZOOM = 19;
-    const STRAIGHT_ZOOM = 16.5;
-    const TURN_THRESHOLD = 300; // CHANGED: Reduced from 500 to 300 meters to delay turn-based heading changes
-    const LOCATION_UPDATE_THRESHOLD = 30;
-    const HEADING_CHANGE_THRESHOLD = 15;
-    const CAMERA_UPDATE_THRESHOLD = 500; // NEW: Debounce camera updates (500ms)
-    const STATIONARY_SPEED_THRESHOLD = 2.2352;
-    const ARRIVAL_RADIUS = 50;
-    const ANNOUNCEMENT_COOLDOWN = 10000;
-    const ALERT_FETCH_INTERVAL = 30000;
-    const ALTERNATE_TRIGGER_DISTANCE = 50;
-    const SNAP_BUFFER = 50;
-    const MAX_GPS_DISTANCE = 300;
-    const HEADING_VARIANCE_THRESHOLD = 45;
-    let navState = {
-      currentRoute: null,
-      isNavigating: false,
-      isFollowing: localStorage.getItem('isFollowing') === 'true',
-      mapOrientation: mapOrientation,
-      destination: null,
-      userLocation: { lat: 33.083270, lng: -83.233040 },
-      previousUserLocation: null,
-      lastKnownPosition: null,
-      routePolyline: null,
-      rerouteCheckTimeout: null,
-      hazardCheckInterval: null,
-      currentHeading: 0,
-      alertState: 'IDLE',
-      tempMarker: null,
-      tempAlertData: null,
-      alternativeRoute: null,
-      originalRoute: null,
-      mapClickListener: null,
-      ignoredHazards: [],
-      currentHazard: null,
-      pendingReroute: null,
-      navigationZoom: 18,
-      mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
-      altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
-      mapType: localStorage.getItem('mapType') || 'roadmap',
-      showTraffic: localStorage.getItem('showTraffic') === 'true',
-      lastRecalculationTime: 0,
-      useDefaultDistances: useDefaultDistances,
-      lastValidHeading: 0,
-      isInitialSnap: true,
-      lastCameraUpdate: 0 // NEW: Track last camera update time
-    };
-    let mockSimulationInterval = null;
-    let isRegister = false;
+<script>
+  function showToast(message) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.classList.add('visible-toast');
+    if (toastTimeout) {
+      clearTimeout(toastTimeout);
+    }
+    toastTimeout = setTimeout(() => {
+      toast.classList.remove('visible-toast');
+      toastTimeout = null;
+    }, 3000);
+    console.log('Toast shown:', message);
+  }
+  const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
+  const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+  const mapId = '2666b5bd496d9c6026f43f82';
+  let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline, offRoadPolyline;
+  let currentAlerts = [];
+  let cameraCheckInterval = null;
+  let alertPollInterval = null;
+  let cameraPositions = [];
+  let cameraAlertShown = new Set();
+  let positionHistory = [];
+  let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
+  let hazardAlertDistance = parseFloat(localStorage.getItem('hazardAlertDistance')) || 2;
+  let cameraAlertDistance = parseFloat(localStorage.getItem('cameraAlertDistance')) || 0.5;
+  let useDefaultDistances = localStorage.getItem('useDefaultDistances') !== 'false';
+  let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
+  let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false';
+  let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up';
+  let isInitialized = false;
+  let toastTimeout = null;
+  let lastHeading = 0;
+  let lastSpokenTurn = '';
+  let lastAnnouncementTime = 0;
+  let headingHistory = [];
+  let lastLocationUpdate = 0;
+  let lastAlertFetchTime = 0;
+  let lastPosition = null;
+  let compassHeading = 0;
+  let retryCount = 0;
+  let rawUserLocation = null;
+  let needsCalibration = false;
+  const markers = new Map();
+  const MAX_RETRIES = 3;
+  const REROUTE_CHECK_INTERVAL = 15000;
+  const OFF_ROUTE_TOLERANCE = 150;
+  const RECALC_COOLDOWN = 10000;
+  const HAZARD_CHECK_INTERVAL = 5000;
+  const MIN_REROUTE_DISTANCE = 100;
+  const MIN_ALERT_DISTANCE = 152.4;
+  const CAMERA_CHECK_INTERVAL = 10000;
+  const ALERT_POLL_INTERVAL = 5000;
+  const HEADING_SMOOTHING_WINDOW = 15;
+  const POSITION_HISTORY_WINDOW = 5;
+  const MIN_ZOOM = 16;
+  const MAX_ZOOM = 19;
+  const TURN_ZOOM = 19;
+  const STRAIGHT_ZOOM = 16.5;
+  const TURN_THRESHOLD = 150;
+  const LOCATION_UPDATE_THRESHOLD = 100;
+  const HEADING_CHANGE_THRESHOLD = 15;
+  const CAMERA_UPDATE_THRESHOLD = 1000;
+  const STATIONARY_SPEED_THRESHOLD = 2.2352;
+  const ARRIVAL_RADIUS = 50;
+  const ANNOUNCEMENT_COOLDOWN = 10000;
+  const ALERT_FETCH_INTERVAL = 30000;
+  const ALTERNATE_TRIGGER_DISTANCE = 50;
+  const SNAP_BUFFER = 30;
+  const MAX_GPS_DISTANCE = 300;
+  const HEADING_VARIANCE_THRESHOLD = 45;
+  const SIGNIFICANT_TURN_THRESHOLD = 30;
+  let navState = {
+    currentRoute: null,
+    isNavigating: false,
+    isFollowing: localStorage.getItem('isFollowing') === 'true',
+    mapOrientation: mapOrientation,
+    destination: null,
+    userLocation: { lat: 33.083270, lng: -83.233040 },
+    previousUserLocation: null,
+    lastKnownPosition: null,
+    routePolyline: null,
+    rerouteCheckTimeout: null,
+    hazardCheckInterval: null,
+    currentHeading: 0,
+    alertState: 'IDLE',
+    tempMarker: null,
+    tempAlertData: null,
+    alternativeRoute: null,
+    originalRoute: null,
+    mapClickListener: null,
+    ignoredHazards: [],
+    currentHazard: null,
+    pendingReroute: null,
+    navigationZoom: 18,
+    mainRouteColor: localStorage.getItem('mainRouteColor') || '#4285F4',
+    altRouteColor: localStorage.getItem('altRouteColor') || '#FFA500',
+    mapType: localStorage.getItem('mapType') || 'roadmap',
+    showTraffic: localStorage.getItem('showTraffic') === 'true',
+    lastRecalculationTime: 0,
+    useDefaultDistances: useDefaultDistances,
+    lastValidHeading: 0,
+    isInitialSnap: true,
+    lastCameraUpdate: 0
+  };
+  let mockSimulationInterval = null;
+  let isRegister = false;
     function switchAuthMode() {
       isRegister = !isRegister;
       console.log('Switching auth mode:', isRegister ? 'Register' : 'Login');
