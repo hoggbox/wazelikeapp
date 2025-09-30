@@ -612,7 +612,7 @@
     const TURN_ZOOM = 19;
     const STRAIGHT_ZOOM = 16.5;
     const TURN_THRESHOLD = 300;
-    const LOCATION_UPDATE_THRESHOLD = 30;
+    const LOCATION_UPDATE_THRESHOLD = 100;
     const HEADING_CHANGE_THRESHOLD = 15;
     const MIN_HEADING_CHANGE = 8;
     const CAMERA_UPDATE_THRESHOLD = 200;
@@ -877,6 +877,10 @@
         return;
       }
       try {
+        if (map) {
+          console.warn('Map already initialized, skipping to prevent multiple instances');
+          return;
+        }
         map = new google.maps.Map(document.getElementById('map'), {
           center: navState.userLocation,
           zoom: navState.navigationZoom,
@@ -933,12 +937,15 @@
           if (pos && navState.isFollowing && navState.isNavigating) {
             const { zoom, tilt, turnHeading } = getDynamicZoom(pos, 0);
             const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-            map.panTo(pos);
-            map.setHeading(heading);
-            map.setZoom(zoom);
-            map.setTilt(tilt);
-            console.log('User marker position changed, map panned:', { lat: pos.lat, lng: pos.lng, heading, zoom, tilt });
-            updateCompass();
+            const lookaheadPoint = getLookaheadPoint(pos, heading, 50);
+            requestAnimationFrame(() => {
+              map.panTo(lookaheadPoint);
+              map.setZoom(zoom);
+              map.setHeading(heading);
+              map.setTilt(tilt);
+              console.log('User marker position changed, map panned:', { lat: pos.lat, lng: pos.lng, heading, zoom, tilt });
+              updateCompass();
+            });
           }
         });
         if (showTrafficCameras) {
@@ -1085,7 +1092,6 @@
               console.log('Alert marker placed from URL:', { alertId, position });
             }
           })
-
           .catch(error => {
             console.error('Error fetching alert for URL centering:', error);
             showToast('Failed to load alert details.');
@@ -2226,18 +2232,14 @@
     }
     function recenterNonNavigation() {
       if (!map) return;
-      new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-        .to({ zoom: 15, center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading }, 500)
-        .easing(TWEEN.Easing.Quadratic.Out)
-        .onUpdate(obj => {
-          map.panTo(obj.center);
-          map.setZoom(obj.zoom);
-          map.setHeading(obj.heading);
-          updateCompass();
-        })
-        .start();
-      map.setTilt(0);
-      console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+      requestAnimationFrame(() => {
+        map.panTo(navState.userLocation);
+        map.setZoom(15);
+        map.setHeading(navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+        map.setTilt(0);
+        console.log('Non-navigation recenter:', navState.userLocation, 'Heading:', navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+        updateCompass();
+      });
     }
     function getDynamicZoom(currentPos, speed) {
       if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
@@ -2313,19 +2315,13 @@
     function endArrival() {
       document.getElementById('arrival-hud-container').classList.remove('active');
       document.getElementById('arrival-hud').classList.remove('active');
-      new TWEEN.Tween({ opacity: 1 })
-        .to({ opacity: 0 }, 1000)
-        .easing(TWEEN.Easing.Quadratic.Out)
-        .onUpdate(obj => {
-          destMarker.content.style.opacity = obj.opacity;
-        })
-        .onComplete(() => {
-          destMarker.content.classList.remove('ping');
-          destMarker.content.style.opacity = 1;
-          stopGPS();
-          console.log('Navigation ended after arrival');
-        })
-        .start();
+      requestAnimationFrame(() => {
+        destMarker.content.style.opacity = 0;
+        destMarker.content.classList.remove('ping');
+        destMarker.content.style.opacity = 1;
+        stopGPS();
+        console.log('Navigation ended after arrival');
+      });
     }
     function updateRouteAhead(currentPos) {
       if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
@@ -2451,19 +2447,12 @@
         position.lng > ne.lng() - edgeThresholdLng ||
         position.lng < sw.lng() + edgeThresholdLng;
       if (isNearEdge) {
-        new TWEEN.Tween({ center: map.getCenter().toJSON(), heading: map.getHeading() })
-          .to({
-            center: position,
-            heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading
-          }, 300)
-          .easing(TWEEN.Easing.Quadratic.Out)
-          .onUpdate(obj => {
-            map.panTo(obj.center);
-            map.setHeading(obj.heading);
-            updateCompass();
-          })
-          .start();
-        console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
+        requestAnimationFrame(() => {
+          map.panTo(position);
+          map.setHeading(navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+          updateCompass();
+          console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
+        });
       }
     }
     function checkCameraProximity() {
@@ -2621,27 +2610,20 @@
         navState.userLocation = pos;
         if (userMarker) {
           if (lastPosition && !snapped) {
-            new TWEEN.Tween(lastPosition)
-              .to(pos, 300)
-              .easing(TWEEN.Easing.Linear.None)
-              .onUpdate(obj => {
-                userMarker.position = obj;
-              })
-
-              .start();
+            requestAnimationFrame(() => {
+              userMarker.position = pos;
+              console.log('Marker position updated (smooth):', pos);
+            });
           } else {
             userMarker.position = pos;
+            console.log('Marker position updated (direct):', pos);
           }
           userMarker.setMap(map);
           if (Math.abs(navState.currentHeading - lastHeading) > HEADING_CHANGE_THRESHOLD) {
-            new TWEEN.Tween({ rotation: lastHeading })
-              .to({ rotation: navState.currentHeading }, 300)
-              .easing(TWEEN.Easing.Quadratic.Out)
-              .onUpdate(obj => {
-                userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? obj.rotation : 0}deg)`;
-              })
-              .start();
-            console.log('Bearing updated:', { heading: navState.currentHeading, source: 'marker-rotation' });
+            requestAnimationFrame(() => {
+              userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+              console.log('Bearing updated:', { heading: navState.currentHeading, source: 'marker-rotation' });
+            });
           }
         }
         lastHeading = navState.currentHeading;
@@ -2653,33 +2635,16 @@
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
           const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
           if (now - navState.lastCameraUpdate > CAMERA_UPDATE_THRESHOLD) {
-            new TWEEN.Tween({
-              center: map.getCenter().toJSON(),
-              zoom: map.getZoom(),
-              heading: map.getHeading(),
-              tilt: map.getTilt()
-            })
-              .to({
-                center: lookaheadPoint.toJSON(),
-                zoom,
-                heading,
-                tilt
-              }, 300)
-              .easing(TWEEN.Easing.Quadratic.Out)
-              .onUpdate(obj => {
-                map.panTo(obj.center);
-                map.setZoom(obj.zoom);
-                map.setHeading(obj.heading);
-                map.setTilt(obj.tilt);
-                userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-                console.log('Camera update in progress:', { center: obj.center, zoom: obj.zoom, heading: obj.heading, tilt: obj.tilt });
-              })
-              .onComplete(() => {
-                console.log('Camera view updated:', { lat: navState.userLocation.lat, lng: navState.userLocation.lng, zoom, heading, tilt });
-                navState.lastCameraUpdate = now;
-              })
-              .start();
-            ensureMarkerInView(navState.userLocation);
+            requestAnimationFrame(() => {
+              map.panTo(lookaheadPoint);
+              map.setZoom(zoom);
+              map.setHeading(heading);
+              map.setTilt(tilt);
+              userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+              console.log('Camera view updated:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
+              navState.lastCameraUpdate = now;
+              ensureMarkerInView(navState.userLocation);
+            });
           } else {
             console.log('Camera update skipped due to throttle:', { lastCameraUpdate: navState.lastCameraUpdate, now });
           }
@@ -2761,12 +2726,14 @@
         navState.navigationZoom = zoom;
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
         const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
-        map.panTo(lookaheadPoint);
-        map.setZoom(zoom);
-        map.setHeading(heading);
-        map.setTilt(tilt);
-        userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-        console.log('Initial navigation view set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
+        requestAnimationFrame(() => {
+          map.panTo(lookaheadPoint);
+          map.setZoom(zoom);
+          map.setHeading(heading);
+          map.setTilt(tilt);
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          console.log('Initial navigation view set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
+        });
         onPositionUpdate({
           coords: {
             latitude: navState.userLocation.lat,
@@ -2970,11 +2937,13 @@
               navState.navigationZoom = zoom;
               const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
               const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
-              map.panTo(lookaheadPoint);
-              map.setZoom(zoom);
-              map.setHeading(heading);
-              map.setTilt(tilt);
-              console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
+              requestAnimationFrame(() => {
+                map.panTo(lookaheadPoint);
+                map.setZoom(zoom);
+                map.setHeading(heading);
+                map.setTilt(tilt);
+                console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
+              });
             }
             console.log('Route calculated:', {
               pathLength: navState.routePolyline.length,
@@ -3413,17 +3382,13 @@
       rerouteHudContainer.classList.add('active');
       alternativeRenderer.setMap(map);
       alternativeRenderer.setDirections(navState.alternativeRoute);
-      new TWEEN.Tween({ zoom: map.getZoom(), center: map.getCenter().toJSON(), heading: map.getHeading() })
-        .to({ zoom: 14, center: map.getCenter().toJSON(), heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading }, 500)
-        .easing(TWEEN.Easing.Quadratic.Out)
-        .onUpdate(obj => {
-          map.panTo(obj.center);
-          map.setZoom(obj.zoom);
-          map.setHeading(obj.heading);
-          updateCompass();
-        })
-        .start();
-      map.setTilt(0);
+      requestAnimationFrame(() => {
+        map.panTo(navState.userLocation);
+        map.setZoom(14);
+        map.setHeading(navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+        map.setTilt(0);
+        updateCompass();
+      });
       showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available.`);
       console.log(`Offering reroute for ${hazard.type} at`, hazard.location);
       navState.alertState = 'OFFERING_REROUTE';
@@ -3461,41 +3426,21 @@
         navState.navigationZoom = zoom;
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
         const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
-        new TWEEN.Tween({
-          zoom: map.getZoom(),
-          center: map.getCenter().toJSON(),
-          heading: map.getHeading(),
-          tilt: map.getTilt()
-        })
-          .to({
-            zoom,
+        requestAnimationFrame(() => {
+          map.panTo(lookaheadPoint);
+          map.setZoom(zoom);
+          map.setHeading(heading);
+          map.setTilt(tilt);
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          updateCompass();
+          console.log('Navigation view restored:', {
             center: lookaheadPoint.toJSON(),
             heading,
+            zoom,
             tilt
-          }, 300)
-          .easing(TWEEN.Easing.Quadratic.Out)
-          .onUpdate(obj => {
-            map.panTo(obj.center);
-            map.setZoom(obj.zoom);
-            map.setHeading(obj.heading);
-            map.setTilt(obj.tilt);
-            updateCompass();
-            if (navState.mapOrientation === 'heading-up') {
-              userMarker.content.style.transform = `rotate(0deg)`;
-            } else {
-              userMarker.content.style.transform = `rotate(${navState.currentHeading}deg)`;
-            }
-          })
-          .onComplete(() => {
-            console.log('Navigation view restored:', {
-              center: lookaheadPoint.toJSON(),
-              heading,
-              zoom,
-              tilt
-            });
-            ensureMarkerInView(navState.userLocation);
-          })
-          .start();
+          });
+          ensureMarkerInView(navState.userLocation);
+        });
       }
     }
     function acceptReroute() {
