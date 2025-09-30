@@ -1,8 +1,9 @@
-const CACHE_NAME = 'waze-app-v1.0.14'; // CHANGED: Bumped version for updated index.html
+const CACHE_NAME = 'waze-app-v1.0.17'; // CHANGED: Bumped version to match index.html updates
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json?v=1.0.3',
+  '/icon.png', // NEW: Added for notification and manifest icon
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
   'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
@@ -15,13 +16,14 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Caching app shell');
+        console.log('Caching app shell:', urlsToCache);
         return cache.addAll(urlsToCache);
       })
       .catch(error => {
         console.error('Cache installation failed:', error);
       })
   );
+  self.skipWaiting(); // NEW: Force immediate activation
 });
 
 self.addEventListener('activate', event => {
@@ -51,7 +53,15 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) {
     console.log('Network request for:', url.pathname);
-    event.respondWith(fetch(event.request));
+    event.respondWith(
+      fetch(event.request).catch(error => {
+        console.error('Network fetch failed:', error);
+        return new Response(JSON.stringify({ error: 'Network unavailable' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      })
+    );
     return;
   }
   event.respondWith(
@@ -76,10 +86,13 @@ self.addEventListener('fetch', event => {
               console.error('Cache put failed:', error);
             });
           return networkResponse;
+        }).catch(error => {
+          console.error('Network fetch failed:', error);
+          return caches.match('/index.html');
         });
       })
       .catch(error => {
-        console.error('Fetch failed:', error);
+        console.error('Cache match failed:', error);
         return caches.match('/index.html');
       })
   );
@@ -100,11 +113,18 @@ self.addEventListener('push', event => {
   }
   const options = {
     body: data.body,
-    icon: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png',
-    badge: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png',
+    icon: '/icon.png', // CHANGED: Use local icon for consistency
+    badge: '/icon.png', // CHANGED: Use local icon
     data: {
-      url: data.url || '/'
-    }
+      url: data.alertId && data.lat && data.lng
+        ? `/?alertId=${data.alertId}&lat=${data.lat}&lng=${data.lng}`
+        : '/', // NEW: Support alert-specific URLs
+      alertId: data.alertId || null,
+      lat: data.lat || null,
+      lng: data.lng || null
+    },
+    vibrate: [200, 100, 200], // NEW: Vibration pattern for alerts
+    requireInteraction: true // NEW: Keep notification until user interacts
   };
   event.waitUntil(
     self.registration.showNotification(data.title || 'Notification', options)
@@ -131,4 +151,28 @@ self.addEventListener('notificationclick', event => {
       })
       .catch(error => console.error('Error handling notification click:', error))
   );
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
+    const { title, body, alertId, lat, lng } = event.data;
+    const options = {
+      body,
+      icon: '/icon.png', // CHANGED: Use local icon
+      badge: '/icon.png', // CHANGED: Use local icon
+      data: {
+        url: alertId && lat && lng ? `/?alertId=${alertId}&lat=${lat}&lng=${lng}` : '/',
+        alertId,
+        lat,
+        lng
+      },
+      vibrate: [200, 100, 200], // NEW: Vibration pattern
+      requireInteraction: true // NEW: Keep notification until interaction
+    };
+    event.waitUntil(
+      self.registration.showNotification(title, options)
+        .then(() => console.log('Client-triggered notification shown:', title))
+        .catch(error => console.error('Error showing client-triggered notification:', error))
+    );
+  }
 });
