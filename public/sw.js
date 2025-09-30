@@ -1,178 +1,174 @@
-const CACHE_NAME = 'waze-app-v1.0.17'; // Matches index.html version
+// sw.js
+const CACHE_NAME = 'waze-like-app-v1.0.4';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/manifest.json?v=1.0.3',
-  '/icon.png', // For notifications and manifest
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
-  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
-  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
-  'https://i.postimg.cc/YS0h0m7R/compass.png',
-  'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
+  '/icon.png',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css',
+  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js',
+  'https://cdn.socket.io/4.7.5/socket.io.min.js',
+  'https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=2666b5bd496d9c6026f43f82&v=beta&libraries=places,geometry,marker,routes&loading=async'
 ];
 
+// Install event: Cache essential assets
 self.addEventListener('install', event => {
-  console.log('Service Worker installing...');
+  console.log('[Service Worker] Installing service worker...');
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Caching app shell:', urlsToCache);
+        console.log('[Service Worker] Caching app shell and assets');
         return cache.addAll(urlsToCache);
       })
+      .then(() => {
+        console.log('[Service Worker] Cache populated successfully');
+        return self.skipWaiting();
+      })
       .catch(error => {
-        console.error('Cache installation failed:', error);
+        console.error('[Service Worker] Cache population failed:', error);
       })
   );
-  self.skipWaiting(); // Force immediate activation
 });
 
+// Activate event: Clean up old caches
 self.addEventListener('activate', event => {
-  console.log('Service Worker activating...');
+  console.log('[Service Worker] Activating service worker...');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
         cacheNames.map(cacheName => {
           if (cacheName !== CACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
+            console.log('[Service Worker] Deleting outdated cache:', cacheName);
             return caches.delete(cacheName);
           }
         })
       );
-    })
-    .then(() => {
-      console.log('Service Worker activated');
+    }).then(() => {
+      console.log('[Service Worker] Claiming clients');
       return self.clients.claim();
     })
-    .catch(error => {
-      console.error('Activation failed:', error);
+  );
+});
+
+// Fetch event: Serve cached assets or fetch from network
+self.addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  console.log('[Service Worker] Fetching:', url.pathname);
+
+  // Bypass service worker for API calls and WebSocket connections
+  if (url.pathname.startsWith('/api/') || url.pathname === '/socket.io/') {
+    console.log('[Service Worker] Bypassing cache for:', url.pathname);
+    event.respondWith(fetch(event.request).catch(error => {
+      console.error('[Service Worker] Fetch failed for API/WebSocket:', error);
+      return new Response(JSON.stringify({ error: 'Network unavailable' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }));
+    return;
+  }
+
+  // Cache-first strategy for static assets
+  event.respondWith(
+    caches.match(event.request).then(cachedResponse => {
+      if (cachedResponse) {
+        console.log('[Service Worker] Serving from cache:', url.pathname);
+        return cachedResponse;
+      }
+      console.log('[Service Worker] Fetching from network:', url.pathname);
+      return fetch(event.request).then(networkResponse => {
+        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+          return networkResponse;
+        }
+        const responseToCache = networkResponse.clone();
+        caches.open(CACHE_NAME).then(cache => {
+          cache.put(event.request, responseToCache);
+          console.log('[Service Worker] Cached network response:', url.pathname);
+        });
+        return networkResponse;
+      }).catch(error => {
+        console.error('[Service Worker] Fetch failed:', error);
+        return new Response('Offline and no cache available', { status: 503 });
+      });
     })
   );
 });
 
-self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/socket.io/')) {
-    console.log('Network request for:', url.pathname);
-    event.respondWith(
-      fetch(event.request).catch(error => {
-        console.error('Network fetch failed:', error);
-        return new Response(JSON.stringify({ error: 'Network unavailable' }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      })
-    );
-    return;
-  }
-  event.respondWith(
-    caches.match(event.request)
-      .then(response => {
-        if (response) {
-          console.log('Serving from cache:', event.request.url);
-          return response;
-        }
-        console.log('Fetching from network:', event.request.url);
-        return fetch(event.request).then(networkResponse => {
-          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-            return networkResponse;
-          }
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME)
-            .then(cache => {
-              cache.put(event.request, responseToCache);
-              console.log('Cached:', event.request.url);
-            })
-            .catch(error => {
-              console.error('Cache put failed:', error);
-            });
-          return networkResponse;
-        }).catch(error => {
-          console.error('Network fetch failed:', error);
-          return caches.match('/index.html');
-        });
-      })
-      .catch(error => {
-        console.error('Cache match failed:', error);
-        return caches.match('/index.html');
-      })
-  );
-});
-
+// Push event: Handle push notifications for alerts
 self.addEventListener('push', event => {
-  console.log('Push notification received:', event);
-  let data = {};
+  console.log('[Service Worker] Push event received');
+  let data = { title: 'Alert', body: 'New alert received' };
   if (event.data) {
     try {
       data = event.data.json();
+      console.log('[Service Worker] Push data:', data);
     } catch (error) {
-      console.error('Error parsing push data:', error);
-      data = { title: 'Notification', body: 'New alert received.' };
+      console.error('[Service Worker] Error parsing push data:', error);
     }
-  } else {
-    data = { title: 'Notification', body: 'New alert received.' };
   }
-  const options = {
-    body: data.body,
-    icon: '/icon.png',
-    badge: '/icon.png',
-    data: {
-      url: data.alertId && data.lat && data.lng
-        ? `/?alertId=${data.alertId}&lat=${data.lat}&lng=${data.lng}`
-        : '/',
-      alertId: data.alertId || null,
-      lat: data.lat || null,
-      lng: data.lng || null
-    },
-    vibrate: [200, 100, 200],
-    requireInteraction: true
-  };
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Notification', options)
-      .then(() => console.log('Push notification shown:', data.title))
-      .catch(error => console.error('Error showing notification:', error))
-  );
-});
-
-self.addEventListener('notificationclick', event => {
-  console.log('Notification clicked:', event.notification);
-  event.notification.close();
-  event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true })
-      .then(clientList => {
-        const url = event.notification.data.url || '/';
-        for (const client of clientList) {
-          if (client.url === url && 'focus' in client) {
-            return client.focus();
-          }
-        }
-        if (clients.openWindow) {
-          return clients.openWindow(url);
-        }
-      })
-      .catch(error => console.error('Error handling notification click:', error))
-  );
-});
-
-self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'SHOW_NOTIFICATION') {
-    const { title, body, alertId, lat, lng } = event.data;
-    const options = {
-      body,
+    self.registration.showNotification(data.title, {
+      body: data.body,
       icon: '/icon.png',
       badge: '/icon.png',
       data: {
-        url: alertId && lat && lng ? `/?alertId=${alertId}&lat=${lat}&lng=${lng}` : '/',
-        alertId,
-        lat,
-        lng
-      },
-      vibrate: [200, 100, 200],
-      requireInteraction: true
-    };
-    event.waitUntil(
-      self.registration.showNotification(title, options)
-        .then(() => console.log('Client-triggered notification shown:', title))
-        .catch(error => console.error('Error showing client-triggered notification:', error))
-    );
+        alertId: data.alertId,
+        lat: data.lat,
+        lng: data.lng
+      }
+    }).then(() => {
+      console.log('[Service Worker] Notification shown:', data.title);
+    }).catch(error => {
+      console.error('[Service Worker] Notification error:', error);
+    })
+  );
+});
+
+// Notification click event: Focus or open app with alert details
+self.addEventListener('notificationclick', event => {
+  console.log('[Service Worker] Notification clicked:', event.notification.data);
+  event.notification.close();
+  const { alertId, lat, lng } = event.notification.data || {};
+  const url = alertId ? `/?alertId=${alertId}&lat=${lat}&lng=${lng}` : '/';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      console.log('[Service Worker] Clients found:', clientList.length);
+      for (const client of clientList) {
+        if (client.url.includes('wazelikeapp.onrender.com') && 'focus' in client) {
+          console.log('[Service Worker] Focusing existing client:', client.url);
+          client.focus();
+          client.postMessage({ type: 'NAVIGATE', url });
+          return;
+        }
+      }
+      if (clients.openWindow) {
+        console.log('[Service Worker] Opening new window:', url);
+        return clients.openWindow(url);
+      }
+    }).catch(error => {
+      console.error('[Service Worker] Error handling notification click:', error);
+    })
+  );
+});
+
+// Message event: Handle messages from index.html
+self.addEventListener('message', event => {
+  console.log('[Service Worker] Message received:', event.data);
+  if (event.data.type === 'INIT') {
+    console.log('[Service Worker] Initialization message received');
+  } else if (event.data.type === 'SHOW_NOTIFICATION') {
+    self.registration.showNotification(event.data.title, {
+      body: event.data.body,
+      icon: '/icon.png',
+      badge: '/icon.png',
+      data: {
+        alertId: event.data.alertId,
+        lat: event.data.lat,
+        lng: event.data.lng
+      }
+    }).then(() => {
+      console.log('[Service Worker] Client-initiated notification shown:', event.data.title);
+    }).catch(error => {
+      console.error('[Service Worker] Client-initiated notification error:', error);
+    });
   }
 });
