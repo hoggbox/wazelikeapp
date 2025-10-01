@@ -619,7 +619,7 @@
     const ANNOUNCEMENT_COOLDOWN = 10000;
     const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
-    const SNAP_BUFFER = 20;
+    const SNAP_BUFFER = 30; // Increased from 20 to 30 to tolerate more GPS drift
     const MAX_GPS_DISTANCE = 300;
     const HEADING_VARIANCE_THRESHOLD = 45;
     const SIGNIFICANT_TURN_THRESHOLD = 30;
@@ -1374,11 +1374,7 @@
         if (navState.isFollowing && navState.isNavigating) {
           lockNavigation();
         } else if (navState.isNavigating) {
-          map.setOptions({ 
-            gestureHandling: 'cooperative', 
-            zoomControl: false, 
-            disableDoubleClickZoom: true 
-          });
+          unlockNavigation();
         }
       });
       document.getElementById('traffic-camera-toggle').addEventListener('change', (e) => {
@@ -2393,7 +2389,7 @@
           if (offRoadPolyline) {
             offRoadPolyline.setMap(null);
             offRoadPolyline = null;
-            console.log('Off-road polyline cleared: snapped to route (distance <= SNAP_BUFFER)');
+            console.log('Off-road polyline cleared: snapped to route');
           }
         }
       }
@@ -2466,7 +2462,7 @@
           const cameraLatLng = new google.maps.LatLng(camera);
           const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
           const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
-          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey) ) {
+          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
             showCameraHud();
             cameraAlertShown.add(cameraKey);
             console.log('Traffic camera alert triggered:', { distance, camera });
@@ -2524,6 +2520,17 @@
           console.error('Error updating server location:', error);
         }
       }
+      function smoothPosition(rawPos) {
+        positionHistory.push(rawPos);
+        if (positionHistory.length > POSITION_HISTORY_WINDOW) {
+          positionHistory.shift();
+        }
+        const avgLat = positionHistory.reduce((sum, p) => sum + p.lat, 0) / positionHistory.length;
+        const avgLng = positionHistory.reduce((sum, p) => sum + p.lng, 0) / positionHistory.length;
+        const smoothedPos = { lat: avgLat, lng: avgLng };
+        console.log('Position smoothed:', { raw: rawPos, smoothed: smoothedPos, historyLength: positionHistory.length });
+        return smoothedPos;
+      }
       function onPositionUpdate(position, isSimulation = false) {
         try {
           const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -2541,7 +2548,8 @@
           }
           navState.previousUserLocation = navState.userLocation;
           rawUserLocation = { lat: latitude, lng: longitude };
-          let pos = rawUserLocation;
+          const smoothedRawPos = smoothPosition(rawUserLocation);
+          let pos = smoothedRawPos;
           let snapped = navState.isInitialSnap;
           let computedHeading = heading;
           if (navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
@@ -2561,7 +2569,7 @@
                 console.log('Off-road polyline cleared: snapped to route');
               }
             } else {
-              updateOffRoadPolyline(rawUserLocation, point);
+              updateOffRoadPolyline(smoothedRawPos, point);
             }
             if (navState.previousUserLocation) {
               const distance = google.maps.geometry.spherical.computeDistanceBetween(
@@ -2888,6 +2896,7 @@
         lastAlertFetchTime = 0;
         lastPosition = null;
         rawUserLocation = null;
+        positionHistory = [];
         document.getElementById('search-container').classList.remove('hidden');
         document.getElementById('search-container').style.display = 'flex';
         document.getElementById('hud-container').style.display = 'none';
