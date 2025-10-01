@@ -1994,7 +1994,6 @@
           sessionStorage.removeItem('token');
           sessionStorage.removeItem('userId');
           document.getElementById('auth-container').style.display = 'flex';
-          showToast('Session expired. Please log in again.');
           return;
         }
         console.log('Deleting alert with token:', token.substring(0, 20) + '...');
@@ -2002,7 +2001,6 @@
         if (!marker) {
           console.warn('Marker not found for deletion:', id);
           item?.remove();
-          updateAlertsDisplay(id);
           setTimeout(() => pollAlerts(), 1000);
           return;
         }
@@ -2014,13 +2012,20 @@
         });
         console.log('Delete alert response:', { status: response.status, ok: response.ok });
         if (response.ok) {
-          // Immediately remove marker and update state for the deleting client
           marker.setMap(null);
           markers.delete(id);
-          updateAlertsDisplay(id);
+          item?.remove();
+          const alert = currentAlerts.find(a => a._id === id);
+          if (alert && alert.type === 'Traffic Camera') {
+            cameraPositions = cameraPositions.filter(pos =>
+              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+            );
+            cameraAlertShown.delete(`mongo-${id}`);
+          }
+          currentAlerts = currentAlerts.filter(a => a._id !== id);
+          displayAlertsInHud(currentAlerts);
           showToast('Alert deleted successfully.');
-          console.log('Alert deleted locally:', id);
-          // Emit event for other clients
+          console.log('Alert deletion synced:', id);
           if (socket && socket.connected) {
             socket.emit('alertDeleted', id);
             console.log('Emitted alertDeleted event:', id);
@@ -2034,62 +2039,9 @@
       } catch (error) {
         console.error('Error deleting alert:', error);
         showToast('Failed to delete alert. Retrying...');
-        setTimeout(() => deleteAlert(id, item), 2000); // Retry after 2 seconds
-      }
-    }
-
-    function updateAlertsDisplay(deletedId) {
-      const alert = currentAlerts.find(a => a._id === deletedId);
-      if (alert && alert.type === 'Traffic Camera') {
-        cameraPositions = cameraPositions.filter(pos =>
-          pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
-        );
-        cameraAlertShown.delete(`mongo-${deletedId}`);
-      }
-      currentAlerts = currentAlerts.filter(a => a._id !== deletedId);
-      displayAlertsInHud(currentAlerts);
-      console.log('Alerts display updated after deletion:', { deletedId, remainingAlerts: currentAlerts.length });
-    }
-
-    // Within the socket.on handlers in initApp
-    socket.on('alertDeleted', (id) => {
-      console.log('Alert deleted via socket:', id);
-      if (!id || typeof id !== 'string') {
-        console.warn('Invalid alert ID received:', id);
-        setTimeout(() => pollAlerts(), 1000);
-        return;
-      }
-      try {
-        const marker = markers.get(id);
-        if (marker) {
-          marker.setMap(null);
-          markers.delete(id);
-          updateAlertsDisplay(id);
-          console.log('Alert deletion synced via socket:', id);
-          showToast('Alert removed in real-time.');
-        } else {
-          console.warn('Marker not found for alert:', id);
-          updateAlertsDisplay(id);
-          setTimeout(() => pollAlerts(), 1000);
-        }
-        if (pushNotificationsEnabled && !navState.isNavigating) {
-          const alert = currentAlerts.find(a => a._id === id);
-          navigator.serviceWorker.controller?.postMessage({
-            type: 'SHOW_NOTIFICATION',
-            title: 'Alert Removed',
-            body: `Alert at ${alert?.address || 'unknown location'} has been removed.`,
-            alertId: id,
-            lat: alert?.location.coordinates[1],
-            lng: alert?.location.coordinates[0]
-          });
-          console.log('Push notification sent for alert deletion:', { alertId: id });
-        }
-      } catch (error) {
-        console.error('Marker removal failed via socket:', { id, reason: error.message });
-        showToast('Failed to sync alert deletion. Retrying...');
         setTimeout(() => pollAlerts(), 1000);
       }
-    });
+    }
     async function pollAlerts() {
       if (!navState.userLocation) return;
       try {
@@ -2755,7 +2707,7 @@
       map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
       console.log('Navigation unlocked');
     }
-      function startGPS() {
+       function startGPS() {
         if (!navigator.geolocation) {
           showToast('Geolocation is not supported by this browser.');
           console.error('Geolocation not supported');
