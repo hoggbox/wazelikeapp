@@ -596,6 +596,7 @@
     let rawUserLocation = null;
     let needsCalibration = false;
     let lastCameraUpdate = 0;
+    let isHeadingTweening = false;
     const markers = new Map();
     const MAX_RETRIES = 5;
     const REROUTE_CHECK_INTERVAL = 2000;
@@ -613,13 +614,13 @@
     const TURN_THRESHOLD = 300;
     const HEADING_CHANGE_THRESHOLD = 15;
     const MIN_HEADING_CHANGE = 8;
-    const CAMERA_UPDATE_THRESHOLD = 50; // Reduced from 200 to 50ms
+    const CAMERA_UPDATE_THRESHOLD = 50;
     const STATIONARY_SPEED_THRESHOLD = 2.2352;
     const ARRIVAL_RADIUS = 50;
     const ANNOUNCEMENT_COOLDOWN = 10000;
     const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
-    const SNAP_BUFFER = 30; // Increased from 20 to 30 to tolerate more GPS drift
+    const SNAP_BUFFER = 30;
     const MAX_GPS_DISTANCE = 300;
     const HEADING_VARIANCE_THRESHOLD = 45;
     const SIGNIFICANT_TURN_THRESHOLD = 30;
@@ -660,6 +661,12 @@
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const LOCATION_UPDATE_THRESHOLD = isMobile ? 500 : 100;
     let isProgrammaticUpdate = false;
+    function normalizeHeadingDelta(current, target) {
+      let delta = target - current;
+      while (delta > 180) delta -= 360;
+      while (delta < -180) delta += 360;
+      return delta;
+    }
     function switchAuthMode() {
       isRegister = !isRegister;
       console.log('Switching auth mode:', isRegister ? 'Register' : 'Login');
@@ -800,7 +807,7 @@
         console.log('Calibration completed, resetting heading history');
       }, 5000);
     }
-    function smoothHeading(newHeading, source = 'unknown', speed = 0) {
+    function smoothHeading(newHeading, source = 'unknown', speed = 0, isSnapped = false) {
       if (isNaN(newHeading) || newHeading === null || speed <= STATIONARY_SPEED_THRESHOLD) {
         console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
@@ -817,7 +824,7 @@
       let smoothedHeading = headingHistory.reduce((sum, h) => sum + h, 0) / headingHistory.length;
       const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.7 : 0.2;
       const compassWeight = needsCalibration ? 0.1 : 0.6;
-      const polylineWeight = needsCalibration ? 0.2 : 0.2;
+      const polylineWeight = isSnapped ? 0.8 : needsCalibration ? 0.2 : 0.2;
       for (let i = 0; i < headingHistory.length; i++) {
         let delta = headingHistory[i] - smoothedHeading;
         if (delta > 180) delta -= 360;
@@ -828,7 +835,7 @@
       if (smoothedHeading < 0) smoothedHeading += 360;
       navState.lastValidHeading = smoothedHeading;
       lastStableHeading = smoothedHeading;
-      console.log('Heading stabilized:', { newHeading, smoothed: smoothedHeading, source, speed, gpsWeight, compassWeight, polylineWeight });
+      console.log('Heading stabilized:', { newHeading, smoothed: smoothedHeading, source, speed, gpsWeight, compassWeight, polylineWeight, isSnapped });
       return smoothedHeading;
     }
     function loadGoogleMaps() {
@@ -944,7 +951,9 @@
             requestAnimationFrame(() => {
               map.panTo(lookaheadPoint);
               map.setZoom(zoom);
-              map.setHeading(heading);
+              if (!isHeadingTweening) {
+                map.setHeading(heading);
+              }
               map.setTilt(tilt);
               userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
               console.log('User marker position changed, map panned:', { lat: pos.lat, lng: pos.lng, heading, zoom, tilt, orientation: navState.mapOrientation });
@@ -1823,12 +1832,12 @@
           console.log('Reverse geocoding successful:', navState.tempAlertData.address);
         } else {
           console.warn('Reverse geocoding failed, using coordinates:', data.status);
-          navState.tempAlertData.address = `${location.lat().toFixed(4)}, ${location.lng().toFixed(4)}`;
+          navState.tempAlertData.address = `Lat: ${location.lat().toFixed(4)}, Lng: ${location.lng().toFixed(4)}`;
         }
       } catch (error) {
         console.error('Reverse geocoding failed:', error);
         showToast('Failed to get address for alert location.');
-        navState.tempAlertData.address = `${location.lat().toFixed(4)}, ${location.lng().toFixed(4)}`;
+        navState.tempAlertData.address = `Lat: ${location.lat().toFixed(4)}, Lng: ${location.lng().toFixed(4)}`;
       }
       const reportBox = document.getElementById('report-box');
       const confirmAlert = document.getElementById('confirm-alert');
@@ -2254,436 +2263,450 @@
           closestIndex = index;
         }
       });
-        let currentStep = null;
-        let nextStep = null;
-        const legs = navState.currentRoute.routes[0].legs[0];
-        for (let i = 0; i < legs.steps.length; i++) {
-          const stepPath = legs.steps[i].path;
-          if (stepPath.some(pt => google.maps.geometry.spherical.computeDistanceBetween(pt, closestPoint) < 20)) {
-            currentStep = legs.steps[i];
-            nextStep = legs.steps[i + 1] || null;
-            break;
-          }
+      let currentStep = null;
+      let nextStep = null;
+      const legs = navState.currentRoute.routes[0].legs[0];
+      for (let i = 0; i < legs.steps.length; i++) {
+        const stepPath = legs.steps[i].path;
+        if (stepPath.some(pt => google.maps.geometry.spherical.computeDistanceBetween(pt, closestPoint) < 20)) {
+          currentStep = legs.steps[i];
+          nextStep = legs.steps[i + 1] || null;
+          break;
         }
-        let zoom = STRAIGHT_ZOOM;
-        let tilt = 45;
-        let turnHeading = null;
-        if (nextStep && nextStep.maneuver && navState.mapOrientation === 'heading-up') {
-          const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
-          if (distanceToTurn < TURN_THRESHOLD) {
-            zoom = TURN_ZOOM;
-            tilt = 60;
-            const turnPoint = new google.maps.LatLng(nextStep.start_location);
-            turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
-            console.log('Turn detected:', { distanceToTurn, turnHeading });
-          }
-        }
-        const speedMph = speed ? speed * 2.23694 : 0;
-        if (speedMph > 40) {
-          zoom -= 0.5;
-        } else if (speedMph < 10 && speedMph > 0) {
-          zoom += 0.5;
-        }
-        return { zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), tilt, turnHeading };
       }
-      function checkArrival(currentPos) {
-        if (!navState.isNavigating || !navState.destination) {
-          return false;
+      let zoom = STRAIGHT_ZOOM;
+      let tilt = 45;
+      let turnHeading = null;
+      if (nextStep && nextStep.maneuver && navState.mapOrientation === 'heading-up') {
+        const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
+        if (distanceToTurn < TURN_THRESHOLD) {
+          zoom = TURN_ZOOM;
+          tilt = 60;
+          const turnPoint = new google.maps.LatLng(nextStep.start_location);
+          turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
+          console.log('Turn detected:', { distanceToTurn, turnHeading });
         }
-        const userLatLng = new google.maps.LatLng(currentPos);
-        const destLatLng = new google.maps.LatLng(navState.destination);
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, destLatLng);
-        if (distance <= ARRIVAL_RADIUS) {
-          console.log('User arrived at destination:', { distance });
-          showToast('You have arrived at your destination.');
-          if ('speechSynthesis' in window) {
-            const utterance = new SpeechSynthesisUtterance('You have arrived at your destination.');
-            utterance.lang = 'en-US';
-            speechSynthesis.speak(utterance);
-          }
-          destMarker.content.classList.add('ping');
-          document.getElementById('arrival-hud-container').classList.add('active');
-          document.getElementById('arrival-hud').classList.add('active');
-          return true;
-        }
+      }
+      const speedMph = speed ? speed * 2.23694 : 0;
+      if (speedMph > 40) {
+        zoom -= 0.5;
+      } else if (speedMph < 10 && speedMph > 0) {
+        zoom += 0.5;
+      }
+      if (closestIndex < path.length - 1 && !turnHeading) {
+        turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, path[closestIndex + 1]);
+      }
+      return { zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), tilt, turnHeading };
+    }
+    function checkArrival(currentPos) {
+      if (!navState.isNavigating || !navState.destination) {
         return false;
       }
-      function endArrival() {
-        document.getElementById('arrival-hud-container').classList.remove('active');
-        document.getElementById('arrival-hud').classList.remove('active');
-        requestAnimationFrame(() => {
-          destMarker.content.style.opacity = 0;
-          destMarker.content.classList.remove('ping');
-          destMarker.content.style.opacity = 1;
-          stopGPS();
-          console.log('Navigation ended after arrival');
+      const userLatLng = new google.maps.LatLng(currentPos);
+      const destLatLng = new google.maps.LatLng(navState.destination);
+      const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, destLatLng);
+      if (distance <= ARRIVAL_RADIUS) {
+        console.log('User arrived at destination:', { distance });
+        showToast('You have arrived at your destination.');
+        if ('speechSynthesis' in window) {
+          const utterance = new SpeechSynthesisUtterance('You have arrived at your destination.');
+          utterance.lang = 'en-US';
+          speechSynthesis.speak(utterance);
+        }
+        destMarker.content.classList.add('ping');
+        document.getElementById('arrival-hud-container').classList.add('active');
+        document.getElementById('arrival-hud').classList.add('active');
+        return true;
+      }
+      return false;
+    }
+    function endArrival() {
+      document.getElementById('arrival-hud-container').classList.remove('active');
+      document.getElementById('arrival-hud').classList.remove('active');
+      requestAnimationFrame(() => {
+        destMarker.content.style.opacity = 0;
+        destMarker.content.classList.remove('ping');
+        destMarker.content.style.opacity = 1;
+        stopGPS();
+        console.log('Navigation ended after arrival');
+      });
+    }
+    function updateRouteAhead(currentPos) {
+      if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
+        if (routePolyline) {
+          routePolyline.setMap(null);
+          routePolyline = null;
+        }
+        if (offRoadPolyline) {
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+        }
+        return;
+      }
+      const path = navState.currentRoute.routes[0].overview_path;
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      let closestIndex = 0;
+      let minDistance = Infinity;
+      path.forEach((point, index) => {
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestIndex = index;
+        }
+      });
+      const fullPath = path.slice(closestIndex);
+      if (routePolyline) {
+        routePolyline.setPath(fullPath);
+      } else {
+        routePolyline = new google.maps.Polyline({
+          path: fullPath,
+          strokeColor: navState.mainRouteColor,
+          strokeWeight: 6,
+          strokeOpacity: 0.8,
+          zIndex: 5,
+          map: map
         });
       }
-      function updateRouteAhead(currentPos) {
-        if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
-          if (routePolyline) {
-            routePolyline.setMap(null);
-            routePolyline = null;
-          }
-          if (offRoadPolyline) {
-            offRoadPolyline.setMap(null);
-            offRoadPolyline = null;
-          }
-          return;
+      console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
+    }
+    function updateOffRoadPolyline(rawPos, targetPos) {
+      if (!rawPos || !targetPos || !navState.isNavigating) {
+        if (offRoadPolyline) {
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+          console.log('Off-road polyline cleared: no position data or not navigating');
         }
-        const path = navState.currentRoute.routes[0].overview_path;
-        const currentLatLng = new google.maps.LatLng(currentPos);
-        let closestIndex = 0;
-        let minDistance = Infinity;
-        path.forEach((point, index) => {
-          const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
-          if (distance < minDistance) {
-            minDistance = distance;
-            closestIndex = index;
-          }
-        });
-        const fullPath = path.slice(closestIndex);
-        if (routePolyline) {
-          routePolyline.setPath(fullPath);
+        return;
+      }
+      const rawLatLng = new google.maps.LatLng(rawPos);
+      const targetLatLng = new google.maps.LatLng(targetPos);
+      const distance = google.maps.geometry.spherical.computeDistanceBetween(rawLatLng, targetLatLng);
+      if (distance > SNAP_BUFFER) {
+        const path = [rawPos, targetPos];
+        if (offRoadPolyline) {
+          offRoadPolyline.setPath(path);
         } else {
-          routePolyline = new google.maps.Polyline({
-            path: fullPath,
-            strokeColor: navState.mainRouteColor,
-            strokeWeight: 6,
-            strokeOpacity: 0.8,
-            zIndex: 5,
+          offRoadPolyline = new google.maps.Polyline({
+            path: path,
+            strokeColor: '#808080',
+            strokeOpacity: 0.6,
+            strokeWeight: 4,
+            zIndex: 4,
+            icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '10px' }],
             map: map
           });
         }
-        console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
+        console.log('Off-road polyline updated:', { from: rawPos, to: targetPos, distance });
+      } else {
+        if (offRoadPolyline) {
+          offRoadPolyline.setMap(null);
+          offRoadPolyline = null;
+          console.log('Off-road polyline cleared: snapped to route');
+        }
       }
-      function updateOffRoadPolyline(rawPos, targetPos) {
-        if (!rawPos || !targetPos || !navState.isNavigating) {
-          if (offRoadPolyline) {
-            offRoadPolyline.setMap(null);
-            offRoadPolyline = null;
-            console.log('Off-road polyline cleared: no position data or not navigating');
+    }
+    function findClosestRoutePoint(currentPos, path, heading, speed) {
+      if (!path || path.length < 2) return { point: currentPos, index: 0 };
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      let bestPoint = currentPos;
+      let bestScore = -Infinity;
+      let closestIndex = 0;
+      const speedMph = speed ? speed * 2.23694 : 0;
+      const isHighway = navState.currentRoute && navState.currentRoute.routes[0].legs[0].steps.some(step => step.travel_mode === 'DRIVING' && step.distance.value > 1000);
+      for (let i = 0; i < path.length; i++) {
+        const point = path[i];
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
+        if (distance <= SNAP_BUFFER) {
+          const nextPoint = i < path.length - 1 ? path[i + 1] : point;
+          const pointHeading = google.maps.geometry.spherical.computeHeading(point, nextPoint);
+          const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
+          const proximityScore = (SNAP_BUFFER - distance) / SNAP_BUFFER * 0.5;
+          const headingScore = (1 - headingDiff / 180) * 0.3;
+          const speedScore = speedMph > 20 && isHighway ? 0.1 : speedMph < 10 ? 0.05 : 0;
+          const contextScore = i < path.length - 1 ? 0.1 : 0.05;
+          const totalScore = proximityScore + headingScore + speedScore + contextScore;
+          if (totalScore > bestScore) {
+            bestScore = totalScore;
+            bestPoint = { lat: point.lat(), lng: point.lng() };
+            closestIndex = i;
           }
+          if (distance < 20) break;
+        }
+      }
+      console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
+      return { point: bestPoint, index: closestIndex };
+    }
+    function ensureMarkerInView(position) {
+      if (!map || !position || !navState.isFollowing) return;
+      const bounds = map.getBounds();
+      if (!bounds) {
+        console.warn('Map bounds unavailable, cannot check viewport');
+        return;
+      }
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const latSpan = ne.lat() - sw.lat();
+      const lngSpan = ne.lng() - sw.lng();
+      const edgeThresholdLat = latSpan * 0.2;
+      const edgeThresholdLng = lngSpan * 0.2;
+      const isNearEdge =
+        position.lat > ne.lat() - edgeThresholdLat ||
+        position.lat < sw.lat() + edgeThresholdLat ||
+        position.lng > ne.lng() - edgeThresholdLng ||
+        position.lng < sw.lng() + edgeThresholdLng;
+      if (isNearEdge) {
+        requestAnimationFrame(() => {
+          map.setCenter(position);
+          console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
+        });
+      }
+    }
+    function checkCameraProximity() {
+      if (!showTrafficCameras || !navState.userLocation) return;
+      const now = Date.now();
+      if (now - navState.lastCameraUpdate < CAMERA_UPDATE_THRESHOLD) {
+        console.log('Skipping camera proximity check due to throttle');
+        return;
+      }
+      navState.lastCameraUpdate = now;
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      for (const camera of cameraPositions) {
+        const cameraLatLng = new google.maps.LatLng(camera);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
+        const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
+          showCameraHud();
+          cameraAlertShown.add(cameraKey);
+          console.log('Traffic camera alert triggered:', { distance, camera });
+          break;
+        }
+      }
+      for (const alert of currentAlerts) {
+        if (alert.type !== 'Traffic Camera') continue;
+        const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
+        const alertKey = `mongo-${alert._id}`;
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(alertKey)) {
+          showCameraHud();
+          cameraAlertShown.add(alertKey);
+          console.log('MongoDB traffic camera alert triggered:', { distance, alertId: alert._id });
+          break;
+        }
+      }
+    }
+    function getLookaheadPoint(currentPos, heading, distance = 50) {
+      return google.maps.geometry.spherical.computeOffset(
+        new google.maps.LatLng(currentPos),
+        distance,
+        heading
+      );
+    }
+    async function updateServerLocation(position) {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, skipping server location update');
           return;
         }
-        const rawLatLng = new google.maps.LatLng(rawPos);
-        const targetLatLng = new google.maps.LatLng(targetPos);
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(rawLatLng, targetLatLng);
-        if (distance > SNAP_BUFFER) {
-          const path = [rawPos, targetPos];
-          if (offRoadPolyline) {
-            offRoadPolyline.setPath(path);
-          } else {
-            offRoadPolyline = new google.maps.Polyline({
-              path: path,
-              strokeColor: '#808080',
-              strokeOpacity: 0.6,
-              strokeWeight: 4,
-              zIndex: 4,
-              icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, scale: 3 }, offset: '0', repeat: '10px' }],
-              map: map
-            });
-          }
-          console.log('Off-road polyline updated:', { from: rawPos, to: targetPos, distance });
+        const response = await fetch('/api/location', {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token.trim()}`
+          },
+          body: JSON.stringify({
+            location: {
+              type: 'Point',
+              coordinates: [position.lng, position.lat]
+            }
+          })
+        });
+        if (!response.ok) {
+          console.error('Failed to update server location:', response.statusText);
         } else {
-          if (offRoadPolyline) {
-            offRoadPolyline.setMap(null);
-            offRoadPolyline = null;
-            console.log('Off-road polyline cleared: snapped to route');
-          }
+          console.log('Server location updated:', position);
         }
+      } catch (error) {
+        console.error('Error updating server location:', error);
       }
-      function findClosestRoutePoint(currentPos, path, heading, speed) {
-        if (!path || path.length < 2) return { point: currentPos, index: 0 };
-        const currentLatLng = new google.maps.LatLng(currentPos);
-        let bestPoint = currentPos;
-        let bestScore = -Infinity;
-        let closestIndex = 0;
-        const speedMph = speed ? speed * 2.23694 : 0;
-        const isHighway = navState.currentRoute && navState.currentRoute.routes[0].legs[0].steps.some(step => step.travel_mode === 'DRIVING' && step.distance.value > 1000);
-        for (let i = 0; i < path.length; i++) {
-          const point = path[i];
-          const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
-          if (distance <= SNAP_BUFFER) {
-            const nextPoint = i < path.length - 1 ? path[i + 1] : point;
-            const pointHeading = google.maps.geometry.spherical.computeHeading(point, nextPoint);
-            const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
-            const proximityScore = (SNAP_BUFFER - distance) / SNAP_BUFFER * 0.5;
-            const headingScore = (1 - headingDiff / 180) * 0.3;
-            const speedScore = speedMph > 20 && isHighway ? 0.1 : speedMph < 10 ? 0.05 : 0;
-            const contextScore = i < path.length - 1 ? 0.1 : 0.05;
-            const totalScore = proximityScore + headingScore + speedScore + contextScore;
-            if (totalScore > bestScore) {
-              bestScore = totalScore;
-              bestPoint = { lat: point.lat(), lng: point.lng() };
-              closestIndex = i;
-            }
-            if (distance < 20) break;
-          }
-        }
-        console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
-        return { point: bestPoint, index: closestIndex };
+    }
+    function smoothPosition(rawPos) {
+      positionHistory.push(rawPos);
+      if (positionHistory.length > POSITION_HISTORY_WINDOW) {
+        positionHistory.shift();
       }
-      function ensureMarkerInView(position) {
-        if (!map || !position || !navState.isFollowing) return;
-        const bounds = map.getBounds();
-        if (!bounds) {
-          console.warn('Map bounds unavailable, cannot check viewport');
-          return;
-        }
-        const ne = bounds.getNorthEast();
-        const sw = bounds.getSouthWest();
-        const latSpan = ne.lat() - sw.lat();
-        const lngSpan = ne.lng() - sw.lng();
-        const edgeThresholdLat = latSpan * 0.2;
-        const edgeThresholdLng = lngSpan * 0.2;
-        const isNearEdge =
-          position.lat > ne.lat() - edgeThresholdLat ||
-          position.lat < sw.lat() + edgeThresholdLat ||
-          position.lng > ne.lng() - edgeThresholdLng ||
-          position.lng < sw.lng() + edgeThresholdLng;
-        if (isNearEdge) {
-          requestAnimationFrame(() => {
-            map.setCenter(position);
-            console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
-          });
-        }
-      }
-      function checkCameraProximity() {
-        if (!showTrafficCameras || !navState.userLocation) return;
+      const avgLat = positionHistory.reduce((sum, p) => sum + p.lat, 0) / positionHistory.length;
+      const avgLng = positionHistory.reduce((sum, p) => sum + p.lng, 0) / positionHistory.length;
+      const smoothedPos = { lat: avgLat, lng: avgLng };
+      console.log('Position smoothed:', { raw: rawPos, smoothed: smoothedPos, historyLength: positionHistory.length });
+      return smoothedPos;
+    }
+    function onPositionUpdate(position, isSimulation = false) {
+      try {
+        const { latitude, longitude, speed = 0, heading = null } = position.coords;
+        console.log('Location update received:', { lat: latitude, lng: longitude, speed, gpsHeading: heading, isSimulation });
+        console.log('Navigation state:', { isNavigating: navState.isNavigating, isFollowing: navState.isFollowing });
         const now = Date.now();
-        if (now - navState.lastCameraUpdate < CAMERA_UPDATE_THRESHOLD) {
-          console.log('Skipping camera proximity check due to throttle');
+        if (now - lastLocationUpdate < LOCATION_UPDATE_THRESHOLD) {
+          console.log('Skipping location update due to throttle');
           return;
         }
-        navState.lastCameraUpdate = now;
-        const userLatLng = new google.maps.LatLng(navState.userLocation);
-        for (const camera of cameraPositions) {
-          const cameraLatLng = new google.maps.LatLng(camera);
-          const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
-          const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
-          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
-            showCameraHud();
-            cameraAlertShown.add(cameraKey);
-            console.log('Traffic camera alert triggered:', { distance, camera });
-            break;
-          }
+        lastLocationUpdate = now;
+        if (now - lastAlertFetchTime > ALERT_FETCH_INTERVAL && navState.isNavigating) {
+          fetchCurrentAlerts();
+          lastAlertFetchTime = now;
         }
-        for (const alert of currentAlerts) {
-          if (alert.type !== 'Traffic Camera') continue;
-          const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
-          const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
-          const alertKey = `mongo-${alert._id}`;
-          if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(alertKey)) {
-            showCameraHud();
-            cameraAlertShown.add(alertKey);
-            console.log('MongoDB traffic camera alert triggered:', { distance, alertId: alert._id });
-            break;
-          }
-        }
-      }
-      function getLookaheadPoint(currentPos, heading, distance = 50) {
-        return google.maps.geometry.spherical.computeOffset(
-          new google.maps.LatLng(currentPos),
-          distance,
-          heading
-        );
-      }
-      async function updateServerLocation(position) {
-        try {
-          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-          if (!token || !token.includes('.') || token === 'undefined') {
-            console.error('Invalid token, skipping server location update');
+        navState.previousUserLocation = navState.userLocation;
+        rawUserLocation = { lat: latitude, lng: longitude };
+        const smoothedRawPos = smoothPosition(rawUserLocation);
+        let pos = smoothedRawPos;
+        let snapped = navState.isInitialSnap;
+        let computedHeading = heading;
+        if (navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
+          if (navState.isNavigating && checkArrival(pos)) {
             return;
           }
-          const response = await fetch('/api/location', {
-            method: 'POST',
-            mode: 'cors',
-            credentials: 'include',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token.trim()}`
-            },
-            body: JSON.stringify({
-              location: {
-                type: 'Point',
-                coordinates: [position.lng, position.lat]
-              }
-            })
-          });
-          if (!response.ok) {
-            console.error('Failed to update server location:', response.statusText);
-          } else {
-            console.log('Server location updated:', position);
-          }
-        } catch (error) {
-          console.error('Error updating server location:', error);
-        }
-      }
-      function smoothPosition(rawPos) {
-        positionHistory.push(rawPos);
-        if (positionHistory.length > POSITION_HISTORY_WINDOW) {
-          positionHistory.shift();
-        }
-        const avgLat = positionHistory.reduce((sum, p) => sum + p.lat, 0) / positionHistory.length;
-        const avgLng = positionHistory.reduce((sum, p) => sum + p.lng, 0) / positionHistory.length;
-        const smoothedPos = { lat: avgLat, lng: avgLng };
-        console.log('Position smoothed:', { raw: rawPos, smoothed: smoothedPos, historyLength: positionHistory.length });
-        return smoothedPos;
-      }
-      function onPositionUpdate(position, isSimulation = false) {
-        try {
-          const { latitude, longitude, speed = 0, heading = null } = position.coords;
-          console.log('Location update received:', { lat: latitude, lng: longitude, speed, gpsHeading: heading, isSimulation });
-          console.log('Navigation state:', { isNavigating: navState.isNavigating, isFollowing: navState.isFollowing });
-          const now = Date.now();
-          if (now - lastLocationUpdate < LOCATION_UPDATE_THRESHOLD) {
-            console.log('Skipping location update due to throttle');
-            return;
-          }
-          lastLocationUpdate = now;
-          if (now - lastAlertFetchTime > ALERT_FETCH_INTERVAL && navState.isNavigating) {
-            fetchCurrentAlerts();
-            lastAlertFetchTime = now;
-          }
-          navState.previousUserLocation = navState.userLocation;
-          rawUserLocation = { lat: latitude, lng: longitude };
-          const smoothedRawPos = smoothPosition(rawUserLocation);
-          let pos = smoothedRawPos;
-          let snapped = navState.isInitialSnap;
-          let computedHeading = heading;
-          if (navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
-            if (navState.isNavigating && checkArrival(pos)) {
-              return;
+          const path = navState.currentRoute.routes[0].overview_path;
+          const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
+          const distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point));
+          if (distanceToRoute < SNAP_BUFFER) {
+            pos = point;
+            snapped = true;
+            console.log('Snapped to polyline:', { pos, distanceToRoute });
+            if (offRoadPolyline) {
+              offRoadPolyline.setMap(null);
+              offRoadPolyline = null;
+              console.log('Off-road polyline cleared: snapped to route');
             }
-            const path = navState.currentRoute.routes[0].overview_path;
-            const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
-            const distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point));
-            if (distanceToRoute < SNAP_BUFFER) {
-              pos = point;
-              snapped = true;
-              console.log('Snapped to polyline:', { pos, distanceToRoute });
-              if (offRoadPolyline) {
-                offRoadPolyline.setMap(null);
-                offRoadPolyline = null;
-                console.log('Off-road polyline cleared: snapped to route');
+          } else {
+            updateOffRoadPolyline(smoothedRawPos, point);
+          }
+          if (navState.previousUserLocation) {
+            const distance = google.maps.geometry.spherical.computeDistanceBetween(
+              new google.maps.LatLng(navState.previousUserLocation),
+              new google.maps.LatLng(pos)
+            );
+            if (distance > MAX_GPS_DISTANCE) {
+              const numPoints = Math.ceil(distance / 100);
+              for (let i = 1; i < numPoints; i++) {
+                const fraction = i / numPoints;
+                const interpolated = google.maps.geometry.spherical.interpolate(
+                  new google.maps.LatLng(navState.previousUserLocation),
+                  new google.maps.LatLng(pos),
+                  fraction
+                );
+                console.log('Interpolated point added:', { lat: interpolated.lat(), lng: interpolated.lng() });
+              }
+            }
+          }
+          if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && index < path.length - 1) {
+            computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[index + 1]);
+            console.log('Computed heading from polyline:', computedHeading);
+          } else if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && navState.previousUserLocation) {
+            computedHeading = google.maps.geometry.spherical.computeHeading(
+              new google.maps.LatLng(navState.previousUserLocation),
+              new google.maps.LatLng(pos)
+            );
+            console.log('Computed heading from previous position:', computedHeading);
+          }
+          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : speed <= STATIONARY_SPEED_THRESHOLD ? 'lastValid' : needsCalibration ? 'lastValid' : 'compass';
+          navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed, snapped);
+          console.log('Heading stabilized:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading, source, speed });
+          if (navState.isNavigating) {
+            try {
+              checkOffRoute(new google.maps.LatLng(pos));
+            } catch (error) {
+              console.error('checkOffRoute failed:', error);
+              showToast('Error checking route deviation. Continuing with raw location.');
+            }
+          }
+        } else {
+          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : 'lastValid';
+          navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
+        }
+        navState.userLocation = pos;
+        if (userMarker) {
+          requestAnimationFrame(() => {
+            userMarker.position = pos;
+            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+            userMarker.setMap(map);
+            console.log('Marker position updated:', { pos, heading: navState.currentHeading, orientation: navState.mapOrientation });
+          });
+        }
+        lastHeading = navState.currentHeading;
+        lastPosition = pos;
+        if (navState.isFollowing && navState.isNavigating) {
+          updateRouteAhead(navState.userLocation);
+          const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
+          navState.navigationZoom = zoom;
+          const targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+          const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 50);
+          requestAnimationFrame(() => {
+            isProgrammaticUpdate = true;
+            if (isMobile && typeof TWEEN !== 'undefined') {
+              new TWEEN.Tween(map.getCenter())
+                .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+                .start();
+              if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
+                const currentHeading = map.getHeading() || 0;
+                const delta = normalizeHeadingDelta(currentHeading, targetHeading);
+                isHeadingTweening = true;
+                new TWEEN.Tween({ heading: currentHeading })
+                  .to({ heading: currentHeading + delta }, 300)
+                  .easing(TWEEN.Easing.Quadratic.Out)
+                  .onUpdate(obj => map.setHeading(obj.heading))
+                  .onComplete(() => { isHeadingTweening = false; })
+                  .start();
               }
             } else {
-              updateOffRoadPolyline(smoothedRawPos, point);
+              map.panTo(lookaheadPoint);
+              if (!isHeadingTweening) map.setHeading(targetHeading);
             }
-            if (navState.previousUserLocation) {
-              const distance = google.maps.geometry.spherical.computeDistanceBetween(
-                new google.maps.LatLng(navState.previousUserLocation),
-                new google.maps.LatLng(pos)
-              );
-              if (distance > MAX_GPS_DISTANCE) {
-                const numPoints = Math.ceil(distance / 100);
-                for (let i = 1; i < numPoints; i++) {
-                  const fraction = i / numPoints;
-                  const interpolated = google.maps.geometry.spherical.interpolate(
-                    new google.maps.LatLng(navState.previousUserLocation),
-                    new google.maps.LatLng(pos),
-                    fraction
-                  );
-                  console.log('Interpolated point added:', { lat: interpolated.lat(), lng: interpolated.lng() });
-                }
-              }
-            }
-            if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && index < path.length - 1) {
-              computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[index + 1]);
-              console.log('Computed heading from polyline:', computedHeading);
-            } else if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && navState.previousUserLocation) {
-              computedHeading = google.maps.geometry.spherical.computeHeading(
-                new google.maps.LatLng(navState.previousUserLocation),
-                new google.maps.LatLng(pos)
-              );
-              console.log('Computed heading from previous position:', computedHeading);
-            }
-            const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : speed <= STATIONARY_SPEED_THRESHOLD ? 'lastValid' : needsCalibration ? 'lastValid' : 'compass';
-            navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
-            console.log('Heading stabilized:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading, source, speed });
-            if (navState.isNavigating) {
-              try {
-                checkOffRoute(new google.maps.LatLng(pos));
-              } catch (error) {
-                console.error('checkOffRoute failed:', error);
-                showToast('Error checking route deviation. Continuing with raw location.');
-              }
-            }
-          } else {
-            const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : 'lastValid';
-            navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
-          }
-          navState.userLocation = pos;
-          if (userMarker) {
-            requestAnimationFrame(() => {
-              userMarker.position = pos;
-              userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-              userMarker.setMap(map);
-              console.log('Marker position updated:', { pos, heading: navState.currentHeading, orientation: navState.mapOrientation });
-            });
-          }
-          lastHeading = navState.currentHeading;
-          lastPosition = pos;
-          if (navState.isFollowing && navState.isNavigating) {
-            updateRouteAhead(navState.userLocation);
-            const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
-            navState.navigationZoom = zoom;
-            const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-            const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
-            requestAnimationFrame(() => {
-              isProgrammaticUpdate = true;
-              if (isMobile && typeof TWEEN !== 'undefined') {
-                new TWEEN.Tween(map.getCenter())
-                  .to(lookaheadPoint, 300)
-                  .easing(TWEEN.Easing.Quadratic.Out)
-                  .onUpdate(() => map.setCenter(lookaheadPoint))
-                  .start();
-              } else {
-                map.panTo(lookaheadPoint);
-              }
-              map.setZoom(zoom);
-              map.setHeading(heading);
-              map.setTilt(tilt);
-              console.log('Camera view updated:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
-              userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-              ensureMarkerInView(navState.userLocation);
-              setTimeout(() => { isProgrammaticUpdate = false; }, 100);
-            });
-          } else {
-            console.log('Camera update skipped:', { isFollowing: navState.isFollowing, isNavigating: navState.isNavigating });
-          }
-          navState.lastKnownPosition = pos;
-          if (!isSimulation && socket && socket.connected) {
-            socket.emit('locationUpdate', { location: navState.userLocation });
-            updateServerLocation(navState.userLocation);
-            console.log('Emitted locationUpdate and sent to server:', navState.userLocation);
-          }
-          updateHUD(navState.currentRoute, navState.userLocation);
-          updateCompass();
-          if (showTrafficCameras) {
-            checkCameraProximity();
-          }
-        } catch (error) {
-          console.error('Error in position update:', error);
-          showToast('Error updating location. Please ensure GPS is enabled.');
+            map.setZoom(zoom);
+            map.setTilt(tilt);
+            console.log('Camera view updated:', { center: lookaheadPoint.toJSON(), zoom, heading: targetHeading, tilt, orientation: navState.mapOrientation });
+            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+            ensureMarkerInView(navState.userLocation);
+            setTimeout(() => { isProgrammaticUpdate = false; }, 100);
+          });
+        } else {
+          console.log('Camera update skipped:', { isFollowing: navState.isFollowing, isNavigating: navState.isNavigating });
         }
+        navState.lastKnownPosition = pos;
+        if (!isSimulation && socket && socket.connected) {
+          socket.emit('locationUpdate', { location: navState.userLocation });
+          updateServerLocation(navState.userLocation);
+          console.log('Emitted locationUpdate and sent to server:', navState.userLocation);
+        }
+        updateHUD(navState.currentRoute, navState.userLocation);
+        updateCompass();
+        if (showTrafficCameras) {
+          checkCameraProximity();
+        }
+      } catch (error) {
+        console.error('Error in position update:', error);
+        showToast('Error updating location. Please ensure GPS is enabled.');
       }
-      function lockNavigation() {
-        navState.isFollowing = true;
-        localStorage.setItem('isFollowing', navState.isFollowing);
-        sessionStorage.setItem('isFollowing', navState.isFollowing);
-        map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-        restoreNavigationView();
-        console.log('Navigation locked');
-      }
-      function unlockNavigation() {
-        navState.isFollowing = false;
-        localStorage.setItem('isFollowing', navState.isFollowing);
-        sessionStorage.setItem('isFollowing', navState.isFollowing);
-        map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-        console.log('Navigation unlocked');
-      }
+    }
+    function lockNavigation() {
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
+      sessionStorage.setItem('isFollowing', navState.isFollowing);
+      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+      restoreNavigationView();
+      console.log('Navigation locked');
+    }
+    function unlockNavigation() {
+      navState.isFollowing = false;
+      localStorage.setItem('isFollowing', navState.isFollowing);
+      sessionStorage.setItem('isFollowing', navState.isFollowing);
+      map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+      console.log('Navigation unlocked');
+    }
       function startGPS() {
         if (!navigator.geolocation) {
           showToast('Geolocation is not supported by this browser.');
@@ -2749,12 +2772,33 @@
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
           const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
           requestAnimationFrame(() => {
-            map.panTo(lookaheadPoint);
+            isProgrammaticUpdate = true;
+            if (isMobile && typeof TWEEN !== 'undefined') {
+              new TWEEN.Tween(map.getCenter())
+                .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+                .start();
+              if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
+                const currentHeading = map.getHeading() || 0;
+                const delta = normalizeHeadingDelta(currentHeading, heading);
+                isHeadingTweening = true;
+                new TWEEN.Tween({ heading: currentHeading })
+                  .to({ heading: currentHeading + delta }, 300)
+                  .easing(TWEEN.Easing.Quadratic.Out)
+                  .onUpdate(obj => map.setHeading(obj.heading))
+                  .onComplete(() => { isHeadingTweening = false; })
+                  .start();
+              }
+            } else {
+              map.panTo(lookaheadPoint);
+              if (!isHeadingTweening) map.setHeading(heading);
+            }
             map.setZoom(zoom);
-            map.setHeading(heading);
             map.setTilt(tilt);
             userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
             console.log('Initial navigation view set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
+            setTimeout(() => { isProgrammaticUpdate = false; }, 100);
           });
           onPositionUpdate({
             coords: {
@@ -2764,16 +2808,6 @@
               heading: navState.currentHeading
             }
           });
-        } else {
-          console.error('No route available to start navigation');
-          showToast('No route available. Please select a destination again.');
-          navState.isNavigating = false;
-          navState.isFollowing = false;
-          localStorage.setItem('isFollowing', navState.isFollowing);
-          sessionStorage.setItem('isFollowing', navState.isFollowing);
-          document.getElementById('search-container').classList.remove('hidden');
-          document.getElementById('hud-container').style.display = 'none';
-          document.getElementById('bottom-hud-container').style.display = 'none';
         }
       }
       function handleGeolocationError(error, isInitial = false) {
@@ -2963,12 +2997,33 @@
                 const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
                 const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
                 requestAnimationFrame(() => {
-                  map.setCenter(lookaheadPoint);
+                  isProgrammaticUpdate = true;
+                  if (isMobile && typeof TWEEN !== 'undefined') {
+                    new TWEEN.Tween(map.getCenter())
+                      .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
+                      .easing(TWEEN.Easing.Quadratic.Out)
+                      .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+                      .start();
+                    if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
+                      const currentHeading = map.getHeading() || 0;
+                      const delta = normalizeHeadingDelta(currentHeading, heading);
+                      isHeadingTweening = true;
+                      new TWEEN.Tween({ heading: currentHeading })
+                        .to({ heading: currentHeading + delta }, 300)
+                        .easing(TWEEN.Easing.Quadratic.Out)
+                        .onUpdate(obj => map.setHeading(obj.heading))
+                        .onComplete(() => { isHeadingTweening = false; })
+                        .start();
+                    }
+                  } else {
+                    map.panTo(lookaheadPoint);
+                    if (!isHeadingTweening) map.setHeading(heading);
+                  }
                   map.setZoom(zoom);
-                  map.setHeading(heading);
                   map.setTilt(tilt);
                   userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
                   console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
+                  setTimeout(() => { isProgrammaticUpdate = false; }, 100);
                 });
               }
               console.log('Route calculated:', {
@@ -3455,18 +3510,28 @@
           requestAnimationFrame(() => {
             isProgrammaticUpdate = true;
             if (isMobile && typeof TWEEN !== 'undefined') {
-                new TWEEN.Tween(map.getCenter())
-                  .to(lookaheadPoint, 300)
+              new TWEEN.Tween(map.getCenter())
+                .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+                .start();
+              if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
+                const currentHeading = map.getHeading() || 0;
+                const delta = normalizeHeadingDelta(currentHeading, heading);
+                isHeadingTweening = true;
+                new TWEEN.Tween({ heading: currentHeading })
+                  .to({ heading: currentHeading + delta }, 300)
                   .easing(TWEEN.Easing.Quadratic.Out)
-                  .onUpdate(() => map.setCenter(lookaheadPoint))
+                  .onUpdate(obj => map.setHeading(obj.heading))
+                  .onComplete(() => { isHeadingTweening = false; })
                   .start();
-              } else {
-                map.panTo(lookaheadPoint);
               }
+            } else {
+              map.panTo(lookaheadPoint);
+              if (!isHeadingTweening) map.setHeading(heading);
+            }
             map.setZoom(zoom);
-            map.setHeading(heading);
             map.setTilt(tilt);
-            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
             console.log('Navigation view restored:', {
               center: lookaheadPoint.toJSON(),
               heading,
