@@ -472,6 +472,14 @@
           </select>
         </div>
         <div class="settings-option">
+          <label for="map-skin">Map Skin</label>
+          <select id="map-skin">
+            <option value="default">Default</option>
+            <option value="dark">Dark</option>
+            <option value="green">Green</option>
+          </select>
+        </div>
+        <div class="settings-option">
           <label for="map-orientation">Map Orientation</label>
           <select id="map-orientation">
             <option value="heading-up">Heading-Up</option>
@@ -588,6 +596,38 @@
     const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
     const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
     const mapId = '2666b5bd496d9c6026f43f82';
+    const mapSkins = {
+      default: [],
+      dark: [
+        {elementType: 'geometry', stylers: [{color: '#242f3e'}]},
+        {elementType: 'labels.text.stroke', stylers: [{color: '#242f3e'}]},
+        {elementType: 'labels.text.fill', stylers: [{color: '#746855'}]},
+        {featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{color: '#d59563'}]},
+        {featureType: 'poi', elementType: 'labels.text.fill', stylers: [{color: '#d59563'}]},
+        {featureType: 'poi.park', elementType: 'geometry', stylers: [{color: '#263c3f'}]},
+        {featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{color: '#6b9a76'}]},
+        {featureType: 'road', elementType: 'geometry', stylers: [{color: '#38414e'}]},
+        {featureType: 'road', elementType: 'geometry.stroke', stylers: [{color: '#212a37'}]},
+        {featureType: 'road', elementType: 'labels.text.fill', stylers: [{color: '#9ca5b3'}]},
+        {featureType: 'road.highway', elementType: 'geometry', stylers: [{color: '#746855'}]},
+        {featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{color: '#1f2835'}]},
+        {featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{color: '#f3d19c'}]},
+        {featureType: 'transit', elementType: 'geometry', stylers: [{color: '#2f3948'}]},
+        {featureType: 'transit.station', elementType: 'labels.text.fill', stylers: [{color: '#d59563'}]},
+        {featureType: 'water', elementType: 'geometry', stylers: [{color: '#17263c'}]},
+        {featureType: 'water', elementType: 'labels.text.fill', stylers: [{color: '#515c6d'}]},
+        {featureType: 'water', elementType: 'labels.text.stroke', stylers: [{color: '#17263c'}]}
+      ],
+      green: [
+        {featureType: 'all', elementType: 'all', stylers: [{saturation: 20}, {lightness: 10}]},
+        {featureType: 'poi.park', elementType: 'geometry', stylers: [{color: '#4a8a4a'}, {lightness: 0}]},
+        {featureType: 'landscape', elementType: 'geometry', stylers: [{color: '#8dc869'}, {lightness: 10}]},
+        {featureType: 'road', elementType: 'geometry', stylers: [{lightness: 10}, {color: '#a3c6a3'}]},
+        {featureType: 'road.highway', elementType: 'geometry', stylers: [{color: '#90c690'}]},
+        {featureType: 'water', elementType: 'geometry', stylers: [{color: '#6bb6ff'}, {lightness: 10}]},
+        {featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{color: '#4a8a4a'}]}
+      ]
+    };
     let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline, offRoadPolyline;
     let currentAlerts = [];
     let cameraCheckInterval = null;
@@ -602,6 +642,7 @@
     let highContrastMode = localStorage.getItem('highContrastMode') === 'true';
     let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false';
     let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up';
+    let mapSkin = localStorage.getItem('mapSkin') || 'default';
     let isInitialized = false;
     let toastTimeout = null;
     let lastHeading = 0;
@@ -1008,6 +1049,7 @@
           zoomControl: false,
           disableDoubleClickZoom: true
         });
+        map.setOptions({ styles: mapSkins[mapSkin] });
         console.log('Map initialized:', { center: navState.userLocation, zoom: navState.navigationZoom, mapId });
         map.setMapTypeId(navState.mapType);
         trafficLayer = new google.maps.TrafficLayer({ map: navState.showTraffic ? map : null });
@@ -1153,6 +1195,7 @@
         document.getElementById('main-route-color').value = navState.mainRouteColor;
         document.getElementById('alt-route-color').value = navState.altRouteColor;
         document.getElementById('map-type').value = navState.mapType;
+        document.getElementById('map-skin').value = mapSkin;
         document.getElementById('map-orientation').value = navState.mapOrientation;
         document.getElementById('auto-recenter-toggle').checked = navState.isFollowing;
         document.getElementById('traffic-camera-toggle').checked = showTrafficCameras;
@@ -1352,6 +1395,15 @@
         } else {
           await unsubscribeFromPush();
         }
+      });
+      document.getElementById('map-skin').addEventListener('change', (e) => {
+        mapSkin = e.target.value;
+        localStorage.setItem('mapSkin', mapSkin);
+        sessionStorage.setItem('mapSkin', mapSkin);
+        if (map) {
+          map.setOptions({ styles: mapSkins[mapSkin] });
+        }
+        console.log('Map skin changed to:', mapSkin);
       });
       document.querySelectorAll('.report-button').forEach(button => {
         button.addEventListener('click', async () => {
