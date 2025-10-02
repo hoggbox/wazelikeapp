@@ -1049,10 +1049,7 @@
           zoomControl: false,
           disableDoubleClickZoom: true
         });
-        map.setOptions({ 
-          styles: mapSkin === 'default' ? [] : mapSkins[mapSkin],
-          mapId: mapSkin === 'default' ? mapId : null
-        });
+        map.setOptions({ styles: mapSkins[mapSkin] });
         console.log('Map initialized:', { center: navState.userLocation, zoom: navState.navigationZoom, mapId });
         map.setMapTypeId(navState.mapType);
         trafficLayer = new google.maps.TrafficLayer({ map: navState.showTraffic ? map : null });
@@ -1404,13 +1401,7 @@
         localStorage.setItem('mapSkin', mapSkin);
         sessionStorage.setItem('mapSkin', mapSkin);
         if (map) {
-          if (mapSkin === 'default') {
-            // For default, use the map ID
-            map.setOptions({ mapId: mapId, styles: [] });
-          } else {
-            // For custom skins, remove mapId and apply styles
-            map.setOptions({ mapId: null, styles: mapSkins[mapSkin] });
-          }
+          map.setOptions({ styles: mapSkins[mapSkin] });
         }
         console.log('Map skin changed to:', mapSkin);
       });
