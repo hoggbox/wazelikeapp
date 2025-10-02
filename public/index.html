@@ -75,7 +75,7 @@
       position: fixed; top: 50%; right: 2vw; transform: translateY(-50%); display: flex; flex-direction: column;
       gap: 1.2vh; padding: 1.5vmin; background: rgba(0, 0, 0, 0.3); border-radius: 0.5rem; z-index: 1001; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.3);
     }
-    #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+    #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button, #admin-button {
       width: 5vw; height: 5vw; max-width: 40px; max-height: 40px; border: 0.1rem solid #fff; border-radius: 50%;
       box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: center; cursor: pointer;
     }
@@ -100,34 +100,37 @@
     #leaderboard-button { background: #FFC107; }
     #leaderboard-button::before { content: '\f091'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
     #leaderboard-button:hover { background: #FFA000; }
+    #admin-button { background: #9C27B0; display: none; }
+    #admin-button::before { content: '\f085'; font-family: 'Font Awesome 6 Free'; font-weight: 900; color: #fff; font-size: 1.2rem; }
+    #admin-button:hover { background: #7B1FA2; }
     .report-container {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 1000;
     }
-    #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+    #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container, #admin-hud-container {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translateY(100%); width: 80vw;
       max-width: 300px; background: rgba(0, 0, 0, 0.7); border-radius: 0.5rem; padding: 1vmin; pointer-events: auto;
       display: none; flex-direction: column; transition: transform 0.3s ease; transform-origin: center; visibility: visible;
       overflow-y: auto; max-height: 80vh; color: white;
     }
-    #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active, #arrival-hud-container.active {
+    #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active, #arrival-hud-container.active, #admin-hud-container.active {
       display: flex; transform: translate(-50%, -50%); visibility: visible;
     }
-    #report-box::before, #reroute-hud-container::before, #settings-hud-container::before, #alerts-hud-container::before, #camera-hud-container::before, #leaderboard-hud-container::before, #arrival-hud-container::before {
+    #report-box::before, #reroute-hud-container::before, #settings-hud-container::before, #alerts-hud-container::before, #camera-hud-container::before, #leaderboard-hud-container::before, #arrival-hud-container::before, #admin-hud-container::before {
       content: ''; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0, 0, 0, 0.3);
       z-index: -1; display: none;
     }
-    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container.active::before, #arrival-hud-container.active::before {
+    #report-box.active::before, #reroute-hud-container.active::before, #settings-hud-container.active::before, #alerts-hud-container.active::before, #camera-hud-container.active::before, #leaderboard-hud-container.active::before, #arrival-hud-container.active::before, #admin-hud-container.active::before {
       display: block;
     }
-    #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+    #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header, #admin-hud-container header {
       width: 100%; padding: 1vmin 0; position: relative; margin-bottom: 1vmin;
     }
-    #report-close, #reroute-close, #settings-close, #alerts-close, #camera-close, #leaderboard-close, #arrival-close {
+    #report-close, #reroute-close, #settings-close, #alerts-close, #camera-close, #leaderboard-close, #arrival-close, #admin-close {
       position: absolute; top: 0.5vmin; right: 0.5vmin; background: #d32f2f; color: white; border: none;
       padding: 0.5vmin 1vmin; border-radius: 0.4rem; cursor: pointer; font-size: clamp(12px, 2.5vmin, 16px);
       font-weight: bold; z-index: 1;
     }
-    #report-close:hover, #reroute-close:hover, #settings-close:hover, #alerts-close:hover, #camera-close:hover, #leaderboard-close:hover, #arrival-close:hover {
+    #report-close:hover, #reroute-close:hover, #settings-close:hover, #alerts-close:hover, #camera-close:hover, #leaderboard-close:hover, #arrival-close:hover, #admin-close:hover {
       background: #b71c1c;
     }
     .report-options {
@@ -266,17 +269,17 @@
     }
     @media (max-width: 414px) {
       #button-container { right: 3vw; gap: 1.5vh; padding: 1.5vmin; }
-      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button, #admin-button {
         width: 8vw; height: 8vw; max-width: 32px; max-height: 32px;
       }
       #compass { width: 32px; height: 32px; top: 12vh; right: 3vw; }
-      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before, #admin-button::before {
         font-size: 1rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container, #admin-hud-container {
         width: 90vw; max-width: none; padding: 1.5vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header, #admin-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
       }
       .report-options { gap: 1.5vmin; padding-top: 2.5vmin; }
@@ -290,17 +293,17 @@
     }
     @media (min-width: 415px) and (max-width: 768px) {
       #button-container { right: 2.5vw; gap: 1.2vh; padding: 1.5vmin; }
-      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button, #admin-button {
         width: 6vw; height: 6vw; max-width: 36px; max-height: 36px;
       }
       #compass { width: 36px; height: 36px; top: 11vh; right: 2.5vw; }
-      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before, #admin-button::before {
         font-size: 1.1rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container, #admin-hud-container {
         width: 80vw; max-width: 320px; padding: 1.2vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header, #admin-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
       }
       .report-options { gap: 1.2vmin; padding-top: 2vmin; }
@@ -309,17 +312,17 @@
     }
     @media (min-width: 769px) {
       #button-container { right: 2vw; gap: 1vh; padding: 1.5vmin; }
-      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button {
+      #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button, #admin-button {
         width: 5vw; height: 5vw; max-width: 40px; max-height: 40px;
       }
       #compass { width: 40px; height: 40px; top: 10vh; right: 2vw; }
-      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before {
+      #hazard-button::before, #recenter-button::before, #settings-button::before, #current-alerts-button::before, #voice-button::before, #share-button::before, #leaderboard-button::before, #admin-button::before {
         font-size: 1.2rem;
       }
-      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container {
+      #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container, #admin-hud-container {
         width: 30vw; max-width: 300px; padding: 1vmin;
       }
-      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header {
+      #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header, #admin-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
       }
       .report-options { gap: 1vmin; padding-top: 2vmin; }
@@ -351,6 +354,12 @@
     #auth-switch { margin-top: 1rem; font-size: 0.9rem; }
     #auth-switch a { color: #4CAF50; text-decoration: none; }
     #auth-switch a:hover { text-decoration: underline; }
+    #admin-content { flex: 1; padding: 1vmin; overflow-y: auto; }
+    #user-search { padding: 0.5rem; margin-bottom: 1vmin; width: 100%; }
+    #search-users-btn { background: #4CAF50; color: white; border: none; padding: 0.5rem; cursor: pointer; }
+    #users-list table { width: 100%; border-collapse: collapse; color: white; }
+    #users-list th, #users-list td { border: 1px solid rgba(255,255,255,0.3); padding: 0.5vmin; text-align: left; }
+    #users-list button { margin-right: 0.5vmin; padding: 0.3vmin 0.6vmin; font-size: clamp(8px, 1.5vmin, 12px); cursor: pointer; }
   </style>
 </head>
 <body>
@@ -381,6 +390,7 @@
     <div id="settings-button"></div>
     <div id="current-alerts-button"></div>
     <div id="leaderboard-button"></div>
+    <div id="admin-button"></div>
   </div>
   <div class="report-container">
     <div id="report-box">
@@ -552,6 +562,17 @@
     </header>
     <div id="leaderboard-content" class="leaderboard-tab-content"></div>
   </div>
+  <div id="admin-hud-container">
+    <header>
+      <button id="admin-close">X</button>
+    </header>
+    <div id="admin-content">
+      <input id="user-search" type="text" placeholder="Search users">
+      <button id="search-users-btn">Search</button>
+      <div id="users-list"></div>
+      <button id="show-nearby-users">Show All Nearby Users</button>
+    </div>
+  </div>
   <div id="toast"></div>
   <div id="auth-container" style="display: none;">
     <h2 id="auth-title">Login</h2>
@@ -597,6 +618,9 @@
     let needsCalibration = false;
     let lastCameraUpdate = 0;
     let isHeadingTweening = false;
+    let isAdmin = localStorage.getItem('isAdmin') === 'true';
+    let trackingUsers = [];
+    let trackedMarkers = new Map();
     const markers = new Map();
     const MAX_RETRIES = 5;
     const REROUTE_CHECK_INTERVAL = 2000;
@@ -779,7 +803,9 @@
           sessionStorage.setItem('token', data.token);
           localStorage.setItem('userId', data.user.id);
           sessionStorage.setItem('userId', data.user.id);
-          console.log('Token and userId saved:', { token: data.token.substring(0, 20) + '...', userId: data.user.id });
+          isAdmin = data.user.email === 'imhoggbox@gmail.com';
+          localStorage.setItem('isAdmin', isAdmin);
+          console.log('Token and userId saved:', { token: data.token.substring(0, 20) + '...', userId: data.user.id, isAdmin });
           document.getElementById('auth-container').style.display = 'none';
           showToast(isRegister ? 'Registration successful!' : 'Login successful!');
           console.log(isRegister ? 'User registered' : 'User logged in', { userId: data.user.id });
@@ -808,10 +834,11 @@
       const cameraHudContainer = document.getElementById('camera-hud-container');
       const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
       const arrivalHudContainer = document.getElementById('arrival-hud-container');
+      const adminHudContainer = document.getElementById('admin-hud-container');
       const currentWidth = window.innerWidth;
       const currentHeight = window.innerHeight;
       const maxHeight = Math.min(currentHeight * 0.5, 400);
-      const hudElements = [reportBox, rerouteHudContainer, settingsHudContainer, alertsHudContainer, cameraHudContainer, leaderboardHudContainer, arrivalHudContainer];
+      const hudElements = [reportBox, rerouteHudContainer, settingsHudContainer, alertsHudContainer, cameraHudContainer, leaderboardHudContainer, arrivalHudContainer, adminHudContainer];
       hudElements.forEach(element => {
         element.style.maxHeight = `${maxHeight}px`;
         element.style.width = currentWidth <= 414 ? '90vw' : currentWidth <= 768 ? '80vw' : '30vw';
@@ -1143,6 +1170,9 @@
         updateCompass();
         checkURLForAlert();
         setupPageVisibility();
+        if (isAdmin) {
+          document.getElementById('admin-button').style.display = 'block';
+        }
         console.log('Map initialization complete');
       } catch (error) {
         console.error('Map initialization error:', error);
@@ -1298,6 +1328,28 @@
           console.log('Navigation view re-locked after closing leaderboard HUD');
         }
       });
+      document.getElementById('admin-button').addEventListener('click', () => {
+        closeAllHuds();
+        const adminHudContainer = document.getElementById('admin-hud-container');
+        adminHudContainer.classList.add('active');
+        fetchUsers('');
+        console.log('Admin button clicked, admin HUD opened');
+      });
+      document.getElementById('admin-close').addEventListener('click', () => {
+        const adminHudContainer = document.getElementById('admin-hud-container');
+        adminHudContainer.classList.remove('active');
+        clearTrackedMarkers();
+        console.log('Admin HUD closed');
+        if (navState.isNavigating && navState.isFollowing) {
+          lockNavigation();
+          console.log('Navigation view re-locked after closing admin HUD');
+        }
+      });
+      document.getElementById('search-users-btn').addEventListener('click', () => {
+        const query = document.getElementById('user-search').value;
+        fetchUsers(query);
+      });
+      document.getElementById('show-nearby-users').addEventListener('click', showNearbyUsers);
       document.getElementById('voice-button').addEventListener('click', startVoiceRecognition);
       document.getElementById('share-button').addEventListener('click', shareRoute);
       document.getElementById('recalibrate-compass-button').addEventListener('click', () => {
@@ -1551,10 +1603,8 @@
       });
       document.getElementById('logout-button').addEventListener('click', () => {
         console.log('Logout button clicked, clearing localStorage and sessionStorage');
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('userId');
+        localStorage.clear();
+        sessionStorage.clear();
         if (socket) socket.disconnect();
         document.getElementById('settings-hud-container').classList.remove('active');
         document.getElementById('auth-container').style.display = 'flex';
@@ -1610,6 +1660,12 @@
         if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         const data = await response.json();
         console.log('Profile data received:', data);
+        isAdmin = data.email === 'imhoggbox@gmail.com';
+        localStorage.setItem('isAdmin', isAdmin);
+        sessionStorage.setItem('isAdmin', isAdmin);
+        if (isAdmin) {
+          document.getElementById('admin-button').style.display = 'block';
+        }
         document.getElementById('points-display').textContent = `Points: ${data.points || 0}`;
         document.getElementById('achievements-display').textContent = `Achievements: ${Array.isArray(data.achievements) ? data.achievements.join(', ') : 'None'}`;
       } catch (err) {
@@ -2292,6 +2348,7 @@
       document.getElementById('camera-hud-container').classList.remove('active');
       document.getElementById('arrival-hud-container').classList.remove('active');
       document.getElementById('leaderboard-hud-container').classList.remove('active');
+      document.getElementById('admin-hud-container').classList.remove('active');
       if (navState.tempMarker) {
         navState.tempMarker.setMap(null);
         navState.tempMarker = null;
@@ -3773,6 +3830,15 @@
       cameraContent.className = 'traffic-cam-marker';
       return cameraContent;
     }
+    function createUserMarkerContent() {
+      const userContent = document.createElement('div');
+      userContent.style.width = '15px';
+      userContent.style.height = '15px';
+      userContent.style.backgroundColor = 'purple';
+      userContent.style.borderRadius = '50%';
+      userContent.style.border = '2px solid white';
+      return userContent;
+    }
     function showToast(message) {
       const toast = document.getElementById('toast');
       if (toastTimeout) {
@@ -4053,7 +4119,22 @@
         }
       });
       socket.on('userLocation', (data) => {
-        console.log('Received friend location:', data);
+        console.log('Received user location:', data);
+        if (trackingUsers.includes(data.userId)) {
+          let marker = trackedMarkers.get(data.userId);
+          if (!marker) {
+            marker = new google.maps.marker.AdvancedMarkerElement({
+              map,
+              position: data.location,
+              content: createUserMarkerContent(),
+              title: 'Tracked User'
+            });
+            trackedMarkers.set(data.userId, marker);
+          } else {
+            marker.position = data.location;
+          }
+          console.log('Updated tracked user marker:', { userId: data.userId, position: data.location });
+        }
       });
       socket.on('pointsUpdate', (data) => {
         if (data.userId === (localStorage.getItem('userId') || sessionStorage.getItem('userId'))) {
@@ -4130,6 +4211,189 @@
       }
       requestPushPermission();
     });
+    async function fetchUsers(query = '') {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const response = await fetch(`/api/users?search=${encodeURIComponent(query)}`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (!response.ok) throw new Error('Failed to fetch users');
+        const users = await response.json();
+        const list = document.getElementById('users-list');
+        list.innerHTML = '<table><thead><tr><th>Username</th><th>Email</th><th>Admin</th><th>Banned</th><th>Actions</th></tr></thead><tbody>';
+        users.forEach(user => {
+          list.innerHTML += `
+            <tr>
+              <td>${user.username}</td>
+              <td>${user.email}</td>
+              <td>${user.isAdmin ? 'Yes' : 'No'}</td>
+              <td>${user.banned ? 'Yes' : 'No'}</td>
+              <td>
+                <button onclick="deleteUser('${user._id}')">Delete</button>
+                <button onclick="banUser('${user._id}')">Ban</button>
+                <button onclick="ipBanUser('${user._id}')">IP Ban</button>
+                <button onclick="toggleAdmin('${user._id}', ${user.isAdmin})">${user.isAdmin ? 'Demote' : 'Promote'}</button>
+                <button onclick="viewLocation('${user._id}')">View Location</button>
+                <button onclick="viewAlerts('${user._id}')">View Alerts</button>
+                <button onclick="trackLive('${user._id}')">Track Live</button>
+                <button onclick="stopTrack('${user._id}')">Stop Track</button>
+              </td>
+            </tr>
+          `;
+        });
+        list.innerHTML += '</tbody></table>';
+        console.log('Fetched users:', users.length);
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        showToast('Failed to load users.');
+      }
+    }
+    async function deleteUser(id) {
+      if (confirm('Delete user?')) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const response = await fetch(`/api/users/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast('User deleted');
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to delete user');
+        }
+      }
+    }
+    async function banUser(id) {
+      if (confirm('Ban user?')) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const response = await fetch(`/api/users/${id}/ban`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast('User banned');
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to ban user');
+        }
+      }
+    }
+    async function ipBanUser(id) {
+      if (confirm('IP Ban user?')) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const response = await fetch(`/api/users/${id}/ipban`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast('User IP banned');
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to IP ban user');
+        }
+      }
+    }
+    async function toggleAdmin(id, isCurrentAdmin) {
+      if (confirm(`${isCurrentAdmin ? 'Demote' : 'Promote'} user to admin?`)) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const endpoint = isCurrentAdmin ? `/api/users/${id}/demote` : `/api/users/${id}/promote`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast(`User ${isCurrentAdmin ? 'demoted' : 'promoted'}`);
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to toggle admin status');
+        }
+      }
+    }
+    async function viewLocation(id) {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const response = await fetch(`/api/users/${id}/location`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const { location } = await response.json();
+          if (location) {
+            const pos = { lat: location.coordinates[1], lng: location.coordinates[0] };
+            map.setCenter(pos);
+            map.setZoom(15);
+            showToast('Centered on user location');
+          } else {
+            showToast('User location not available');
+          }
+        }
+      } catch (error) {
+        showToast('Failed to view user location');
+      }
+    }
+    async function viewAlerts(id) {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const response = await fetch(`/api/alerts/user/${id}?since=${since}`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const alerts = await response.json();
+          const list = document.getElementById('users-list');
+          list.innerHTML += '<h4>User Alerts This Week</h4><ul>';
+          alerts.forEach(alert => {
+            list.innerHTML += `<li>${alert.type} at ${alert.address || 'unknown'} (${new Date(alert.timestamp).toLocaleString()})</li>`;
+          });
+          list.innerHTML += '</ul>';
+          showToast('User alerts loaded');
+        }
+      } catch (error) {
+        showToast('Failed to view user alerts');
+      }
+    }
+    function trackLive(id) {
+      if (!trackingUsers.includes(id)) {
+        trackingUsers.push(id);
+        showToast('Tracking user live');
+      }
+    }
+    function stopTrack(id) {
+      trackingUsers = trackingUsers.filter(u => u !== id);
+      const marker = trackedMarkers.get(id);
+      if (marker) {
+        marker.setMap(null);
+        trackedMarkers.delete(id);
+      }
+      showToast('Stopped tracking user');
+    }
+    async function showNearbyUsers() {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const response = await fetch(`/api/users/nearby?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&radius=48280`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const users = await response.json();
+          users.forEach(user => trackLive(user._id));
+          showToast('Showing nearby users on map');
+        }
+      } catch (error) {
+        showToast('Failed to show nearby users');
+      }
+    }
+    function clearTrackedMarkers() {
+      trackedMarkers.forEach(marker => marker.setMap(null));
+      trackedMarkers.clear();
+      trackingUsers = [];
+    }
   </script>
 </body>
 </html>
