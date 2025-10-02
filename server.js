@@ -166,6 +166,12 @@ app.get('/', (req, res) => {
   logger.info('Served index.html', { ip: req.ip });
 });
 
+// Serve admin.html
+app.get('/admin.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public/admin.html'));
+  logger.info('Served admin.html', { ip: req.ip });
+});
+
 // Refresh token endpoint
 app.post('/api/auth/refresh', authMiddleware, async (req, res) => {
   try {
@@ -518,6 +524,173 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
   }
 });
 
+// NEW: Users management routes for admin panel
+app.get('/api/users', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user.isAdmin) {
+      logger.warn('Non-admin access attempt to /api/users', { userId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { search } = req.query;
+    const query = search ? {
+      $or: [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+      ],
+    } : {};
+    const users = await User.find(query).select('-password').limit(50);
+    logger.info(`Admin fetched users (search: ${search || 'all'})`, { adminId: req.user._id, count: users.length, ip: req.ip });
+    res.json(users);
+  } catch (err) {
+    logger.error('Error fetching users:', { message: err.message, stack: err.stack, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/users/nearby', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user.isAdmin) {
+      logger.warn('Non-admin access attempt to /api/users/nearby', { userId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { lat, lng, radius = 48280 } = req.query; // Default 30 miles
+    const users = await User.find({
+      location: {
+        $near: {
+          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+          $maxDistance: parseInt(radius),
+        },
+      },
+      banned: false,
+    }).select('-password').limit(50);
+    logger.info(`Admin fetched nearby users (lat:${lat}, lng:${lng}, radius:${radius})`, { adminId: req.user._id, count: users.length, ip: req.ip });
+    res.json(users);
+  } catch (err) {
+    logger.error('Error fetching nearby users:', { message: err.message, stack: err.stack, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.delete('/api/users/:id', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await User.findById(req.user._id);
+    if (!adminUser.isAdmin) {
+      logger.warn('Non-admin delete user attempt', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    await User.findByIdAndDelete(req.params.id);
+    logger.info('Admin deleted user', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Error deleting user:', { message: err.message, stack: err.stack, targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/users/:id/ban', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await User.findById(req.user._id);
+    if (!adminUser.isAdmin) {
+      logger.warn('Non-admin ban user attempt', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    await User.findByIdAndUpdate(req.params.id, { banned: true });
+    logger.info('Admin banned user', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Error banning user:', { message: err.message, stack: err.stack, targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/users/:id/ipban', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await User.findById(req.user._id);
+    if (!adminUser.isAdmin) {
+      logger.warn('Non-admin IP ban user attempt', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const user = await User.findById(req.params.id);
+    if (!user.ipBanned) user.ipBanned = [];
+    user.ipBanned.push(req.ip); // Note: req.ip may need proxy config for accuracy
+    await user.save();
+    logger.info('Admin IP banned user', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Error IP banning user:', { message: err.message, stack: err.stack, targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/users/:id/promote', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await User.findById(req.user._id);
+    if (!adminUser.isAdmin) {
+      logger.warn('Non-admin promote user attempt', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    await User.findByIdAndUpdate(req.params.id, { isAdmin: true });
+    logger.info('Admin promoted user', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Error promoting user:', { message: err.message, stack: err.stack, targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.post('/api/users/:id/demote', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await User.findById(req.user._id);
+    if (!adminUser.isAdmin) {
+      logger.warn('Non-admin demote user attempt', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    await User.findByIdAndUpdate(req.params.id, { isAdmin: false });
+    logger.info('Admin demoted user', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Error demoting user:', { message: err.message, stack: err.stack, targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/users/:id/location', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await User.findById(req.user._id);
+    if (!adminUser.isAdmin) {
+      logger.warn('Non-admin location access attempt', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const user = await User.findById(req.params.id).select('location');
+    res.json(user || { location: null });
+    logger.info('Admin viewed user location', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+  } catch (err) {
+    logger.error('Error fetching user location:', { message: err.message, stack: err.stack, targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/alerts/user/:id', authMiddleware, async (req, res) => {
+  try {
+    const adminUser = await User.findById(req.user._id);
+    if (!adminUser.isAdmin) {
+      logger.warn('Non-admin alerts access attempt', { targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    const { since } = req.query;
+    const query = { userId: req.params.id };
+    if (since) query.timestamp = { $gte: new Date(since) };
+    const alerts = await Alert.find(query).populate('userId', 'username').sort({ timestamp: -1 });
+    logger.info('Admin fetched user alerts', { targetId: req.params.id, adminId: req.user._id, count: alerts.length, ip: req.ip });
+    res.json(alerts);
+  } catch (err) {
+    logger.error('Error fetching user alerts:', { message: err.message, stack: err.stack, targetId: req.params.id, adminId: req.user._id, ip: req.ip });
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Socket.IO setup
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -569,6 +742,14 @@ io.on('connection', (socket) => {
     } catch (error) {
       logger.error('Error updating socket location for push subscriptions:', { message: error.message, stack: error.stack, userId: socket.user.id, ip: socket.handshake.address });
     }
+  });
+  // NEW: Handle admin tracking (optional, since broadcast works)
+  socket.on('trackUser', (targetId) => {
+    // For now, no-op as broadcast sends to all; could join room for targeted emits
+    logger.info('Admin tracking user', { adminId: socket.user.id, targetId, ip: socket.handshake.address });
+  });
+  socket.on('stopTracking', (targetId) => {
+    logger.info('Admin stopped tracking user', { adminId: socket.user.id, targetId, ip: socket.handshake.address });
   });
   socket.on('disconnect', () => {
     logger.info(`User disconnected: ${socket.user.id}`, { ip: socket.handshake.address });
