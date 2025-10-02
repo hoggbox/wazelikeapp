@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: Arial, sans-serif; }
+    #map { height: 50vh; width: 100%; }
+    #admin-container { padding: 1rem; height: 50vh; overflow-y: auto; }
+    #user-search { padding: 0.5rem; width: 80%; }
+    #search-users-btn { background: #4CAF50; color: white; border: none; padding: 0.5rem 1rem; cursor: pointer; }
+    #users-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    #users-table th, #users-table td { border: 1px solid #ddd; padding: 0.5rem; text-align: left; }
+    #users-table th { background: #f4f4f4; }
+    #users-table button { margin-right: 0.5rem; padding: 0.3rem 0.6rem; cursor: pointer; }
+    #show-nearby-users { background: #2196F3; color: white; border: none; padding: 0.5rem 1rem; cursor: pointer; margin-top: 1rem; }
+    #toast {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(0, 0, 0, 0.7);
+      color: white; padding: 1rem; border-radius: 0.5rem; z-index: 1003; transition: opacity 0.5s;
+      opacity: 0; pointer-events: none; max-width: 90vw; text-align: center;
+    }
+    #toast.visible-toast { opacity: 1; }
+    #alerts-list { margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="admin-container">
+    <input id="user-search" type="text" placeholder="Search users by username or email">
+    <button id="search-users-btn">Search</button>
+    <table id="users-table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Email</th>
+          <th>Admin</th>
+          <th>Banned</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <button id="show-nearby-users">Show All Nearby Users (30 miles)</button>
+  </div>
+  <div id="toast"></div>
+  <script>
+    const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+    const mapId = '2666b5bd496d9c6026f43f82';
+    let map, socket, trackedMarkers = new Map(), trackingUsers = [];
+    let isAdmin = localStorage.getItem('isAdmin') === 'true';
+    let userLocation = { lat: 33.083270, lng: -83.233040 };
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+
+    if (!token || !isAdmin) {
+      location.href = '/';
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('visible-toast');
+      setTimeout(() => toast.classList.remove('visible-toast'), 3000);
+    }
+
+    function loadGoogleMaps() {
+      const script = document.createElement('script');
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${API_KEY}&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker`;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+
+    window.initMap = function() {
+      map = new google.maps.Map(document.getElementById('map'), {
+        center: userLocation,
+        zoom: 10,
+        mapId: mapId,
+        disableDefaultUI: true
+      });
+      setupSocket();
+      setupEventListeners();
+      fetchUsers();
+    };
+
+    function setupSocket() {
+      socket = io({ auth: { token: token.trim() } });
+      socket.on('userLocation', (data) => {
+        if (trackingUsers.includes(data.userId)) {
+          let marker = trackedMarkers.get(data.userId);
+          if (!marker) {
+            marker = new google.maps.marker.AdvancedMarkerElement({
+              map,
+              position: data.location,
+              content: createUserMarkerContent(),
+              title: 'Tracked User'
+            });
+            trackedMarkers.set(data.userId, marker);
+          } else {
+            marker.position = data.location;
+          }
+        }
+      });
+    }
+
+    function createUserMarkerContent() {
+      const content = document.createElement('div');
+      content.style.width = '15px';
+      content.style.height = '15px';
+      content.style.backgroundColor = 'purple';
+      content.style.borderRadius = '50%';
+      content.style.border = '2px solid white';
+      return content;
+    }
+
+    function setupEventListeners() {
+      document.getElementById('search-users-btn').addEventListener('click', () => {
+        const query = document.getElementById('user-search').value;
+        fetchUsers(query);
+      });
+      document.getElementById('show-nearby-users').addEventListener('click', showNearbyUsers);
+    }
+
+    async function fetchUsers(query = '') {
+      try {
+        const response = await fetch(`/api/users?search=${encodeURIComponent(query)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!response.ok) throw new Error('Failed to fetch users');
+        const users = await response.json();
+        const tbody = document.querySelector('#users-table tbody');
+        tbody.innerHTML = '';
+        users.forEach(user => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${user.username}</td>
+            <td>${user.email}</td>
+            <td>${user.isAdmin ? 'Yes' : 'No'}</td>
+            <td>${user.banned ? 'Yes' : 'No'}</td>
+            <td>
+              <button onclick="deleteUser('${user._id}')">Delete</button>
+              <button onclick="banUser('${user._id}')">Ban</button>
+              <button onclick="ipBanUser('${user._id}')">IP Ban</button>
+              <button onclick="toggleAdmin('${user._id}', ${user.isAdmin})">${user.isAdmin ? 'Demote' : 'Promote'}</button>
+              <button onclick="viewLocation('${user._id}')">View Location</button>
+              <button onclick="viewAlerts('${user._id}')">View Alerts</button>
+              <button onclick="trackLive('${user._id}')">Track Live</button>
+              <button onclick="stopTrack('${user._id}')">Stop Track</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (error) {
+        showToast('Failed to load users');
+      }
+    }
+
+    async function deleteUser(id) {
+      if (!confirm('Delete user?')) return;
+      try {
+        const response = await fetch(`/api/users/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          showToast('User deleted');
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast('Failed to delete user');
+        }
+      } catch (error) {
+        showToast('Failed to delete user');
+      }
+    }
+
+    async function banUser(id) {
+      if (!confirm('Ban user?')) return;
+      try {
+        const response = await fetch(`/api/users/${id}/ban`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          showToast('User banned');
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast('Failed to ban user');
+        }
+      } catch (error) {
+        showToast('Failed to ban user');
+      }
+    }
+
+    async function ipBanUser(id) {
+      if (!confirm('IP ban user?')) return;
+      try {
+        const response = await fetch(`/api/users/${id}/ipban`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          showToast('User IP banned');
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast('Failed to IP ban user');
+        }
+      } catch (error) {
+        showToast('Failed to IP ban user');
+      }
+    }
+
+    async function toggleAdmin(id, isAdmin) {
+      if (!confirm(`${isAdmin ? 'Demote' : 'Promote'} user?`)) return;
+      try {
+        const endpoint = isAdmin ? `/api/users/${id}/demote` : `/api/users/${id}/promote`;
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          showToast(`User ${isAdmin ? 'demoted' : 'promoted'}`);
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast('Failed to toggle admin');
+        }
+      } catch (error) {
+        showToast('Failed to toggle admin');
+      }
+    }
+
+    async function viewLocation(id) {
+      try {
+        const response = await fetch(`/api/users/${id}/location`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.location) {
+            const pos = { lat: data.location.coordinates[1], lng: data.location.coordinates[0] };
+            map.setCenter(pos);
+            map.setZoom(15);
+            showToast('Centered on user location');
+          } else {
+            showToast('No location available');
+          }
+        } else {
+          showToast('Failed to fetch location');
+        }
+      } catch (error) {
+        showToast('Failed to fetch location');
+      }
+    }
+
+    async function viewAlerts(id) {
+      try {
+        const since = new Date(Date.now() - 7*24*60*60*1000).toISOString();
+        const response = await fetch(`/api/alerts/user/${id}?since=${since}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const alerts = await response.json();
+          const list = document.createElement('div');
+          list.id = 'alerts-list';
+          list.innerHTML = '<h3>Alerts This Week</h3><ul>';
+          alerts.forEach(alert => {
+            list.innerHTML += `<li>${alert.type} - ${new Date(alert.timestamp).toLocaleString()} - ${alert.address || 'No address'}</li>`;
+          });
+          list.innerHTML += '</ul>';
+          document.getElementById('admin-container').appendChild(list);
+          showToast('Alerts loaded');
+          setTimeout(() => list.remove(), 10000); // Auto-remove after 10s
+        } else {
+          showToast('Failed to fetch alerts');
+        }
+      } catch (error) {
+        showToast('Failed to fetch alerts');
+      }
+    }
+
+    function trackLive(id) {
+      if (!trackingUsers.includes(id)) {
+        socket.emit('trackUser', id);
+        trackingUsers.push(id);
+        showToast('Tracking started');
+      }
+    }
+
+    function stopTrack(id) {
+      socket.emit('stopTracking', id);
+      trackingUsers = trackingUsers.filter(u => u !== id);
+      const marker = trackedMarkers.get(id);
+      if (marker) {
+        marker.setMap(null);
+        trackedMarkers.delete(id);
+      }
+      showToast('Tracking stopped');
+    }
+
+    async function showNearbyUsers() {
+      try {
+        const response = await fetch(`/api/users/nearby?lat=${userLocation.lat}&lng=${userLocation.lng}&radius=48280`, { // 30 miles in meters
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (response.ok) {
+          const users = await response.json();
+          users.forEach(user => trackLive(user._id));
+          showToast(`${users.length} nearby users shown`);
+        } else {
+          showToast('Failed to fetch nearby users');
+        }
+      } catch (error) {
+        showToast('Failed to fetch nearby users');
+      }
+    }
+
+    loadGoogleMaps();
+  </script>
+</body>
+</html>

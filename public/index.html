@@ -1329,21 +1329,7 @@
         }
       });
       document.getElementById('admin-button').addEventListener('click', () => {
-        closeAllHuds();
-        const adminHudContainer = document.getElementById('admin-hud-container');
-        adminHudContainer.classList.add('active');
-        fetchUsers('');
-        console.log('Admin button clicked, admin HUD opened');
-      });
-      document.getElementById('admin-close').addEventListener('click', () => {
-        const adminHudContainer = document.getElementById('admin-hud-container');
-        adminHudContainer.classList.remove('active');
-        clearTrackedMarkers();
-        console.log('Admin HUD closed');
-        if (navState.isNavigating && navState.isFollowing) {
-          lockNavigation();
-          console.log('Navigation view re-locked after closing admin HUD');
-        }
+        location.href = '/admin.html';
       });
       document.getElementById('search-users-btn').addEventListener('click', () => {
         const query = document.getElementById('user-search').value;
@@ -3121,8 +3107,8 @@
             if (navState.isFollowing && navState.isNavigating) {
               const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
               navState.navigationZoom = zoom;
-              const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-              const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
+              const targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+              const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 50);
               requestAnimationFrame(() => {
                 isProgrammaticUpdate = true;
                 if (isMobile && typeof TWEEN !== 'undefined') {
@@ -3133,7 +3119,7 @@
                     .start();
                   if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
                     const currentHeading = map.getHeading() || 0;
-                    const delta = normalizeHeadingDelta(currentHeading, heading);
+                    const delta = normalizeHeadingDelta(currentHeading, targetHeading);
                     isHeadingTweening = true;
                     new TWEEN.Tween({ heading: currentHeading })
                       .to({ heading: currentHeading + delta }, 300)
@@ -3144,7 +3130,7 @@
                   }
                 } else {
                   map.panTo(lookaheadPoint);
-                  if (!isHeadingTweening) map.setHeading(heading);
+                  if (!isHeadingTweening) map.setHeading(targetHeading);
                 }
                 map.setZoom(zoom);
                 map.setTilt(tilt);
@@ -3688,7 +3674,6 @@
         directionsRenderer.setDirections(navState.currentRoute);
         updateRouteAhead(navState.userLocation);
         updateOffRoadPolyline(rawUserLocation, path[0]);
-        alternativeRenderer.setMap(null);
         updateBottomHUD(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
         const rerouteHudContainer = document.getElementById('reroute-hud-container');
