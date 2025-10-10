@@ -666,6 +666,7 @@
       OFFERING_REROUTE: 'offering_reroute',
       OFF_ROUTE: 'off_route'
     };
+
     let currentNavState = navigationStates.IDLE;
     let mockSimulationInterval = null;
     let isRegister = false;
@@ -826,22 +827,17 @@
       if (isNaN(newHeading) || newHeading === null) {
         return navState.lastValidHeading;
       }
-     
+      
       // While moving at reasonable speed, use GPS heading directly with minimal smoothing
       if (speed > STATIONARY_SPEED_THRESHOLD) {
-        const headingDiff = Math.abs(newHeading - navState.lastValidHeading);
-        if (headingDiff > 10) { // Only require significant changes, not 8°
-          headingHistory = [newHeading]; // Reset history for sharp turns
-        } else {
-          headingHistory.push(newHeading);
-        }
+        headingHistory.push(newHeading);
         if (headingHistory.length > 5) headingHistory.shift(); // Reduced from 15
         const smoothed = headingHistory.reduce((a, b) => a + b) / headingHistory.length;
         navState.lastValidHeading = smoothed;
         console.log('Heading smoothed (moving):', { raw: newHeading, smoothed, speed });
         return smoothed;
       }
-     
+      
       // When stationary, hold last valid heading
       console.log('Heading held (stationary):', { lastValid: navState.lastValidHeading, speed });
       return navState.lastValidHeading;
@@ -2260,11 +2256,11 @@
       if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: 18, tilt: 45, turnHeading: null };
       }
-     
+      
       const legs = navState.currentRoute.routes[0].legs[0];
       let nextTurn = null;
       const currentLatLng = new google.maps.LatLng(currentPos);
-     
+      
       // Find next turn instruction
       for (const step of legs.steps) {
         if (step.maneuver && step.start_location) {
@@ -2278,16 +2274,16 @@
           }
         }
       }
-     
+      
       const zoom = nextTurn ? 19 : 17;
       const tilt = nextTurn ? 50 : 45;
-      const turnHeading = nextTurn
+      const turnHeading = nextTurn 
         ? google.maps.geometry.spherical.computeHeading(
             currentLatLng,
             new google.maps.LatLng(nextTurn.start_location)
           )
         : null;
-     
+      
       console.log('Dynamic zoom calculated:', { zoom, tilt, hasTurn: !!nextTurn });
       return { zoom, tilt, turnHeading };
     }
@@ -2363,19 +2359,19 @@
       console.log('Route ahead updated:', { points: fullPath.length, endPoint: fullPath[fullPath.length - 1] });
     }
     function updateOffRoadPolyline(rawPos, snappedPos) {
-      if (!(currentNavState === navigationStates.NAVIGATING)) {
+      if (!currentNavState === navigationStates.NAVIGATING) {
         if (offRoadPolyline) {
           offRoadPolyline.setMap(null);
           offRoadPolyline = null;
         }
         return;
       }
-     
+      
       const distance = google.maps.geometry.spherical.computeDistanceBetween(
         new google.maps.LatLng(rawPos),
         new google.maps.LatLng(snappedPos)
       );
-     
+      
       // Only show line if meaningfully off-route
       if (distance > SNAP_BUFFER) {
         if (!offRoadPolyline) {
@@ -2399,12 +2395,12 @@
     }
     function findClosestRoutePoint(currentPos, path, heading, speed) {
       if (!path || path.length < 2) return { point: currentPos, index: 0 };
-     
+      
       const currentLatLng = new google.maps.LatLng(currentPos);
       let bestPoint = currentPos;
       let closestIndex = 0;
       let minDistance = Infinity;
-     
+      
       // Find closest point without heading consideration
       for (let i = 0; i < path.length; i++) {
         const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, path[i]);
@@ -2414,7 +2410,7 @@
           closestIndex = i;
         }
       }
-     
+      
       console.log('Closest route point found:', { point: bestPoint, distance: minDistance, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
@@ -2621,6 +2617,7 @@
           new google.maps.LatLng(rawPos),
           new google.maps.LatLng(snappedPos)
         );
+
         if (distanceToSnap > SNAP_BUFFER) {
           // Actually off-road, use snapped position
           console.log('Position off-road by', distanceToSnap, 'meters, snapping');
@@ -2628,17 +2625,21 @@
           // Close enough, use raw position
           snappedPos = rawPos;
         }
+
         // THEN: Smooth the position
         positionHistory.push(snappedPos);
         if (positionHistory.length > POSITION_SMOOTHING_WINDOW) {
           positionHistory.shift();
         }
+
         const smoothedPos = {
           lat: positionHistory.reduce((sum, p) => sum + p.lat, 0) / positionHistory.length,
           lng: positionHistory.reduce((sum, p) => sum + p.lng, 0) / positionHistory.length
         };
+
         const pos = smoothedPos;
         console.log('Position smoothed:', { raw: rawPos, snapped: snappedPos, smoothed: pos });
+
         const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : speed <= STATIONARY_SPEED_THRESHOLD ? 'lastValid' : needsCalibration ? 'lastValid' : 'compass';
         navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
         console.log('Heading stabilized:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading, source, speed });
@@ -2667,15 +2668,14 @@
           navState.navigationZoom = zoom;
           const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
           const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
-         
-          // Defer just slightly to let other operations finish
-          setTimeout(() => {
-            map.setCenter(lookaheadPoint);
-            map.setZoom(zoom);
-            map.setHeading(heading);
-            map.setTilt(tilt);
-            updateCompass();
-          }, 0); // Yields to browser, but same frame
+          
+          // Update synchronously without requestAnimationFrame
+          map.setCenter(lookaheadPoint);
+          map.setZoom(zoom);
+          map.setHeading(heading);
+          map.setTilt(tilt);
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          updateCompass();
         } else {
           console.log('Camera update skipped:', { isFollowing: navState.isFollowing, isNavigating: currentNavState === navigationStates.NAVIGATING });
         }
@@ -2716,21 +2716,22 @@
         console.error('Geolocation not supported');
         return;
       }
+
       if (!navState.destination) {
         showToast('Please select a destination.');
         console.error('No destination selected');
         return;
       }
+
       if (!navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0]) {
         showToast('Route not calculated. Please try again.');
         console.error('No route available');
         return;
       }
+
       currentNavState = navigationStates.NAVIGATING;
       navState.isFollowing = true;
       navState.isInitialSnap = true;
-      currentStepIndex = 0;
-      nextStepIndex = 1;
       localStorage.setItem('isFollowing', navState.isFollowing);
       sessionStorage.setItem('isFollowing', navState.isFollowing);
       document.getElementById('search-container').classList.add('hidden');
@@ -2885,7 +2886,7 @@
     }
     function stopGPS() {
       currentNavState = navigationStates.IDLE;
-     
+      
       // Clear any pending timers
       if (rerouteCountdownTimer) {
         clearInterval(rerouteCountdownTimer);
@@ -2895,7 +2896,7 @@
         clearInterval(cameraCountdownTimer);
         cameraCountdownTimer = null;
       }
-     
+      
       if (watchId) {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
@@ -3019,7 +3020,7 @@
             directionsRenderer.setDirections(response);
             updateRouteAhead(navState.userLocation);
             updateOffRoadPolyline(rawUserLocation || navState.userLocation, response.routes[0].overview_path[0]);
-            updateHUD(response, origin);
+            updateHUDWithCachedSteps(response, origin);
             updateBottomHUD(response);
             if (callback) callback();
             if (navState.isFollowing && currentNavState === navigationStates.NAVIGATING) {
@@ -3051,123 +3052,55 @@
         }
       );
     }
-    function updateHUD(route, currentPos) {
-      const hudTurn = document.getElementById('hud-turn');
-      const hudStreet = document.getElementById('hud-street');
-      const hudHeading = document.getElementById('hud-heading');
-     
-      if (!route || !route.routes[0]) {
-        hudTurn.textContent = 'Follow the road';
-        hudStreet.textContent = 'Current street: Unknown';
-        hudHeading.textContent = 'Heading: Unknown';
-        return;
-      }
-     
-      const steps = route.routes[0].legs[0].steps;
-      const currentLatLng = new google.maps.LatLng(currentPos);
-     
-      // Reset step indices for preview
-      currentStepIndex = 0;
-      nextStepIndex = 1;
-     
-      // Find which step the user is on
-      for (let i = currentStepIndex; i < steps.length; i++) {
-        const stepStart = new google.maps.LatLng(steps[i].start_location);
-        const distToStep = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, stepStart);
-       
-        if (distToStep < 200) {
-          currentStepIndex = i;
-          nextStepIndex = i + 1;
-          break;
-        }
-      }
-     
-      const currentStep = steps[currentStepIndex];
-      const nextStep = steps[nextStepIndex] || null;
-     
-      hudStreet.textContent = currentStep
-        ? `Current street: ${stripHtml(currentStep.instructions)}`
-        : 'Current street: Unknown';
-     
-      hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
-     
-      if (nextStep && nextStep.maneuver) {
-        const distToTurn = google.maps.geometry.spherical.computeDistanceBetween(
-          currentLatLng,
-          new google.maps.LatLng(nextStep.start_location)
-        );
-       
-        const distText = distToTurn < 1609.34
-          ? `${Math.round(distToTurn * 3.28084)} feet`
-          : `${(distToTurn / 1609.34).toFixed(1)} miles`;
-       
-        const turnText = `${nextStep.maneuver.replace(/-/g, ' ').toUpperCase()} in ${distText}`;
-        hudTurn.textContent = turnText;
-       
-        // Announce only when entering new step
-        if (distToTurn < 50 && turnText !== lastSpokenTurn) {
-          const now = Date.now();
-          if (now - lastAnnouncementTime > ANNOUNCEMENT_COOLDOWN && 'speechSynthesis' in window) {
-            const utterance = new SpeechSynthesisUtterance(turnText);
-            utterance.lang = 'en-US';
-            speechSynthesis.speak(utterance);
-            lastSpokenTurn = turnText;
-            lastAnnouncementTime = now;
-          }
-        }
-      } else {
-        hudTurn.textContent = 'Follow the road';
-      }
-    }
     function updateHUDWithCachedSteps(route, currentPos) {
       const hudTurn = document.getElementById('hud-turn');
       const hudStreet = document.getElementById('hud-street');
       const hudHeading = document.getElementById('hud-heading');
-     
+      
       if (!route || !route.routes[0]) {
         hudTurn.textContent = 'Follow the road';
         hudStreet.textContent = 'Current street: Unknown';
         hudHeading.textContent = 'Heading: Unknown';
         return;
       }
-     
+      
       const steps = route.routes[0].legs[0].steps;
       const currentLatLng = new google.maps.LatLng(currentPos);
-     
+      
       // Find which step the user is on
       for (let i = currentStepIndex; i < steps.length; i++) {
         const stepStart = new google.maps.LatLng(steps[i].start_location);
         const distToStep = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, stepStart);
-       
+        
         if (distToStep < 200) {
           currentStepIndex = i;
           nextStepIndex = i + 1;
           break;
         }
       }
-     
+      
       const currentStep = steps[currentStepIndex];
       const nextStep = steps[nextStepIndex] || null;
-     
+      
       hudStreet.textContent = currentStep
         ? `Current street: ${stripHtml(currentStep.instructions)}`
         : 'Current street: Unknown';
-     
+      
       hudHeading.textContent = `Heading: ${Math.round(navState.currentHeading || 0)}°`;
-     
+      
       if (nextStep && nextStep.maneuver) {
         const distToTurn = google.maps.geometry.spherical.computeDistanceBetween(
           currentLatLng,
           new google.maps.LatLng(nextStep.start_location)
         );
-       
+        
         const distText = distToTurn < 1609.34
           ? `${Math.round(distToTurn * 3.28084)} feet`
           : `${(distToTurn / 1609.34).toFixed(1)} miles`;
-       
+        
         const turnText = `${nextStep.maneuver.replace(/-/g, ' ').toUpperCase()} in ${distText}`;
         hudTurn.textContent = turnText;
-       
+        
         // Announce only when entering new step
         if (distToTurn < 50 && turnText !== lastSpokenTurn) {
           const now = Date.now();
@@ -3223,16 +3156,16 @@
         console.log('checkOffRoute skipped: Not navigating or no route data');
         return false;
       }
-     
+      
       const path = navState.currentRoute.routes[0].overview_path;
       let minDistance = Infinity;
-     
+      
       // Find minimum distance to any point on the route
       for (let i = 0; i < path.length - 1; i++) {
         const dist = distanceToSegment(userLatLng, path[i], path[i + 1]);
         minDistance = Math.min(minDistance, dist);
       }
-     
+      
       // Only trigger reroute if significantly off-route (>100m)
       if (minDistance > OFF_ROUTE_TOLERANCE) {
         console.log('User off-route by', minDistance, 'meters, triggering recalculation');
@@ -3246,7 +3179,7 @@
         });
         return true;
       }
-     
+      
       return false;
     }
     async function checkHazardsAndOfferReroute() {
@@ -3536,7 +3469,7 @@
       if (rerouteCountdownTimer) {
         clearInterval(rerouteCountdownTimer);
       }
-     
+      
       const cameraHudContainer = document.getElementById('camera-hud-container');
       if (cameraHudContainer.classList.contains('active')) {
         console.log('Camera HUD active, queuing reroute HUD');
@@ -3573,6 +3506,7 @@
       const toast = document.getElementById('toast');
       toast.textContent = `Auto closing HUD in ${countdown} seconds...`;
       toast.classList.add('visible-toast');
+
       rerouteCountdownTimer = setInterval(() => {
         countdown--;
         if (countdown <= 0) {
@@ -3592,21 +3526,11 @@
           clearInterval(rerouteCountdownTimer);
           rerouteCountdownTimer = null;
         }
-        document.getElementById('toast').classList.remove('visible-toast');
+        toast.classList.remove('visible-toast');
       };
-      // Make sure ALL three buttons call this:
-      document.getElementById('accept-reroute-button').addEventListener('click', () => {
-        clearCountdown();
-        acceptReroute();
-      }, { once: true });
-      document.getElementById('reject-reroute-button').addEventListener('click', () => {
-        clearCountdown();
-        rejectReroute();
-      }, { once: true });
-      document.getElementById('reroute-close').addEventListener('click', () => {
-        clearCountdown();
-        rejectReroute();
-      }, { once: true });
+      document.getElementById('accept-reroute-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
     }
     function closeRerouteHud() {
       if (rerouteCountdownTimer) {
@@ -3775,15 +3699,8 @@
         toast.classList.remove('visible-toast');
         toast.classList.remove('countdown-toast');
       };
-      // Make sure ALL three buttons call this:
-      document.getElementById('dismiss-camera-button').addEventListener('click', () => {
-        clearCountdown();
-        dismissCameraAlert();
-      }, { once: true });
-      document.getElementById('camera-close').addEventListener('click', () => {
-        clearCountdown();
-        dismissCameraAlert();
-      }, { once: true });
+      document.getElementById('dismiss-camera-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('camera-close').addEventListener('click', clearCountdown, { once: true });
     }
     function dismissCameraAlert() {
       const cameraHudContainer = document.getElementById('camera-hud-container');
