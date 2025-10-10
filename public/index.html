@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2737,140 +2738,110 @@
       console.log(`Confirming ${alertType} alert at`, navState.tempAlertData.location);
     }
     async function postAlert() {
-  if (!navState.tempAlertData || !navState.tempMarker) {
-    console.error('No alert data or marker to post');
-    showToast('Failed to post alert: No data available.');
-    return;
-  }
-  
-  const isTrafficCamera = navState.tempAlertData.type === 'Traffic Camera';
-  if (isTrafficCamera && !showTrafficCameras) {
-    console.log('Traffic camera alert not posted: traffic cameras disabled');
-    navState.tempMarker.setMap(null);
-    navState.tempMarker = null;
-    navState.tempAlertData = null;
-    navState.alertState = 'IDLE';
-    showToast('Traffic camera alert not posted: cameras disabled in settings.');
-    return;
-  }
-  
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    if (!token || !token.includes('.') || token === 'undefined') {
-      console.error('Invalid token, showing auth form');
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      sessionStorage.removeItem('token');
-      sessionStorage.removeItem('userId');
-      document.getElementById('auth-container').style.display = 'flex';
-      return;
-    }
-    console.log('Posting alert with token:', token.substring(0, 20) + '...');
-    
-    const response = await fetchWithRetry('/api/alerts', {
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token.trim()}`
-      },
-      body: JSON.stringify(navState.tempAlertData)
-    });
-    
-    console.log('Post alert response:', { status: response.status, ok: response.ok });
-    const result = await response.json();
-    console.log('Post alert result:', result);
-    
-    if (response.status === 201 && result.alert && result.alert._id) {
-      const alertId = result.alert._id;
-      
-      // Dedupe check against currentAlerts (global array)
-      if (!currentAlerts.some(a => a._id === alertId)) {
-        currentAlerts.push(result.alert);
-        console.log('Added new alert to currentAlerts:', alertId);
-      } else {
-        console.log('Alert already in currentAlerts, skipping push:', alertId);
+      if (!navState.tempAlertData || !navState.tempMarker) {
+        console.error('No alert data or marker to post');
+        showToast('Failed to post alert: No data available.');
+        return;
       }
-      
-      // Create marker only if not already present
-      if (!markers.has(alertId)) {
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-          map,
-          position: { lat: navState.tempAlertData.location.coordinates[1], lng: navState.tempAlertData.location.coordinates[0] },
-          content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-          title: `${navState.tempAlertData.type} Alert`
+      const isTrafficCamera = navState.tempAlertData.type === 'Traffic Camera';
+      if (isTrafficCamera && !showTrafficCameras) {
+        console.log('Traffic camera alert not posted: traffic cameras disabled');
+        navState.tempMarker.setMap(null);
+        navState.tempMarker = null;
+        navState.tempAlertData = null;
+        navState.alertState = 'IDLE';
+        showToast('Traffic camera alert not posted: cameras disabled in settings.');
+        return;
+      }
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, showing auth form');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          return;
+        }
+        console.log('Posting alert with token:', token.substring(0, 20) + '...');
+        const response = await fetchWithRetry('/api/alerts', {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token.trim()}`
+          },
+          body: JSON.stringify(navState.tempAlertData)
         });
-        markers.set(alertId, marker);
-        console.log('Created new marker for alert:', alertId);
-      } else {
-        console.log('Marker already exists for alert, skipping creation:', alertId);
+        console.log('Post alert response:', { status: response.status, ok: response.ok });
+        const result = await response.json();
+        console.log('Post alert result:', result);
+        if (response.status === 201 && result.alert) {
+          const marker = new google.maps.marker.AdvancedMarkerElement({
+            map,
+            position: { lat: navState.tempAlertData.location.coordinates[1], lng: navState.tempAlertData.location.coordinates[0] },
+            content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+            title: `${navState.tempAlertData.type} Alert`
+          });
+          markers.set(result.alert._id, marker);
+          if (!currentAlerts.some(a => a._id === result.alert._id)) {
+            currentAlerts.push(result.alert);
+          }
+          displayAlertsInHud(currentAlerts);
+          console.log('Alert saved to MongoDB:', result.alert);
+          showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
+          if (isTrafficCamera) {
+            cameraPositions.push({
+              lat: navState.tempAlertData.location.coordinates[1],
+              lng: navState.tempAlertData.location.coordinates[0]
+            });
+          } else if (navState.isNavigating) {
+            checkHazardsAndOfferReroute();
+          }
+          if (socket && socket.connected) {
+            socket.emit('alert', result.alert);
+            console.log('Emitted alert event:', result.alert._id);
+          }
+          const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+          fetchProfile(ownId, true).then(populateAccountProfile);
+          if (navState.familyMembers.length > 0) {
+            socket.emit('familyAlert', { alert: result.alert, family: navState.familyMembers });
+          }
+        } else if (response.status === 409 && result.alert) {
+          if (!currentAlerts.some(a => a._id === result.alert._id)) {
+            currentAlerts.push(result.alert);
+            displayAlertsInHud(currentAlerts);
+          }
+          showToast(result.message || 'Duplicate alert ignored.');
+          console.log('Duplicate alert ignored:', result.alert._id);
+        } else {
+          console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
+          showToast(`Failed to save alert: ${result.error || 'Server error'}`);
+        }
+      } catch (error) {
+        console.error('Error posting alert:', error);
+        showToast(`Error posting alert: ${error.message}`);
+      } finally {
+        if (navState.tempMarker) {
+          navState.tempMarker.setMap(null);
+          navState.tempMarker = null;
+        }
+        navState.tempAlertData = null;
+        navState.alertState = 'IDLE';
+        const reportBox = document.getElementById('report-box');
+        const confirmAlert = document.getElementById('confirm-alert');
+        const reportOptions = document.querySelector('.report-options');
+        reportBox.classList.remove('active');
+        confirmAlert.classList.remove('active');
+        reportOptions.style.display = 'grid';
+        if (navState.isNavigating && navState.isFollowing) {
+          lockNavigation();
+          console.log('Navigation view re-locked after manual report');
+        }
       }
-      
-      // Update HUD explicitly
-      displayAlertsInHud(currentAlerts);
-      
-      console.log('Alert saved to MongoDB:', result.alert);
-      showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
-      
-      if (isTrafficCamera) {
-        cameraPositions.push({
-          lat: navState.tempAlertData.location.coordinates[1],
-          lng: navState.tempAlertData.location.coordinates[0]
-        });
-      } else if (navState.isNavigating) {
-        checkHazardsAndOfferReroute();
-      }
-      
-      if (socket && socket.connected) {
-        socket.emit('alert', result.alert);
-        console.log('Emitted alert event:', alertId);
-      }
-      
-      // Refresh profile
-      const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-      fetchProfile(ownId, true).then(populateAccountProfile);
-      
-      // Final sync via poll to catch any server-side changes
-      setTimeout(() => pollAlerts(), 1000);
-      
-    } else if (response.status === 409 && result.alert && result.alert._id) {
-      const alertId = result.alert._id;
-      if (!currentAlerts.some(a => a._id === alertId)) {
-        currentAlerts.push(result.alert);
-        displayAlertsInHud(currentAlerts);
-      }
-      showToast(result.message || 'Duplicate alert ignored.');
-      console.log('Duplicate alert ignored:', alertId);
-      setTimeout(() => pollAlerts(), 1000);
-      
-    } else {
-      console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
-      showToast(`Failed to save alert: ${result.error || 'Server error'}`);
     }
-  } catch (error) {
-    console.error('Error posting alert:', error);
-    showToast(`Error posting alert: ${error.message}`);
-  } finally {
-    // Always clean up temp state
-    if (navState.tempMarker) {
-      navState.tempMarker.setMap(null);
-      navState.tempMarker = null;
-    }
-    navState.tempAlertData = null;
-    navState.alertState = 'IDLE';
-    const reportBox = document.getElementById('report-box');
-    const confirmAlert = document.getElementById('confirm-alert');
-    const reportOptions = document.querySelector('.report-options');
-    reportBox.classList.remove('active');
-    confirmAlert.classList.remove('active');
-    reportOptions.style.display = 'grid';
-    if (navState.isNavigating && navState.isFollowing) {
-      lockNavigation();
-      console.log('Navigation view re-locked after manual report');
-    }
-  }
-}
     function cancelAlert() {
       if (navState.tempMarker) {
         navState.tempMarker.setMap(null);
@@ -2954,84 +2925,64 @@
       console.log('Verification HUD dismissed');
     }
     async function deleteAlert(id, item) {
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    if (!token || !token.includes('.') || token === 'undefined') {
-      console.error('Invalid token, showing auth form');
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      sessionStorage.removeItem('token');
-      sessionStorage.removeItem('userId');
-      document.getElementById('auth-container').style.display = 'flex';
-      return;
-    }
-    console.log('Deleting alert with token:', token.substring(0, 20) + '...');
-    
-    // Always attempt server deletion first, regardless of local marker
-    const response = await fetchWithRetry(`/api/alerts/${id}`, {
-      method: 'DELETE',
-      mode: 'cors',
-      credentials: 'include',
-      headers: { 'Authorization': `Bearer ${token.trim()}` }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Failed to delete alert: ${response.statusText}`);
-    }
-    
-    console.log('Delete alert response:', { status: response.status, ok: response.ok });
-    
-    // Now handle local cleanup on success
-    const marker = markers.get(id);
-    if (marker) {
-      marker.setMap(null);
-      markers.delete(id);
-      console.log('Local marker removed:', id);
-    } else {
-      console.warn('Marker not found locally, but server deletion succeeded:', id);
-    }
-    
-    // Remove from currentAlerts and update HUD
-    const alertIndex = currentAlerts.findIndex(a => a._id === id);
-    if (alertIndex !== -1) {
-      const removedAlert = currentAlerts.splice(alertIndex, 1)[0];
-      if (removedAlert && removedAlert.type === 'Traffic Camera') {
-        cameraPositions = cameraPositions.filter(pos =>
-          pos.lat !== removedAlert.location.coordinates[1] || pos.lng !== removedAlert.location.coordinates[0]
-        );
-        cameraAlertShown.delete(`mongo-${id}`);
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, showing auth form');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          return;
+        }
+        console.log('Deleting alert with token:', token.substring(0, 20) + '...');
+        const marker = markers.get(id);
+        if (!marker) {
+          console.warn('Marker not found for deletion:', id);
+          item?.remove();
+          setTimeout(() => pollAlerts(), 1000);
+          return;
+        }
+        const response = await fetchWithRetry(`/api/alerts/${id}`, {
+          method: 'DELETE',
+          mode: 'cors',
+          credentials: 'include',
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        console.log('Delete alert response:', { status: response.status, ok: response.ok });
+        if (!response.ok) {
+          throw new Error(`Failed to delete alert: ${response.statusText}`);
+        }
+        marker.setMap(null);
+        markers.delete(id);
+        item?.remove();
+        const alert = currentAlerts.find(a => a._id === id);
+        if (alert && alert.type === 'Traffic Camera') {
+          cameraPositions = cameraPositions.filter(pos =>
+            pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+          );
+          cameraAlertShown.delete(`mongo-${id}`);
+        }
+        currentAlerts = currentAlerts.filter(a => a._id !== id);
+        displayAlertsInHud(currentAlerts);
+        showToast('Alert deleted successfully.');
+        console.log('Alert deletion synced:', id);
+        if (socket && socket.connected) {
+          socket.emit('alertDeleted', id);
+          console.log('Emitted alertDeleted event:', id);
+        } else {
+          console.warn('Socket not connected, relying on polling for alert deletion:', id);
+          setTimeout(() => pollAlerts(), 1000);
+        }
+        const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+        fetchProfile(ownId, true).then(populateAccountProfile);
+      } catch (error) {
+        console.error('Error deleting alert:', error);
+        showToast(`Failed to delete alert: ${error.message}`);
+        setTimeout(() => pollAlerts(), 1000);
       }
-      displayAlertsInHud(currentAlerts);
-      console.log('Alert removed from currentAlerts:', id);
     }
-    
-    // Remove UI item if provided
-    item?.remove();
-    
-    showToast('Alert deleted successfully.');
-    console.log('Alert deletion complete:', id);
-    
-    // Emit deletion event if socket connected
-    if (socket && socket.connected) {
-      socket.emit('alertDeleted', id);
-      console.log('Emitted alertDeleted event:', id);
-    } else {
-      // Fallback to polling if no socket
-      console.warn('Socket not connected, relying on polling for alert deletion:', id);
-      setTimeout(() => pollAlerts(), 1000);
-    }
-    
-    // Refresh profile if own alert
-    const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-    fetchProfile(ownId, true).then(populateAccountProfile);
-    
-  } catch (error) {
-    console.error('Error deleting alert:', error);
-    showToast(`Failed to delete alert: ${error.message}`);
-    // Always poll on error to sync state
-    setTimeout(() => pollAlerts(), 1000);
-  }
-}
     async function pollAlerts() {
       if (!navState.userLocation) return;
       try {
@@ -4820,62 +4771,26 @@
         showToast('Failed to connect to server.');
       });
       socket.on('alert', (alert) => {
-  console.log('Received new alert via Socket.IO:', alert?._id);
-  
-  // ❌ Fixed: Validate alert structure before processing
-  if (!alert || !alert._id || !alert.location || !Array.isArray(alert.location.coordinates) || alert.location.coordinates.length < 2 || !alert.type) {
-    console.error('Invalid alert structure received via Socket.IO:', alert);
-    return;
-  }
-  
-  const alertId = alert._id;
-  const isTrafficCamera = alert.type === 'Traffic Camera';
-  
-  // Skip if filtered out
-  if (isTrafficCamera && !showTrafficCameras) {
-    console.log('Skipping traffic camera alert: disabled in settings');
-    return;
-  }
-  const filterKey = alert.type.toLowerCase().replace(' ', '-');
-  if (navState.alertFilters[filterKey] === false) {
-    console.log('Skipping filtered alert:', filterKey);
-    return;
-  }
-  
-  // Dedupe in currentAlerts
-  if (!currentAlerts.some(a => a._id === alertId)) {
-    currentAlerts.push(alert);
-    displayAlertsInHud(currentAlerts);
-    console.log('Added alert to currentAlerts via socket:', alertId);
-  } else {
-    console.log('Alert already in currentAlerts, skipping push:', alertId);
-  }
-  
-  // Dedupe marker creation
-  if (!markers.has(alertId)) {
-    const marker = new google.maps.marker.AdvancedMarkerElement({
-      map,
-      position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
-      content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-      title: `${alert.type} Alert`
-    });
-    markers.set(alertId, marker);
-    console.log('Created marker for socket alert:', alertId);
-  } else {
-    console.log('Marker already exists for socket alert, skipping creation:', alertId);
-  }
-  
-  if (isTrafficCamera) {
-    cameraPositions.push({
-      lat: alert.location.coordinates[1],
-      lng: alert.location.coordinates[0]
-    });
-  } else if (navState.isNavigating) {
-    checkHazardsAndOfferReroute();
-  }
-  
-  showToast(`New ${alert.type} alert received.`);
-});
+        console.log('Received new alert via Socket.IO:', alert._id);
+        if (alert.type === 'Traffic Camera' && !showTrafficCameras) return;
+        const filterKey = alert.type.toLowerCase().replace(' ', '-');
+        if (navState.alertFilters[filterKey] === false) return;
+        if (!currentAlerts.some(a => a._id === alert._id)) {
+          currentAlerts.push(alert);
+          displayAlertsInHud(currentAlerts);
+        }
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+          map,
+          position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
+          content: alert.type === 'Traffic Camera' ? createTrafficCameraContent() : createAlertContent(),
+          title: `${alert.type} Alert`
+        });
+        markers.set(alert._id, marker);
+        if (alert.type !== 'Traffic Camera' && navState.isNavigating) {
+          checkHazardsAndOfferReroute();
+        }
+        showToast(`New ${alert.type} alert received.`);
+      });
       socket.on('alertDeleted', (alertId) => {
         console.log('Alert deleted via Socket.IO:', alertId);
         const marker = markers.get(alertId);
