@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,6 +11,7 @@
   <link rel="manifest" href="/manifest.json?v=1.0.3">
   <script src="https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
+  <script src="https://unpkg.com/pocketsphinx@0.2.0/dist/pocketsphinx.js"></script>
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
@@ -113,11 +113,6 @@
       display: none; flex-direction: column; transition: transform 0.3s ease; transform-origin: center; visibility: visible;
       overflow-y: auto; max-height: 80vh; color: white;
     }
-    #admin-hud-container {
-      max-width: 90vw;
-      max-height: 90vh;
-      width: 90vw;
-    }
     #report-box.active, #reroute-hud-container.active, #settings-hud-container.active, #alerts-hud-container.active, #camera-hud-container.active, #leaderboard-hud-container.active, #arrival-hud-container.active, #admin-hud-container.active, #verification-hud-container.active, #user-profile-hud-container.active {
       display: flex; transform: translate(-50%, -50%); visibility: visible;
     }
@@ -179,17 +174,17 @@
     #accept-reroute-button:hover { background-color: #45a049; }
     #reject-reroute-button { background-color: #d32f2f; }
     #reject-reroute-button:hover { background-color: #b71c1c; }
-    #settings-tabs, #alerts-tabs, #leaderboard-tabs, #admin-tabs {
+    #settings-tabs, #alerts-tabs, #leaderboard-tabs {
       display: flex; border-bottom: 1px solid rgba(255, 255, 255, 0.3); margin-bottom: 1.5vmin;
     }
-    .settings-tab, .alerts-tab, .leaderboard-tab, .admin-tab {
+    .settings-tab, .alerts-tab, .leaderboard-tab {
       flex: 1; padding: 0.5vmin; text-align: center; cursor: pointer; font-size: clamp(12px, 2.2vmin, 16px);
       color: rgba(255, 255, 255, 0.7); transition: color 0.2s, border-bottom 0.2s;
     }
-    .settings-tab.active, .alerts-tab.active, .leaderboard-tab.active, .admin-tab.active {
+    .settings-tab.active, .alerts-tab.active, .leaderboard-tab.active {
       color: white; border-bottom: 2px solid #4CAF50;
     }
-    .settings-tab:hover, .alerts-tab:hover, .leaderboard-tab:hover, .admin-tab:hover { color: white; }
+    .settings-tab:hover, .alerts-tab:hover, .leaderboard-tab:hover { color: white; }
     #settings-content {
       flex: 1; display: flex; flex-direction: column; gap: 1.5vmin; padding: 1.5vmin;
     }
@@ -271,7 +266,7 @@
       white-space: nowrap;
       box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
     }
-    .alerts-tab-content, .leaderboard-tab-content, .admin-tab-content {
+    .alerts-tab-content, .leaderboard-tab-content {
       flex: 1; overflow-y: auto; padding: 1.5vmin; display: none;
     }
     .alert-item {
@@ -338,33 +333,6 @@
     }
     .remove-family { background: #d32f2f; color: white; border: none; padding: 0.3rem 0.6rem; border-radius: 0.2rem; cursor: pointer; }
     #offline-download-btn { background: #4CAF50; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.3rem; cursor: pointer; margin-top: 0.5rem; }
-    #admin-search { width: 100%; padding: 0.5rem; margin-bottom: 1rem; border-radius: 0.3rem; border: none; background: #333; color: white; }
-    #admin-search::placeholder { color: #ccc; }
-    #search-users-btn { background: #4CAF50; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.3rem; cursor: pointer; margin-left: 0.5rem; }
-    #users-list table { width: 100%; border-collapse: collapse; color: white; margin-top: 1rem; }
-    #users-list th, #users-list td { border: 1px solid rgba(255,255,255,0.3); padding: 0.5rem; text-align: left; }
-    #users-list button { margin-right: 0.5rem; padding: 0.3rem 0.6rem; font-size: clamp(8px, 1.5vmin, 12px); cursor: pointer; border-radius: 0.2rem; border: none; }
-    #admin-user-activity { margin-top: 1rem; }
-    #admin-user-activity ul { list-style: none; padding: 0; }
-    #admin-user-activity li { padding: 0.5rem; background: rgba(255,255,255,0.1); margin-bottom: 0.5rem; border-radius: 0.3rem; }
-    .admin-action-btn { background: #d32f2f; color: white; }
-    .admin-action-btn:hover { background: #b71c1c; }
-    .admin-promote-btn { background: #4CAF50; color: white; }
-    .admin-promote-btn:hover { background: #45a049; }
-    .accordion-header {
-      background: rgba(255, 255, 255, 0.2); color: white; padding: 0.8vmin; cursor: pointer;
-      border-radius: 0.3rem; margin-bottom: 0.5vmin; font-size: clamp(12px, 2.2vmin, 16px);
-      transition: background 0.2s; display: flex; align-items: center; justify-content: space-between;
-    }
-    .accordion-header:hover { background: rgba(255, 255, 255, 0.3); }
-    .accordion-header::after {
-      content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: 1rem; color: white;
-    }
-    .accordion-header.active::after { content: '\f077'; }
-    .accordion-content {
-      display: none; padding: 1vmin; background: rgba(255, 255, 255, 0.1); border-radius: 0.3rem;
-    }
-    .accordion-content.active { display: block; }
     @media (max-width: 414px) {
       #button-container { right: 3vw; gap: 1.5vh; padding: 1.5vmin; }
       #hazard-button, #recenter-button, #settings-button, #current-alerts-button, #voice-button, #share-button, #leaderboard-button, #admin-button {
@@ -376,10 +344,6 @@
       }
       #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container, #admin-hud-container, #verification-hud-container, #user-profile-hud-container {
         width: 90vw; max-width: none; padding: 1.5vmin;
-      }
-      #admin-hud-container {
-        width: 95vw;
-        max-width: none;
       }
       #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header, #admin-hud-container header, #verification-hud-container header, #user-profile-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
@@ -393,7 +357,6 @@
       .traffic-cam-marker { width: 32px; height: 32px; }
       .settings-option .slider-value { font-size: clamp(9px, 1.8vmin, 13px); }
       .vote-btn { font-size: clamp(9px, 1.8vmin, 13px); }
-      #users-list th, #users-list td { padding: 0.3rem; font-size: 0.8rem; }
     }
     @media (min-width: 415px) and (max-width: 768px) {
       #button-container { right: 2.5vw; gap: 1.2vh; padding: 1.5vmin; }
@@ -406,10 +369,6 @@
       }
       #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container, #admin-hud-container, #verification-hud-container, #user-profile-hud-container {
         width: 80vw; max-width: 320px; padding: 1.2vmin;
-      }
-      #admin-hud-container {
-        width: 85vw;
-        max-width: 500px;
       }
       #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header, #admin-hud-container header, #verification-hud-container header, #user-profile-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
@@ -429,10 +388,6 @@
       }
       #report-box, #reroute-hud-container, #settings-hud-container, #alerts-hud-container, #camera-hud-container, #leaderboard-hud-container, #arrival-hud-container, #admin-hud-container, #verification-hud-container, #user-profile-hud-container {
         width: 30vw; max-width: 300px; padding: 1vmin;
-      }
-      #admin-hud-container {
-        width: 60vw;
-        max-width: 800px;
       }
       #report-box header, #reroute-hud-container header, #settings-hud-container header, #alerts-hud-container header, #camera-hud-container header, #leaderboard-hud-container header, #arrival-hud-container header, #admin-hud-container header, #verification-hud-container header, #user-profile-hud-container header {
         padding: 1vmin 0; margin-bottom: 1vmin;
@@ -466,32 +421,26 @@
     #auth-switch { margin-top: 1rem; font-size: 0.9rem; }
     #auth-switch a { color: #4CAF50; text-decoration: none; }
     #auth-switch a:hover { text-decoration: underline; }
-    #admin-content { flex: 1; padding: 1vmin; overflow-y: auto; display: flex; flex-direction: column; }
-    #admin-tabs { margin-bottom: 1rem; }
-    .admin-tab-content { padding: 1rem; background: rgba(255,255,255,0.05); border-radius: 0.5rem; }
-    #user-search-container { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-    #user-search { flex: 1; padding: 0.5rem; border-radius: 0.3rem; border: none; background: #333; color: white; }
-    #search-users-btn { background: #4CAF50; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.3rem; cursor: pointer; }
-    #show-all-users-btn { background: #2196F3; color: white; border: none; padding: 0.5rem 1rem; border-radius: 0.3rem; cursor: pointer; margin-top: 0.5rem; }
-    #users-list { margin-top: 1rem; overflow-x: auto; }
-    #users-list table { width: 100%; border-collapse: collapse; color: white; min-width: 600px; }
-    #users-list th, #users-list td { border: 1px solid rgba(255,255,255,0.3); padding: 0.8rem; text-align: left; }
-    #users-list th { background: rgba(255,255,255,0.1); }
-    #users-list button { margin-right: 0.5rem; padding: 0.4rem 0.8rem; font-size: 0.9rem; cursor: pointer; border-radius: 0.3rem; border: none; }
-    .delete-btn, .ban-btn { background: #d32f2f; color: white; }
-    .delete-btn:hover, .ban-btn:hover { background: #b71c1c; }
-    .ipban-btn { background: #f44336; color: white; }
-    .ipban-btn:hover { background: #d32f2f; }
-    .promote-btn { background: #4CAF50; color: white; }
-    .promote-btn:hover { background: #45a049; }
-    .demote-btn { background: #FF9800; color: white; }
-    .demote-btn:hover { background: #F57C00; }
-    .view-activity-btn { background: #2196F3; color: white; }
-    .view-activity-btn:hover { background: #1976D2; }
-    #user-activity-list { list-style: none; padding: 0; max-height: 300px; overflow-y: auto; }
-    #user-activity-list li { padding: 0.5rem; background: rgba(255,255,255,0.05); margin-bottom: 0.5rem; border-radius: 0.3rem; border-left: 3px solid #4CAF50; }
-    #user-activity-list li strong { color: #4CAF50; }
-    .no-activity { text-align: center; color: #ccc; font-style: italic; }
+    #admin-content { flex: 1; padding: 1vmin; overflow-y: auto; }
+    #user-search { padding: 0.5rem; margin-bottom: 1vmin; width: 100%; }
+    #search-users-btn { background: #4CAF50; color: white; border: none; padding: 0.5rem; cursor: pointer; }
+    #users-list table { width: 100%; border-collapse: collapse; color: white; }
+    #users-list th, #users-list td { border: 1px solid rgba(255,255,255,0.3); padding: 0.5vmin; text-align: left; }
+    #users-list button { margin-right: 0.5vmin; padding: 0.3vmin 0.6vmin; font-size: clamp(8px, 1.5vmin, 12px); cursor: pointer; }
+    .accordion-header {
+      background: rgba(255, 255, 255, 0.2); color: white; padding: 0.8vmin; cursor: pointer;
+      border-radius: 0.3rem; margin-bottom: 0.5vmin; font-size: clamp(12px, 2.2vmin, 16px);
+      transition: background 0.2s; display: flex; align-items: center; justify-content: space-between;
+    }
+    .accordion-header:hover { background: rgba(255, 255, 255, 0.3); }
+    .accordion-header::after {
+      content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: 1rem; color: white;
+    }
+    .accordion-header.active::after { content: '\f077'; }
+    .accordion-content {
+      display: none; padding: 1vmin; background: rgba(255, 255, 255, 0.1); border-radius: 0.3rem;
+    }
+    .accordion-content.active { display: block; }
   </style>
 </head>
 <body>
@@ -655,7 +604,7 @@
             </div>
             <div class="settings-option">
               <label for="voice-assistant-toggle">Voice Assistant (Nova)</label>
-              <input type="checkbox" id="voice-assistant-toggle" checked>
+              <input type="checkbox" id="voice-assistant-toggle">
             </div>
             <div class="settings-option">
               <label for="push-notifications-toggle">Push Notifications</label>
@@ -816,28 +765,12 @@
   <div id="admin-hud-container">
     <header>
       <button id="admin-close">X</button>
-      <h2>Admin Panel</h2>
     </header>
-    <div id="admin-tabs">
-      <div class="admin-tab active" data-tab="users">Users</div>
-      <div class="admin-tab" data-tab="activity">User Activity</div>
-    </div>
     <div id="admin-content">
-      <div id="users" class="admin-tab-content">
-        <div id="user-search-container">
-          <input id="user-search" type="text" placeholder="Search users by username or email">
-          <button id="search-users-btn">Search</button>
-        </div>
-        <button id="show-all-users-btn">Show All Users</button>
-        <div id="users-list"></div>
-      </div>
-      <div id="activity" class="admin-tab-content">
-        <div id="user-search-container">
-          <input id="activity-user-search" type="text" placeholder="Enter user ID or username for activity">
-          <button id="load-activity-btn">Load Activity</button>
-        </div>
-        <div id="user-activity-list"></div>
-      </div>
+      <input id="user-search" type="text" placeholder="Search users">
+      <button id="search-users-btn">Search</button>
+      <div id="users-list"></div>
+      <button id="show-nearby-users">Show All Nearby Users</button>
     </div>
   </div>
   <div id="user-profile-hud-container">
@@ -916,7 +849,7 @@
     let pushNotificationsEnabled = localStorage.getItem('pushNotificationsEnabled') !== 'false';
     let mapOrientation = localStorage.getItem('mapOrientation') || 'heading-up';
     let mapSkin = localStorage.getItem('mapSkin') || 'default';
-    let voiceAssistantEnabled = localStorage.getItem('voiceAssistantEnabled') !== 'false';
+    let voiceAssistantEnabled = localStorage.getItem('voiceAssistantEnabled') === 'true';
     let showTooltips = localStorage.getItem('showTooltips') !== 'false';
     let isInitialized = false;
     let toastTimeout = null;
@@ -1019,7 +952,7 @@
     let isLowBattery = false;
     let visibilityHandler = null;
     let currentVerificationAlertId = null;
-    let wakeWordRecognizer = null;
+    let pocketSphinxRecognizer = null;
     let commandSpeechRecognition = null;
     const tooltipTexts = {
       'hazard-button': 'Report hazard ahead',
@@ -1033,7 +966,6 @@
     };
     let tooltipTimer = null;
     let tooltipHideTimer = null;
-    let selectedUserId = null; // For admin activity view
     function showTooltip(buttonId, text) {
       if (!showTooltips) return;
       const tooltip = document.getElementById('tooltip');
@@ -1146,7 +1078,7 @@
     window.addEventListener('beforeunload', () => {
       releaseWakeLock();
       cleanupPageVisibility();
-      stopWakeWordDetection();
+      stopPocketSphinx();
     });
     navigator.getBattery?.().then(battery => {
       isLowBattery = battery.level < 0.2;
@@ -1203,10 +1135,8 @@
           sessionStorage.setItem('token', data.token);
           localStorage.setItem('userId', data.user.id);
           sessionStorage.setItem('userId', data.user.id);
-          isAdmin = data.user.email === 'imhoggbox@gmail.com' || data.user.isAdmin;
+          isAdmin = data.user.email === 'imhoggbox@gmail.com';
           localStorage.setItem('isAdmin', isAdmin);
-          sessionStorage.setItem('isAdmin', isAdmin);
-          document.getElementById('admin-button').style.display = isAdmin ? 'flex' : 'none';
           console.log('Token and userId saved:', { token: data.token.substring(0, 20) + '...', userId: data.user.id, isAdmin });
           document.getElementById('auth-container').style.display = 'none';
           showToast(isRegister ? 'Registration successful!' : 'Login successful!');
@@ -1592,10 +1522,10 @@
         checkURLForAlert();
         setupPageVisibility();
         if (isAdmin) {
-          document.getElementById('admin-button').style.display = 'flex';
+          document.getElementById('admin-button').style.display = 'block';
         }
         if (voiceAssistantEnabled) {
-          setTimeout(startWakeWordDetection, 1000); // Delay to ensure permissions
+          initPocketSphinx();
         }
         console.log('Map initialization complete');
       } catch (error) {
@@ -1650,10 +1580,14 @@
         map.setZoom(15);
         console.log('Centered map on alert from URL:', { alertId, lat, lng });
         window.history.replaceState({}, document.title, window.location.pathname);
-        fetchWithRetry(`/api/markers?lat=${lat}&lng=${lng}&maxDistance=100`, {
+        fetch(`/api/markers?lat=${lat}&lng=${lng}&maxDistance=100`, {
           headers: { 'Authorization': `Bearer ${(localStorage.getItem('token') || sessionStorage.getItem('token'))?.trim()}` }
         })
-          .then(response => response.json())
+          .then(response => {
+            console.log('Alert fetch response:', { status: response.status, ok: response.ok });
+            if (!response.ok) throw new Error(`Failed to fetch alert: ${response.statusText}`);
+            return response.json();
+          })
           .then(alerts => {
             const alert = alerts.find(a => a._id === alertId);
             if (alert) {
@@ -1784,37 +1718,13 @@
         }
       });
       document.getElementById('admin-button').addEventListener('click', () => {
-        window.location.href = 'admin.html';
-      });
-      document.getElementById('admin-close').addEventListener('click', () => {
-        document.getElementById('admin-hud-container').classList.remove('active');
-        console.log('Admin HUD closed');
-        if (navState.isNavigating && navState.isFollowing) {
-          lockNavigation();
-        }
-      });
-      document.querySelectorAll('.admin-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-          document.querySelectorAll('.admin-tab-content').forEach(c => c.style.display = 'none');
-          tab.classList.add('active');
-          document.getElementById(tab.dataset.tab).style.display = 'block';
-          if (tab.dataset.tab === 'activity' && selectedUserId) {
-            loadUserActivity(selectedUserId);
-          }
-        });
+        location.href = '/admin.html';
       });
       document.getElementById('search-users-btn').addEventListener('click', () => {
         const query = document.getElementById('user-search').value;
         fetchUsers(query);
       });
-      document.getElementById('show-all-users-btn').addEventListener('click', () => loadAllUsers());
-      document.getElementById('load-activity-btn').addEventListener('click', () => {
-        const query = document.getElementById('activity-user-search').value;
-        if (query) {
-          fetchUserForActivity(query);
-        }
-      });
+      document.getElementById('show-nearby-users').addEventListener('click', showNearbyUsers);
       document.getElementById('voice-button').addEventListener('click', startVoiceRecognition);
       document.getElementById('share-button').addEventListener('click', shareRoute);
       document.getElementById('recalibrate-compass-button').addEventListener('click', () => {
@@ -1843,9 +1753,9 @@
         voiceAssistantEnabled = e.target.checked;
         localStorage.setItem('voiceAssistantEnabled', voiceAssistantEnabled);
         if (voiceAssistantEnabled) {
-          startWakeWordDetection();
+          initPocketSphinx();
         } else {
-          stopWakeWordDetection();
+          stopPocketSphinx();
         }
         console.log('Voice assistant toggled:', voiceAssistantEnabled);
       });
@@ -1905,6 +1815,7 @@
           const region = { bounds: bounds.toJSON(), name: `Region ${navState.offlineRegions.length + 1}`, timestamp: new Date().toISOString() };
           navState.offlineRegions.push(region);
           localStorage.setItem('offlineRegions', JSON.stringify(navState.offlineRegions));
+          // Notify service worker to cache region
           navigator.serviceWorker.controller?.postMessage({ type: 'CACHE_REGION', region });
           loadOfflineRegions();
           showToast('Region downloaded for offline use');
@@ -1979,27 +1890,6 @@
       document.getElementById('user-profile-close').addEventListener('click', () => {
         document.getElementById('user-profile-hud-container').classList.remove('active');
       });
-      // Add logout button event listener
-      document.getElementById('logout-button').addEventListener('click', () => {
-      console.log('Logout button clicked');
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      localStorage.removeItem('isAdmin');
-      sessionStorage.removeItem('token');
-      sessionStorage.removeItem('userId');
-      sessionStorage.removeItem('isAdmin');
-      isAdmin = false;
-      document.getElementById('admin-button').style.display = 'none';
-      document.getElementById('auth-container').style.display = 'flex';
-      document.getElementById('settings-hud-container').classList.remove('active');
-      showToast('Logged out successfully');
-      if (socket) {
-        socket.disconnect();
-        socket = null;
-      }
-      stopGPS();
-      console.log('User logged out, auth container shown');
-    });
       let dragStartTime;
       let dragTimer;
       map.addListener('dragstart', () => {
@@ -2180,15 +2070,6 @@
           console.log('Restored default distances: hazard=2 miles, camera=0.5 miles');
         }
       });
-      document.querySelectorAll('.settings-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
-          document.querySelectorAll('.settings-tab-content').forEach(c => c.style.display = 'none');
-          tab.classList.add('active');
-          document.getElementById(tab.getAttribute('data-tab')).style.display = 'block';
-          console.log('Switched to settings tab:', tab.getAttribute('data-tab'));
-        });
-      });
       document.querySelectorAll('.alerts-tab').forEach(tab => {
         tab.addEventListener('click', () => {
           document.querySelectorAll('.alerts-tab').forEach(t => t.classList.remove('active'));
@@ -2205,83 +2086,44 @@
         }
       });
     }
-    async function startWakeWordDetection() {
-      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        console.warn('Speech recognition not supported');
-        showToast('Voice assistant not supported in this browser');
-        return;
-      }
-      if (!voiceAssistantEnabled) {
-        console.log('Voice assistant disabled, skipping');
+    async function initPocketSphinx() {
+      if (!window.PocketSphinx) {
+        console.warn('PocketSphinx not loaded');
+        showToast('Voice assistant unavailable: PocketSphinx not loaded');
         return;
       }
       try {
-        await navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-          stream.getTracks().forEach(track => track.stop());
-          console.log('Mic access granted for wake word');
-        }).catch(err => {
-          console.error('Mic access denied:', err);
-          showToast('Mic access denied - check permissions');
-          return;
-        });
-        if (wakeWordRecognizer) {
-          wakeWordRecognizer.stop();
-        }
-        wakeWordRecognizer = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-        wakeWordRecognizer.continuous = true;
-        wakeWordRecognizer.interimResults = true;
-        wakeWordRecognizer.lang = 'en-US';
-        wakeWordRecognizer.maxAlternatives = 1;
-        wakeWordRecognizer.onresult = (event) => {
-          let transcript = '';
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript.toLowerCase().trim();
-          }
-          console.log('Wake word heard:', transcript);
-          if (transcript.includes('hey nova')) {
+        pocketSphinxRecognizer = new window.PocketSphinx();
+        const grammar = `#JSGF V1.0;\ngramma r wakeword;\npublic <wakeword> = hey nova;`;
+        pocketSphinxRecognizer.loadGrammar('wakeword', grammar);
+        pocketSphinxRecognizer.setSearch('wakeword');
+        pocketSphinxRecognizer.on('result', (result) => {
+          if (result.hypstr.toLowerCase() === 'hey nova') {
             console.log('Wake word "Hey Nova" detected');
             showToast('Listening for command...');
-            wakeWordRecognizer.stop();
             startCommandRecognition();
-            setTimeout(startWakeWordDetection, 3000);
           }
-        };
-        wakeWordRecognizer.onerror = (event) => {
-          console.error('Wake word recognition error:', event.error);
-          if (event.error === 'not-allowed') {
-            showToast('Mic access denied - check permissions');
-          } else if (event.error !== 'aborted') {
-            setTimeout(startWakeWordDetection, 1000);
-          }
-        };
-        wakeWordRecognizer.onend = () => {
-          if (voiceAssistantEnabled) {
-            setTimeout(startWakeWordDetection, 100);
-          }
-        };
-        wakeWordRecognizer.start();
-        console.log('Wake word detection started');
-        showToast('Voice assistant enabled');
+        });
+        pocketSphinxRecognizer.on('error', (err) => {
+          console.error('PocketSphinx error:', err);
+        });
+        await pocketSphinxRecognizer.start();
+        console.log('PocketSphinx initialized and started');
       } catch (err) {
-        console.error('Failed to start wake word detection:', err);
-        showToast('Voice assistant failed to start');
-        stopWakeWordDetection();
+        console.error('Failed to init PocketSphinx:', err);
+        showToast('Voice assistant initialization failed');
+        stopPocketSphinx();
       }
     }
-    function stopWakeWordDetection() {
-      if (wakeWordRecognizer) {
-        wakeWordRecognizer.stop();
-        wakeWordRecognizer = null;
-        console.log('Wake word detection stopped');
-      }
-      if (commandSpeechRecognition) {
-        commandSpeechRecognition.stop();
-        commandSpeechRecognition = null;
-        console.log('Command recognition stopped');
+    function stopPocketSphinx() {
+      if (pocketSphinxRecognizer) {
+        pocketSphinxRecognizer.stop();
+        pocketSphinxRecognizer = null;
+        console.log('PocketSphinx stopped');
       }
     }
     function startCommandRecognition() {
-      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
         console.warn('Speech recognition not supported');
         showToast('Command recognition not supported');
         return;
@@ -2305,9 +2147,6 @@
       commandSpeechRecognition.onend = () => {
         console.log('Command recognition ended');
         commandSpeechRecognition = null;
-        if (voiceAssistantEnabled) {
-          startWakeWordDetection();
-        }
       };
       commandSpeechRecognition.start();
       console.log('Command recognition started');
@@ -2334,6 +2173,7 @@
         showToast('Placing alert at current location');
       } else if (command.includes('place an alert at this location')) {
         showToast('Tap on the map to place alert');
+        // Trigger manual placement mode
         const manualReportButton = document.querySelector('[data-alert-type="Manual Report"]');
         if (manualReportButton) manualReportButton.click();
       } else if (command.includes('recenter')) {
@@ -2352,17 +2192,28 @@
           throw new Error('Invalid token format in storage');
         }
         console.log('Fetching profile with token:', token.substring(0, 20) + '...');
-        let response = await fetchWithRetry(`/api/auth/profile/${targetId}`, {
+        let response = await fetch(`/api/auth/profile/${targetId}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         console.log('Profile fetch response:', { status: response.status, ok: response.ok });
+        if (response.status === 401) {
+          const refreshed = await refreshToken();
+          if (refreshed) {
+            response = await fetch(`/api/auth/profile/${targetId}`, {
+              headers: { 'Authorization': `Bearer ${(localStorage.getItem('token') || sessionStorage.getItem('token')).trim()}` }
+            });
+          } else {
+            throw new Error('Authentication failed');
+          }
+        }
+        if (!response.ok) throw new Error(`Profile fetch failed: ${response.status}`);
         const data = await response.json();
-        if (!response.ok) throw new Error(`Profile fetch failed: ${data.error || response.statusText}`);
-        isAdmin = data.email === 'imhoggbox@gmail.com' || data.isAdmin;
+        console.log('Profile data received:', data);
+        isAdmin = data.email === 'imhoggbox@gmail.com';
         localStorage.setItem('isAdmin', isAdmin);
         sessionStorage.setItem('isAdmin', isAdmin);
         if (isAdmin) {
-          document.getElementById('admin-button').style.display = 'flex';
+          document.getElementById('admin-button').style.display = 'block';
         }
         return data;
       } catch (err) {
@@ -2450,7 +2301,7 @@
           return;
         }
         console.log('Subscribing to push with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry('/api/auth/subscribe', {
+        const response = await fetch('/api/auth/subscribe', {
           method: 'POST',
           mode: 'cors',
           credentials: 'include',
@@ -2479,7 +2330,7 @@
             return;
           }
           console.log('Unsubscribing from push with token:', token.substring(0, 20) + '...');
-          await fetchWithRetry('/api/auth/unsubscribe', {
+          await fetch('/api/auth/unsubscribe', {
             method: 'POST',
             mode: 'cors',
             credentials: 'include',
@@ -2522,11 +2373,11 @@
       }
       try {
         console.log('Fetching leaderboard with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry('/api/leaderboard', {
+        const response = await fetch('/api/leaderboard', {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         console.log('Leaderboard fetch response:', { status: response.status, ok: response.ok });
-        if (!response.ok) throw new Error(`Leaderboard fetch failed: ${response.statusText}`);
+        if (!response.ok) throw new Error(`Leaderboard fetch failed: ${response.status}`);
         const users = await response.json();
         const content = document.getElementById('leaderboard-content');
         content.innerHTML = '';
@@ -2546,7 +2397,7 @@
       }
     }
     function startVoiceRecognition() {
-      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      if (!window.SpeechRecognition && !window.webkitSpeechRecognition) {
         console.warn('Speech recognition not supported');
         showToast('Speech recognition not supported');
         return;
@@ -2625,35 +2476,6 @@
         return false;
       }
     }
-    async function fetchWithRetry(url, options, retries = 3, backoff = 1000) {
-      for (let i = 0; i < retries; i++) {
-        try {
-          const response = await fetch(url, options);
-          if (response.status === 401) {
-            console.log(`Attempt ${i + 1} failed with 401, trying to refresh token`);
-            const refreshed = await refreshToken();
-            if (refreshed) {
-              const newToken = localStorage.getItem('token') || sessionStorage.getItem('token');
-              options.headers['Authorization'] = `Bearer ${newToken.trim()}`;
-              return await fetch(url, options);
-            }
-          }
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
-          }
-          return response;
-        } catch (error) {
-          if (i < retries - 1) {
-            console.log(`Fetch retry ${i + 1} failed for ${url}:`, error.message, `Retrying in ${backoff}ms...`);
-            await new Promise(resolve => setTimeout(resolve, backoff));
-            backoff *= 2;
-          } else {
-            throw error;
-          }
-        }
-      }
-    }
     async function confirmAlertLocation(location, alertType) {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -2667,19 +2489,24 @@
           return;
         }
         console.log('Checking nearby alerts with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`, {
+        const response = await fetch(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         console.log('Nearby alerts response:', { status: response.status, ok: response.ok });
-        const nearbyAlerts = await response.json();
-        if (nearbyAlerts.length > 0) {
-          showToast('Cannot place alert within 500ft of another alert. Please choose a different location.');
-          navState.alertState = 'IDLE';
-          if (navState.mapClickListener) {
-            google.maps.event.removeListener(navState.mapClickListener);
-            navState.mapClickListener = null;
+        if (!response.ok) {
+          console.warn(`Failed to check nearby alerts (status: ${response.status}), proceeding with alert placement`);
+          showToast('Server unavailable for nearby alerts check. Proceeding with placement.');
+        } else {
+          const nearbyAlerts = await response.json();
+          if (nearbyAlerts.length > 0) {
+            showToast('Cannot place alert within 500ft of another alert. Please choose a different location.');
+            navState.alertState = 'IDLE';
+            if (navState.mapClickListener) {
+              google.maps.event.removeListener(navState.mapClickListener);
+              navState.mapClickListener = null;
+            }
+            return;
           }
-          return;
         }
       } catch (error) {
         console.error('Error checking nearby alerts:', error);
@@ -2765,7 +2592,7 @@
           return;
         }
         console.log('Posting alert with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry('/api/alerts', {
+        let response = await fetch('/api/alerts', {
           method: 'POST',
           mode: 'cors',
           credentials: 'include',
@@ -2776,6 +2603,23 @@
           body: JSON.stringify(navState.tempAlertData)
         });
         console.log('Post alert response:', { status: response.status, ok: response.ok });
+        if (response.status === 401) {
+          const refreshed = await refreshToken();
+          if (refreshed) {
+            response = await fetch('/api/alerts', {
+              method: 'POST',
+              mode: 'cors',
+              credentials: 'include',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${(localStorage.getItem('token') || sessionStorage.getItem('token')).trim()}`
+              },
+              body: JSON.stringify(navState.tempAlertData)
+            });
+          } else {
+            throw new Error('Authentication failed');
+          }
+        }
         const result = await response.json();
         console.log('Post alert result:', result);
         if (response.status === 201 && result.alert) {
@@ -2786,10 +2630,6 @@
             title: `${navState.tempAlertData.type} Alert`
           });
           markers.set(result.alert._id, marker);
-          if (!currentAlerts.some(a => a._id === result.alert._id)) {
-            currentAlerts.push(result.alert);
-          }
-          displayAlertsInHud(currentAlerts);
           console.log('Alert saved to MongoDB:', result.alert);
           showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
           if (isTrafficCamera) {
@@ -2798,6 +2638,7 @@
               lng: navState.tempAlertData.location.coordinates[0]
             });
           } else if (navState.isNavigating) {
+            currentAlerts.push(result.alert);
             checkHazardsAndOfferReroute();
           }
           if (socket && socket.connected) {
@@ -2806,16 +2647,10 @@
           }
           const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
           fetchProfile(ownId, true).then(populateAccountProfile);
+          // Share with family
           if (navState.familyMembers.length > 0) {
             socket.emit('familyAlert', { alert: result.alert, family: navState.familyMembers });
           }
-        } else if (response.status === 409 && result.alert) {
-          if (!currentAlerts.some(a => a._id === result.alert._id)) {
-            currentAlerts.push(result.alert);
-            displayAlertsInHud(currentAlerts);
-          }
-          showToast(result.message || 'Duplicate alert ignored.');
-          console.log('Duplicate alert ignored:', result.alert._id);
         } else {
           console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
           showToast(`Failed to save alert: ${result.error || 'Server error'}`);
@@ -2879,7 +2714,7 @@
           return;
         }
         console.log(`Voting ${voteType} on alert ${alertId} with token:`, token.substring(0, 20) + '...');
-        const response = await fetchWithRetry(`/api/alerts/${alertId}/vote`, {
+        const response = await fetch(`/api/alerts/${alertId}/vote`, {
           method: 'POST',
           mode: 'cors',
           credentials: 'include',
@@ -2890,21 +2725,24 @@
           body: JSON.stringify({ voteType })
         });
         console.log('Vote response:', { status: response.status, ok: response.ok });
+        if (!response.ok) {
+          throw new Error(`Failed to vote: ${response.statusText}`);
+        }
         const updatedAlert = await response.json();
         console.log('Vote successful, updated alert:', updatedAlert);
-        if (!response.ok) {
-          throw new Error(`Failed to vote: ${updatedAlert.error || response.statusText}`);
-        }
+        // Update local alerts
         const index = currentAlerts.findIndex(a => a._id === alertId);
         if (index !== -1) {
           currentAlerts[index] = updatedAlert;
           displayAlertsInHud(currentAlerts);
         }
+        // Check if should remove alert
         if (updatedAlert.votes.down > updatedAlert.votes.up * 2) {
           console.log('Downvotes exceed threshold, removing alert');
           deleteAlert(alertId);
         } else if (updatedAlert.votes.up > updatedAlert.votes.down) {
           console.log('Upvotes exceed downvotes, extending alert duration');
+          // Assume backend handles extension, or emit event
           if (socket && socket.connected) {
             socket.emit('extendAlert', alertId);
           }
@@ -2913,7 +2751,7 @@
         showToast(`Voted ${voteType} on alert.`);
       } catch (error) {
         console.error('Error voting on alert:', error);
-        showToast(`Failed to vote on alert: ${error.message}`);
+        showToast('Failed to vote on alert.');
       }
     }
     function dismissVerificationHud() {
@@ -2944,42 +2782,43 @@
           setTimeout(() => pollAlerts(), 1000);
           return;
         }
-        const response = await fetchWithRetry(`/api/alerts/${id}`, {
+        const response = await fetch(`/api/alerts/${id}`, {
           method: 'DELETE',
           mode: 'cors',
           credentials: 'include',
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         console.log('Delete alert response:', { status: response.status, ok: response.ok });
-        if (!response.ok) {
+        if (response.ok) {
+          marker.setMap(null);
+          markers.delete(id);
+          item?.remove();
+          const alert = currentAlerts.find(a => a._id === id);
+          if (alert && alert.type === 'Traffic Camera') {
+            cameraPositions = cameraPositions.filter(pos =>
+              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+            );
+            cameraAlertShown.delete(`mongo-${id}`);
+          }
+          currentAlerts = currentAlerts.filter(a => a._id !== id);
+          displayAlertsInHud(currentAlerts);
+          showToast('Alert deleted successfully.');
+          console.log('Alert deletion synced:', id);
+          if (socket && socket.connected) {
+            socket.emit('alertDeleted', id);
+            console.log('Emitted alertDeleted event:', id);
+          } else {
+            console.warn('Socket not connected, relying on polling for alert deletion:', id);
+            setTimeout(() => pollAlerts(), 1000);
+          }
+          const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+          fetchProfile(ownId, true).then(populateAccountProfile);
+        } else {
           throw new Error(`Failed to delete alert: ${response.statusText}`);
         }
-        marker.setMap(null);
-        markers.delete(id);
-        item?.remove();
-        const alert = currentAlerts.find(a => a._id === id);
-        if (alert && alert.type === 'Traffic Camera') {
-          cameraPositions = cameraPositions.filter(pos =>
-            pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
-          );
-          cameraAlertShown.delete(`mongo-${id}`);
-        }
-        currentAlerts = currentAlerts.filter(a => a._id !== id);
-        displayAlertsInHud(currentAlerts);
-        showToast('Alert deleted successfully.');
-        console.log('Alert deletion synced:', id);
-        if (socket && socket.connected) {
-          socket.emit('alertDeleted', id);
-          console.log('Emitted alertDeleted event:', id);
-        } else {
-          console.warn('Socket not connected, relying on polling for alert deletion:', id);
-          setTimeout(() => pollAlerts(), 1000);
-        }
-        const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-        fetchProfile(ownId, true).then(populateAccountProfile);
       } catch (error) {
         console.error('Error deleting alert:', error);
-        showToast(`Failed to delete alert: ${error.message}`);
+        showToast('Failed to delete alert. Retrying...');
         setTimeout(() => pollAlerts(), 1000);
       }
     }
@@ -2992,10 +2831,11 @@
           return;
         }
         console.log('Polling alerts with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${navState.alertRadius * 1609.34}`, {
+        const response = await fetch(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${navState.alertRadius * 1609.34}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         console.log('Poll alerts response:', { status: response.status, ok: response.ok });
+        if (!response.ok) throw new Error(`Failed to fetch alerts for polling: ${response.statusText}`);
         const serverAlerts = await response.json();
         const serverAlertIds = new Set(serverAlerts.map(alert => alert._id));
         let removedCount = 0;
@@ -3007,11 +2847,11 @@
             console.log('Removed stale marker during poll:', id);
           }
         });
-        currentAlerts = [...new Map(serverAlerts.filter(alert => {
+        currentAlerts = serverAlerts.filter(alert => {
           if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
           const filterKey = alert.type.toLowerCase().replace(' ', '-');
           return navState.alertFilters[filterKey] !== false;
-        }).map(a => [a._id, a])).values()];
+        });
         displayAlertsInHud(currentAlerts);
         console.log(`Polling synced: ${serverAlerts.length} markers, removed ${removedCount} stale`);
       } catch (error) {
@@ -3028,10 +2868,11 @@
         }
         console.log('Fetching markers with token:', token.substring(0, 20) + '...');
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=${navState.alertRadius * 1609.34}`;
-        const response = await fetchWithRetry(url, {
+        const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         console.log('Markers fetch response:', { status: response.status, ok: response.ok });
+        if (!response.ok) throw new Error(`Failed to fetch markers: ${response.statusText}`);
         const markersData = await response.json();
         markers.forEach((marker, id) => {
           marker.setMap(null);
@@ -3061,53 +2902,46 @@
             });
           }
         });
-        currentAlerts = [...new Map(markersData.filter(alert => {
-          if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
-          const filterKey = alert.type.toLowerCase().replace(' ', '-');
-          return navState.alertFilters[filterKey] !== false;
-        }).map(a => [a._id, a])).values()];
-        displayAlertsInHud(currentAlerts);
         console.log('Fetched and displayed markers:', markersData.length);
       } catch (error) {
         console.error('Error fetching markers:', error);
         showToast('Failed to load alerts.');
       }
     }
-    async function fetchCurrentAlerts() {
+    function fetchCurrentAlerts() {
       const center = navState.userLocation;
       const token = localStorage.getItem('token') || sessionStorage.getItem('token');
       if (!token || !token.includes('.') || token === 'undefined') {
-        console.error('Invalid token, showing auth form');
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('userId');
-        document.getElementById('auth-container').style.display = 'flex';
+        console.error('Invalid token, skipping alert fetch');
         return;
       }
-      try {
-        console.log('Fetching current alerts with token:', token.substring(0, 20) + '...');
-        const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=${navState.alertRadius * 1609.34}`;
-        const response = await fetchWithRetry(url, {
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
+      console.log('Fetching current alerts with token:', token.substring(0, 20) + '...');
+      const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=${navState.alertRadius * 1609.34}`;
+      fetch(url, {
+        headers: { 'Authorization': `Bearer ${token.trim()}` }
+      })
+        .then(response => {
+          console.log('Current alerts fetch response:', { status: response.status, ok: response.ok });
+          if (!response.ok) throw new Error(`Failed to fetch alerts: ${response.statusText}`);
+          return response.json();
+        })
+        .then(alerts => {
+          currentAlerts = alerts.filter(alert => {
+            if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
+            const filterKey = alert.type.toLowerCase().replace(' ', '-');
+            return navState.alertFilters[filterKey] !== false;
+          });
+          lastAlertFetchTime = Date.now();
+          displayAlertsInHud(currentAlerts);
+          if (navState.isNavigating) {
+            checkHazardsAndOfferReroute();
+          }
+          console.log('Fetched current alerts:', currentAlerts.length);
+        })
+        .catch(error => {
+          console.error('Error fetching alerts:', error);
+          showToast('Failed to load current alerts.');
         });
-        console.log('Current alerts fetch response:', { status: response.status, ok: response.ok });
-        const alerts = await response.json();
-        currentAlerts = [...new Map(alerts.filter(alert => {
-          if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
-          const filterKey = alert.type.toLowerCase().replace(' ', '-');
-          return navState.alertFilters[filterKey] !== false;
-        }).map(a => [a._id, a])).values()];
-        lastAlertFetchTime = Date.now();
-        displayAlertsInHud(currentAlerts);
-        if (navState.isNavigating) {
-          checkHazardsAndOfferReroute();
-        }
-        console.log('Fetched current alerts:', currentAlerts.length);
-      } catch (error) {
-        console.error('Error fetching alerts:', error);
-        showToast(`Failed to load current alerts: ${error.message}`);
-      }
     }
     function formatDuration(ms) {
       const seconds = Math.floor(ms / 1000);
@@ -3126,7 +2960,6 @@
         content.innerHTML = '<p>No current alerts nearby.</p>';
         return;
       }
-      const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
       alerts.forEach(alert => {
         const dateObj = new Date(alert.timestamp);
         const now = Date.now();
@@ -3134,8 +2967,6 @@
         const item = document.createElement('div');
         item.className = 'alert-item';
         const postedBy = alert.userId && alert.userId.username ? `<a href="#" onclick="viewUserProfile('${alert.userId._id}')">${alert.userId.username}</a>` : 'Anonymous';
-        const isOwn = alert.userId && alert.userId._id === ownId;
-        const showDelete = isOwn || isAdmin;
         item.innerHTML = `
           <div class="alert-field"><strong>Exact Location:</strong> ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`}</div>
           <div class="alert-field"><strong>Date:</strong> ${dateObj.toLocaleDateString()}</div>
@@ -3147,7 +2978,7 @@
           </div>
           <div class="alert-actions">
             <button class="center-btn" data-lat="${alert.location.coordinates[1]}" data-lng="${alert.location.coordinates[0]}">Center</button>
-            ${showDelete ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
+            ${alert.userId && alert.userId._id === (localStorage.getItem('userId') || sessionStorage.getItem('userId')) ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
             <button class="vote-btn upvote-btn" data-id="${alert._id}" data-type="up">👍 Upvote</button>
             <button class="vote-btn downvote-btn" data-id="${alert._id}" data-type="down">👎 Downvote</button>
           </div>
@@ -3506,7 +3337,7 @@
           console.error('Invalid token, skipping server location update');
           return;
         }
-        const response = await fetchWithRetry('/api/location', {
+        const response = await fetch('/api/location', {
           method: 'POST',
           mode: 'cors',
           credentials: 'include',
@@ -3684,6 +3515,7 @@
       }
     }
     function forecastTrafficAhead() {
+      // Simulate predictive alert
       if (Math.random() > 0.8 && navState.isNavigating) {
         showToast('AI Forecast: Heavy traffic 10 miles ahead. Consider reroute.');
         console.log('Simulated traffic forecast alert');
@@ -3974,6 +3806,7 @@
         avoidHighways: navState.avoidHighways
       };
       if (navState.evCharging) {
+        // Simulate EV charging waypoint
         request.waypoints.unshift({ location: 'EV charging station near origin', stopover: true });
       }
       directionsService.route(request, (response, status) => {
@@ -4030,7 +3863,7 @@
               map.setZoom(zoom);
               map.setTilt(tilt);
               userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-              console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading: targetHeading, tilt, orientation: navState.mapOrientation });
+              console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
               setTimeout(() => { isProgrammaticUpdate = false; }, 100);
             });
           }
@@ -4155,602 +3988,729 @@
         console.log('User off-route detected, recalculating...', { distance: OFF_ROUTE_TOLERANCE });
         showToast('You are off-route. Recalculating route...');
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
-          console.log('Route recalculated due to off-route detection');
-          showToast('Route recalculated.');
-          if (navState.isFollowing) {
-            lockNavigation();
-          }
+          showToast('Route recalculated successfully.');
+          console.log('Route recalculated:', navState.currentRoute.routes[0].legs[0].distance.text);
+          updateOffRoadPolyline(rawUserLocation, navState.currentRoute.routes[0].overview_path[0]);
+          restoreNavigationView();
         });
         return true;
       }
+      console.log('User on route');
       return false;
     }
-    function createAlertContent() {
-      const content = document.createElement('div');
-      content.style.width = '20px';
-      content.style.height = '20px';
-      content.style.backgroundColor = 'red';
-      content.style.borderRadius = '50%';
-      content.style.border = '2px solid white';
-      content.classList.add('ping');
-      return content;
-    }
-    function createTrafficCameraContent() {
-      const content = document.createElement('img');
-      content.src = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
-      content.className = 'traffic-cam-marker';
-      return content;
-    }
-    function checkHazardsAndOfferReroute() {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.userLocation) {
-        console.log('Hazard check skipped: Not navigating or no route/location data');
+    async function checkHazardsAndOfferReroute() {
+      console.log('Checking for hazards...');
+      if (!navState.isNavigating || !navState.currentRoute || !navState.currentRoute.routes || !navState.currentRoute.routes[0] || navState.alertState === 'OFFERING_REROUTE') {
+        console.log('checkHazardsAndOfferReroute skipped:', {
+          isNavigating: navState.isNavigating,
+          hasCurrentRoute: !!navState.currentRoute,
+          hasRoutes: !!(navState.currentRoute && navState.currentRoute.routes),
+          alertState: navState.alertState
+        });
         return;
       }
-      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      if (cameraHudContainer.classList.contains('active')) {
+        console.log('Camera HUD active, queuing reroute HUD');
+        navState.pendingReroute = true;
+        return;
+      }
       const path = navState.currentRoute.routes[0].overview_path;
-      for (const alert of currentAlerts) {
-        if (alert.type === 'Traffic Camera' || navState.ignoredHazards.includes(alert._id)) continue;
-        const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
-        if (distance <= hazardAlertDistance * 1609.34) {
-          let isOnRoute = false;
-          for (const point of path) {
-            const pointLatLng = new google.maps.LatLng(point);
-            const distanceToPoint = google.maps.geometry.spherical.computeDistanceBetween(alertLatLng, pointLatLng);
-            if (distanceToPoint < 50) {
-              isOnRoute = true;
-              break;
-            }
-          }
-          if (isOnRoute) {
-            console.log('Hazard detected on route:', { alertId: alert._id, type: alert.type, distance });
-            navState.currentHazard = alert;
-            calculateAlternativeRoute(alert);
-            break;
-          }
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      let closestIndex = 0;
+      let minDistance = Infinity;
+      path.forEach((point, index) => {
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, point);
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestIndex = index;
         }
-      }
-    }
-    function calculateAlternativeRoute(hazard) {
-      if (!navState.isNavigating || !navState.currentRoute || !navState.userLocation || !navState.destination) {
-        console.log('Alternative route calculation skipped: Missing navigation data');
-        return;
-      }
-      const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
-      const waypoints = navState.waypoints.map(w => ({ location: w, stopover: true }));
-      const request = {
-        origin: navState.userLocation,
-        destination: navState.destination,
-        travelMode: google.maps.TravelMode.DRIVING,
-        provideRouteAlternatives: true,
-        waypoints: waypoints,
-        avoidTolls: navState.avoidTolls,
-        avoidHighways: navState.avoidHighways,
-        region: 'US'
-      };
-      directionsService.route(request, (response, status) => {
-        if (status === 'OK' && response.routes.length > 1) {
-          let selectedRoute = null;
-          let timeSaved = 0;
-          const mainRouteDuration = navState.currentRoute.routes[0].legs[0].duration.value;
-          for (const route of response.routes) {
-            let intersectsHazard = false;
-            for (const point of route.overview_path) {
-              const pointLatLng = new google.maps.LatLng(point);
-              const distance = google.maps.geometry.spherical.computeDistanceBetween(hazardLatLng, pointLatLng);
-              if (distance < ALTERNATE_TRIGGER_DISTANCE) {
-                intersectsHazard = true;
-                break;
-              }
+      });
+      const segmentPath = path.slice(closestIndex);
+      const polyline = segmentPath.map(point => [point.lng(), point.lat()]);
+      console.log('Checking hazards for polyline:', { points: polyline.length, maxDistance: hazardAlertDistance * 1609.34 });
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, skipping hazard check');
+          return;
+        }
+        console.log('Checking hazards with token:', token.substring(0, 20) + '...');
+        const response = await fetch('/api/hazards-near-route', {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token.trim()}`
+          },
+          body: JSON.stringify({ polyline, maxDistance: hazardAlertDistance * 1609.34 })
+        });
+        console.log('Hazard check response:', { status: response.status, ok: response.ok });
+        if (!response.ok) {
+          throw new Error(`HTTP error ${response.status}: ${await response.text()}`);
+        }
+        const hazards = await response.json();
+        console.log('Hazard check response:', { hazards: hazards.length });
+        if (hazards.length > 0) {
+          const validHazards = hazards.filter(hazard => {
+            if (navState.ignoredHazards.includes(hazard._id)) {
+              console.log('Ignoring previously handled hazard:', hazard._id);
+              return false;
             }
-            if (!intersectsHazard) {
-              selectedRoute = route;
-              timeSaved = mainRouteDuration - route.legs[0].duration.value;
-              if (timeSaved > 60) {
-                break;
-              }
+            const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+            const distanceToHazard = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, hazardLatLng);
+            const distanceToPolyline = getMinDistanceToPolyline(hazardLatLng, path);
+            console.log(`Hazard ${hazard._id}: type=${hazard.type}, distanceToUser=${distanceToHazard}m, distanceToPolyline=${distanceToPolyline}m`);
+            const isValid = distanceToHazard >= MIN_REROUTE_DISTANCE && distanceToHazard <= hazardAlertDistance * 1609.34 && distanceToPolyline < ALTERNATE_TRIGGER_DISTANCE;
+            console.log('Hazard valid?', isValid);
+            return isValid;
+          });
+          if (validHazards.length > 0) {
+            const hazard = validHazards[0];
+            console.log('Valid hazard detected near route:', hazard);
+            navState.currentHazard = hazard;
+            navState.originalRoute = navState.currentRoute;
+            const timeSaved = await checkAlternativeRoute(hazard);
+            if (timeSaved !== null) {
+              showRerouteHud(hazard, timeSaved);
+              navState.pendingReroute = false;
+            } else {
+              console.log('No suitable alternative route found that avoids the hazard.');
+              showToast('Hazard detected, but no alternative route available.');
+              navState.ignoredHazards.push(hazard._id);
             }
-          }
-          if (selectedRoute) {
-            navState.alternativeRoute = response;
-            alternativeRenderer.setDirections(response);
-            alternativeRenderer.setRouteIndex(response.routes.indexOf(selectedRoute));
-            alternativeRenderer.setMap(map);
-            showRerouteHud(hazard, timeSaved);
-            console.log('Alternative route calculated:', {
-              hazardId: hazard._id,
-              timeSaved: timeSaved / 60,
-              pathLength: selectedRoute.overview_path.length
-            });
           } else {
-            console.log('No viable alternative route found');
+            console.log('No valid hazards ahead after filtering.');
           }
         } else {
-          console.log('Alternative route request failed:', status);
+          console.log('No hazards detected near route.');
         }
+      } catch (error) {
+        console.error('Error checking hazards:', error);
+        showToast('Unable to check for hazards. Please try again.');
+      }
+    }
+    function projectPointToLine(p, a, b) {
+      const lat1 = a.lat();
+      const lng1 = a.lng();
+      const lat2 = b.lat();
+      const lng2 = b.lng();
+      const lat3 = p.lat();
+      const lng3 = p.lng();
+      const dx = lng2 - lng1;
+      const dy = lat2 - lat1;
+      if (dx === 0 && dy === 0) return a;
+      const t = ((lat3 - lat1) * dy + (lng3 - lng1) * dx) / (dx * dx + dy * dy);
+      if (t < 0) return a;
+      if (t > 1) return b;
+      return new google.maps.LatLng(lat1 + t * dy, lng1 + t * dx);
+    }
+    function distanceToSegment(point, a, b) {
+      const proj = projectPointToLine(point, a, b);
+      return google.maps.geometry.spherical.computeDistanceBetween(point, proj);
+    }
+    function getMinDistanceToPolyline(point, path) {
+      let minDist = Infinity;
+      for (let i = 0; i < path.length - 1; i++) {
+        const dist = distanceToSegment(point, path[i], path[i + 1]);
+        minDist = Math.min(minDist, dist);
+      }
+      return minDist;
+    }
+    function isHazardAvoided(hazardPoint, path) {
+      const BUFFER = 50;
+      let minDist = Infinity;
+      for (let i = 0; i < path.length - 1; i++) {
+        const dist = distanceToSegment(hazardPoint, path[i], path[i + 1]);
+        minDist = Math.min(minDist, dist);
+      }
+      console.log('Hazard avoidance check:', { minDist, buffer: BUFFER, avoided: minDist > BUFFER });
+      return minDist > BUFFER;
+    }
+    async function checkAlternativeRoute(hazard) {
+      return new Promise((resolve) => {
+        if (!navState.userLocation || !navState.destination) {
+          console.error('Missing userLocation or destination for route calculation', {
+            userLocation: navState.userLocation,
+            destination: navState.destination
+          });
+          resolve(null);
+          return;
+        }
+        const hazardLatLng = new google.maps.LatLng(hazard.location.coordinates[1], hazard.location.coordinates[0]);
+        const tryRoute = (options, attempt) => {
+          const midpoint = google.maps.geometry.spherical.interpolate(
+            new google.maps.LatLng(navState.userLocation),
+            new google.maps.LatLng(navState.destination),
+            0.5
+          );
+          const request = {
+            origin: navState.userLocation,
+            destination: navState.destination,
+            travelMode: google.maps.TravelMode.DRIVING,
+            provideRouteAlternatives: true,
+            waypoints: attempt > 4 ? [{ location: midpoint, stopover: false }] : [],
+            avoidTolls: navState.avoidTolls,
+            avoidHighways: navState.avoidHighways,
+            ...options
+          };
+          console.log(`Attempting alternate route calculation, attempt ${attempt}:`, {
+            origin: navState.userLocation,
+            destination: navState.destination,
+            waypoints: request.waypoints,
+            options
+          });
+          directionsService.route(request, (response, status) => {
+            console.log(`Alternative route response, attempt ${attempt}:`, {
+              status,
+              routeCount: response?.routes?.length || 0
+            });
+            if (status === 'OK' && response.routes && response.routes.length > 0) {
+              const currentDuration = navState.currentRoute.routes[0].legs[0].duration.value;
+              let bestAlt = null;
+              let bestTimeSaved = -Infinity;
+              let fastestRoute = null;
+              let fastestDuration = Infinity;
+              for (let i = 0; i < response.routes.length; i++) {
+                const alt = response.routes[i];
+                const altPath = alt.overview_path;
+                const lastPoint = altPath[altPath.length - 1];
+                const destLatLng = new google.maps.LatLng(navState.destination);
+                const distanceToDest = google.maps.geometry.spherical.computeDistanceBetween(
+                  new google.maps.LatLng(lastPoint),
+                  destLatLng
+                );
+                const altDuration = alt.legs[0].duration.value;
+                if (distanceToDest > 50) {
+                  console.warn(`Route ${i} rejected: Does not reach destination`, {
+                    lastPoint: { lat: lastPoint.lat(), lng: lastPoint.lng() },
+                    destination: navState.destination,
+                    distanceToDest
+                  });
+                  continue;
+                }
+                if (altDuration < fastestDuration) {
+                  fastestRoute = alt;
+                  fastestDuration = altDuration;
+                }
+                if (isHazardAvoided(hazardLatLng, altPath)) {
+                  const timeSaved = currentDuration - altDuration;
+                  console.log(`Route ${i}:`, {
+                    duration: altDuration,
+                    timeSaved,
+                    avoidsHazard: true,
+                    reachesDestination: true,
+                    distanceToDest
+                  });
+                  if (timeSaved >= bestTimeSaved) {
+                    bestAlt = alt;
+                    bestTimeSaved = timeSaved;
+                  }
+                } else {
+                  console.log(`Route ${i} rejected: Does not avoid hazard`, {
+                    duration: altDuration,
+                    minDistanceToHazard: getMinDistanceToPolyline(hazardLatLng, altPath)
+                  });
+                }
+              }
+              if (bestAlt) {
+                navState.alternativeRoute = {
+                  ...response,
+                  routes: [bestAlt]
+                };
+                const timeSavedMin = Math.round(bestTimeSaved / 60);
+                console.log(`Best alternate route found:`, {
+                  timeSavedMin,
+                  pathLength: bestAlt.overview_path.length,
+                  endPoint: bestAlt.overview_path[bestAlt.overview_path.length - 1]
+                });
+                resolve(timeSavedMin);
+              } else if (fastestRoute) {
+                navState.alternativeRoute = {
+                  ...response,
+                  routes: [fastestRoute]
+                };
+                const timeSavedMin = Math.round((currentDuration - fastestDuration) / 60);
+                console.log(`Fallback: Using fastest route as alternative:`, {
+                  timeSavedMin,
+                  pathLength: fastestRoute.overview_path.length,
+                  endPoint: fastestRoute.overview_path[fastestRoute.overview_path.length - 1]
+                });
+                resolve(timeSavedMin);
+              } else if (attempt < 8) {
+                console.log(`No valid alternate route found, retrying with new options, attempt ${attempt + 1}`);
+                const newOptions = [
+                  { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+                  { avoidTolls: true, avoidHighways: false, avoidFerries: false },
+                  { avoidTolls: false, avoidHighways: true, avoidFerries: false },
+                  { avoidTolls: true, avoidHighways: true, avoidFerries: false },
+                  { avoidTolls: false, avoidHighways: false, avoidFerries: true },
+                  { avoidTolls: true, avoidHighways: false, avoidFerries: true },
+                  { avoidTolls: false, avoidHighways: true, avoidFerries: true },
+                  { avoidTolls: true, avoidHighways: true, avoidFerries: true }
+                ][attempt];
+                tryRoute(newOptions, attempt + 1);
+              } else {
+                console.log('No suitable alternative route found after all attempts.');
+                showToast('Failed to find alternate routes.');
+                resolve(null);
+              }
+            } else {
+              console.error(`Directions request failed, attempt ${attempt}:`, status);
+              if (attempt < 8) {
+                console.log(`Retrying with new options, attempt ${attempt + 1}`);
+                const newOptions = [
+                  { avoidTolls: false, avoidHighways: false, avoidFerries: false },
+                  { avoidTolls: true, avoidHighways: false, avoidFerries: false },
+                  { avoidTolls: false, avoidHighways: true, avoidFerries: false },
+                  { avoidTolls: true, avoidHighways: true, avoidFerries: false },
+                  { avoidTolls: false, avoidHighways: false, avoidFerries: true },
+                  { avoidTolls: true, avoidHighways: false, avoidFerries: true },
+                  { avoidTolls: false, avoidHighways: true, avoidFerries: true },
+                  { avoidTolls: true, avoidHighways: true, avoidFerries: true }
+                ][attempt];
+                tryRoute(newOptions, attempt + 1);
+              } else {
+                console.log('No suitable alternative route found after all attempts.');
+                showToast('Failed to find alternate routes.');
+                resolve(null);
+              }
+            }
+          });
+        };
+        tryRoute({ avoidTolls: false, avoidHighways: false, avoidFerries: false }, 1);
       });
     }
     function showRerouteHud(hazard, timeSaved) {
-      if (!document.getElementById('reroute-hud-container').classList.contains('active')) {
-        navState.alertState = 'OFFERING_REROUTE';
-        const rerouteHudContainer = document.getElementById('reroute-hud-container');
-        const rerouteHud = document.getElementById('reroute-hud');
-        const hazardMessage = document.getElementById('hazard-message');
-        const timeText = timeSaved > 0 ? `Saves ${Math.round(timeSaved / 60)} minutes` : 'Avoids hazard';
-        hazardMessage.textContent = `A ${hazard.type} is ahead on your route. Reroute available. ${timeText}.`;
-        rerouteHudContainer.classList.add('active');
-        rerouteHud.classList.add('active');
-        unlockNavigation();
-        console.log('Reroute HUD shown:', { hazardId: hazard._id, type: hazard.type, timeSaved });
-      } else {
-        console.log('Reroute HUD already open, queuing reroute offer');
+      const cameraHudContainer = document.getElementById('camera-hud-container');
+      if (cameraHudContainer.classList.contains('active')) {
+        console.log('Camera HUD active, queuing reroute HUD');
         navState.pendingReroute = { hazard, timeSaved };
+        return;
+      }
+      const rerouteHudContainer = document.getElementById('reroute-hud-container');
+      const rerouteHud = document.getElementById('reroute-hud');
+      const hazardMessage = document.getElementById('hazard-message');
+      let timeText = '';
+      if (timeSaved > 0) {
+        timeText = `saves ${timeSaved} minutes`;
+      } else if (timeSaved === 0) {
+        timeText = `takes the same time`;
+      } else {
+        timeText = `adds ${Math.abs(timeSaved)} minutes`;
+      }
+      hazardMessage.textContent = `${hazard.type} detected ahead. Alternative route ${timeText} and avoids the hazard. Reroute?`;
+      rerouteHud.classList.add('active');
+      rerouteHudContainer.classList.add('active');
+      alternativeRenderer.setMap(map);
+      alternativeRenderer.setDirections(navState.alternativeRoute);
+      requestAnimationFrame(() => {
+        map.setCenter(navState.userLocation);
+        map.setZoom(14);
+        map.setHeading(navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+        map.setTilt(0);
+        updateCompass();
+      });
+      showToast(`Hazard (${hazard.type}) detected ahead. Alternative route available.`);
+      console.log(`Offering reroute for ${hazard.type} at`, hazard.location);
+      navState.alertState = 'OFFERING_REROUTE';
+      let countdown = 15;
+      const toast = document.getElementById('toast');
+      toast.textContent = `Auto closing HUD in ${countdown} seconds...`;
+      toast.classList.add('visible-toast');
+      toast.classList.add('countdown-toast');
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          toast.classList.remove('visible-toast');
+          toast.classList.remove('countdown-toast');
+          if (navState.alertState === 'OFFERING_REROUTE') {
+            rejectReroute();
+            console.log('Reroute HUD auto-closed after 15 seconds');
+          }
+        } else {
+          toast.textContent = `Auto closing HUD in ${countdown} seconds...`;
+        }
+      }, 1000);
+      const clearCountdown = () => {
+        clearInterval(countdownInterval);
+        toast.classList.remove('visible-toast');
+        toast.classList.remove('countdown-toast');
+      };
+      document.getElementById('accept-reroute-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('reject-reroute-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('reroute-close').addEventListener('click', clearCountdown, { once: true });
+    }
+    function restoreNavigationView() {
+      if (navState.isFollowing && navState.isNavigating) {
+        const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+        navState.navigationZoom = zoom;
+        const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+        const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
+        requestAnimationFrame(() => {
+          isProgrammaticUpdate = true;
+          if (isMobile && typeof TWEEN !== 'undefined') {
+            new TWEEN.Tween(map.getCenter())
+              .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
+              .easing(TWEEN.Easing.Quadratic.Out)
+              .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+              .start();
+            if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
+              const currentHeading = map.getHeading() || 0;
+              const delta = normalizeHeadingDelta(currentHeading, heading);
+              isHeadingTweening = true;
+              new TWEEN.Tween({ heading: currentHeading })
+                .to({ heading: currentHeading + delta }, 300)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(obj => map.setHeading(obj.heading))
+                .onComplete(() => { isHeadingTweening = false; })
+                .start();
+            }
+          } else {
+            map.panTo(lookaheadPoint);
+            if (!isHeadingTweening) map.setHeading(heading);
+          }
+          map.setZoom(zoom);
+          map.setTilt(tilt);
+          console.log('Navigation view restored:', {
+            center: lookaheadPoint.toJSON(),
+            heading,
+            zoom,
+            tilt,
+            orientation: navState.mapOrientation
+          });
+          updateCompass();
+          setTimeout(() => { isProgrammaticUpdate = false; }, 100);
+        });
       }
     }
     function acceptReroute() {
-      if (!navState.alternativeRoute) {
-        console.error('No alternative route available');
-        return;
-      }
-      navState.currentRoute = navState.alternativeRoute;
-      navState.routePolyline = navState.alternativeRoute.routes[0].overview_path;
-      directionsRenderer.setDirections(navState.currentRoute);
-      directionsRenderer.setMap(map);
-      alternativeRenderer.setMap(null);
-      updateRouteAhead(navState.userLocation);
-      updateHUD(navState.currentRoute, navState.userLocation);
-      updateBottomHUD(navState.currentRoute);
-      navState.ignoredHazards.push(navState.currentHazard._id);
-      navState.currentHazard = null;
-      navState.alternativeRoute = null;
-      const rerouteHudContainer = document.getElementById('reroute-hud-container');
-      const rerouteHud = document.getElementById('reroute-hud');
-      rerouteHudContainer.classList.remove('active');
-      rerouteHud.classList.remove('active');
-      navState.alertState = 'IDLE';
-      if (navState.isFollowing) {
+      if (navState.alternativeRoute && navState.currentHazard) {
+        navState.ignoredHazards.push(navState.currentHazard._id);
+        navState.currentRoute = navState.alternativeRoute;
+        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        navState.originalRoute = navState.currentRoute;
+        const path = navState.routePolyline;
+        const { point } = findClosestRoutePoint(navState.userLocation, path, navState.currentHeading, 0);
+        navState.userLocation = point;
+        requestAnimationFrame(() => {
+          userMarker.position = navState.userLocation;
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          console.log('Snapped to new route start after reroute:', navState.userLocation);
+        });
+        directionsRenderer.setDirections(navState.currentRoute);
+        updateRouteAhead(navState.userLocation);
+        updateOffRoadPolyline(rawUserLocation, path[0]);
+        updateBottomHUD(navState.currentRoute);
+        updateHUD(navState.currentRoute, navState.userLocation);
+        const rerouteHudContainer = document.getElementById('reroute-hud-container');
+        const rerouteHud = document.getElementById('reroute-hud');
+        rerouteHudContainer.classList.remove('active');
+        rerouteHud.classList.remove('active');
+        navState.isFollowing = true;
+        navState.isInitialSnap = true;
+        localStorage.setItem('isFollowing', navState.isFollowing);
+        sessionStorage.setItem('isFollowing', navState.isFollowing);
         lockNavigation();
+        showToast('Alternative route accepted.');
+        console.log('Reroute accepted, navigation view restored:', navState.currentRoute.routes[0].legs[0].distance.text);
+        navState.alertState = 'IDLE';
+        navState.alternativeRoute = null;
+        navState.currentHazard = null;
+        navState.pendingReroute = null;
+        navigator.geolocation.getCurrentPosition(
+          onPositionUpdate,
+          (error) => {
+            console.error('Immediate position update after reroute failed:', error);
+            showToast('Error syncing navigation after reroute.');
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 5000
+          }
+        );
       }
-      showToast('Reroute accepted.');
-      console.log('Reroute accepted, navigation updated');
     }
     function rejectReroute() {
       if (navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
-        console.log('Hazard ignored:', navState.currentHazard._id);
+      }
+      if (navState.originalRoute) {
+        navState.currentRoute = navState.originalRoute;
+        navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        directionsRenderer.setDirections(navState.currentRoute);
+        const path = navState.routePolyline;
+        const { point } = findClosestRoutePoint(navState.userLocation, path, navState.currentHeading, 0);
+        navState.userLocation = point;
+        requestAnimationFrame(() => {
+          userMarker.position = navState.userLocation;
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          console.log('Snapped to original route after reroute rejection:', navState.userLocation);
+        });
+        updateRouteAhead(navState.userLocation);
+        updateOffRoadPolyline(rawUserLocation, path[0]);
+        updateBottomHUD(navState.currentRoute);
+        updateHUD(navState.currentRoute, navState.userLocation);
       }
       alternativeRenderer.setMap(null);
-      navState.alternativeRoute = null;
-      navState.currentHazard = null;
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
+      sessionStorage.setItem('isFollowing', navState.isFollowing);
+      lockNavigation();
+      showToast('Reroute rejected, continuing on original route.');
+      console.log('Reroute rejected, navigation view restored:', { center: navState.userLocation, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, orientation: navState.mapOrientation });
       navState.alertState = 'IDLE';
-      if (navState.isFollowing) {
-        lockNavigation();
-      }
-      showToast('Reroute rejected.');
-      console.log('Reroute rejected, continuing on original route');
+      navState.alternativeRoute = null;
+      navState.currentHazard = null;
+      navState.pendingReroute = null;
     }
     function showCameraHud() {
-      if (document.getElementById('camera-hud-container').classList.contains('active')) {
-        console.log('Camera HUD already open, skipping');
-        return;
-      }
+      if (!showTrafficCameras) return;
       const cameraHudContainer = document.getElementById('camera-hud-container');
       const cameraHud = document.getElementById('camera-hud');
-      cameraHudContainer.classList.add('active');
       cameraHud.classList.add('active');
-      if ('speechSynthesis' in window) {
-        const utterance = new SpeechSynthesisUtterance('Traffic camera ahead. Drive safely.');
-        utterance.lang = 'en-US';
-        speechSynthesis.speak(utterance);
-      }
-      console.log('Camera HUD shown');
+      cameraHudContainer.classList.add('active');
+      showToast('Traffic camera alert shown');
+      console.log('Traffic camera alert HUD shown');
+      let countdown = 15;
+      const toast = document.getElementById('toast');
+      toast.textContent = `Auto closing camera HUD in ${countdown} seconds...`;
+      toast.classList.add('visible-toast');
+      toast.classList.add('countdown-toast');
+      const countdownInterval = setInterval(() => {
+        countdown--;
+        if (countdown <= 0) {
+          clearInterval(countdownInterval);
+          toast.classList.remove('visible-toast');
+          toast.classList.remove('countdown-toast');
+          dismissCameraAlert();
+          console.log('Camera HUD auto-closed after 15 seconds');
+        } else {
+          toast.textContent = `Auto closing camera HUD in ${countdown} seconds...`;
+        }
+      }, 1000);
+      const clearCountdown = () => {
+        clearInterval(countdownInterval);
+        toast.classList.remove('visible-toast');
+        toast.classList.remove('countdown-toast');
+      };
+      document.getElementById('dismiss-camera-button').addEventListener('click', clearCountdown, { once: true });
+      document.getElementById('camera-close').addEventListener('click', clearCountdown, { once: true });
     }
     function dismissCameraAlert() {
       const cameraHudContainer = document.getElementById('camera-hud-container');
       const cameraHud = document.getElementById('camera-hud');
       cameraHudContainer.classList.remove('active');
       cameraHud.classList.remove('active');
-      if (navState.isFollowing) {
+      console.log('Camera alert dismissed');
+      if (navState.pendingReroute) {
+        const { hazard, timeSaved } = navState.pendingReroute;
+        showRerouteHud(hazard, timeSaved);
+        navState.pendingReroute = null;
+        console.log('Showing pending reroute HUD after camera alert dismissal');
+      }
+      if (navState.isNavigating && navState.isFollowing) {
         lockNavigation();
+        console.log('Navigation view re-locked after dismissing camera alert');
       }
-      console.log('Camera HUD dismissed');
     }
-    function toggleAccordion(header) {
-      const content = header.nextElementSibling;
-      const isActive = header.classList.contains('active');
-      document.querySelectorAll('.accordion-header').forEach(h => {
-        h.classList.remove('active');
-        h.nextElementSibling.classList.remove('active');
-      });
-      if (!isActive) {
-        header.classList.add('active');
-        content.classList.add('active');
-      }
-      console.log('Accordion toggled:', header.textContent, 'Active:', !isActive);
+    function createAlertContent() {
+      const alertContent = document.createElement('div');
+      alertContent.style.cssText = `
+        color: white;
+        background-color: red;
+        border-radius: 50%;
+        width: 25px;
+        height: 25px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-weight: bold;
+        font-family: sans-serif;
+      `;
+      alertContent.textContent = '!';
+      return alertContent;
     }
-    function showToast(message, duration = 3000) {
+    function createTrafficCameraContent() {
+      const cameraContent = document.createElement('img');
+      cameraContent.src = 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png';
+      cameraContent.className = 'traffic-cam-marker';
+      return cameraContent;
+    }
+    function createUserMarkerContent() {
+      const userContent = document.createElement('div');
+      userContent.style.width = '15px';
+      userContent.style.height = '15px';
+      userContent.style.backgroundColor = 'purple';
+      userContent.style.borderRadius = '50%';
+      userContent.style.border = '2px solid white';
+      return userContent;
+    }
+    function showToast(message) {
       const toast = document.getElementById('toast');
-      toast.textContent = message;
-      toast.classList.add('visible-toast');
-      if (toastTimeout) clearTimeout(toastTimeout);
-      toastTimeout = setTimeout(() => {
+      if (toastTimeout) {
+        clearTimeout(toastTimeout);
         toast.classList.remove('visible-toast');
-      }, duration);
+      }
+      if (!toast.classList.contains('countdown-toast') || toast.textContent !== message) {
+        toast.textContent = message;
+        toast.classList.add('visible-toast');
+        toast.classList.remove('countdown-toast');
+        toastTimeout = setTimeout(() => {
+          if (!toast.classList.contains('countdown-toast')) {
+            toast.classList.remove('visible-toast');
+            toastTimeout = null;
+          }
+        }, 3000);
+      }
       console.log('Toast shown:', message);
     }
+    function calculateSimulationSpeed(step) {
+      const isHighway = step && step.distance.value > 1000;
+      const baseSpeed = isHighway ? 15 : 10; // 15 m/s (~33 mph) for highways, 10 m/s (~22 mph) for city
+      const variation = Math.random() * 5 - 2.5; // Random variation ±2.5 m/s
+      return Math.max(5, Math.min(20, baseSpeed + variation)); // 11-45 mph range
+    }
+    function offsetPosition(pos, heading, distance) {
+      const offsetAngle = heading + 90; // Perpendicular to heading
+      const offsetLatLng = google.maps.geometry.spherical.computeOffset(
+        new google.maps.LatLng(pos),
+        distance,
+        offsetAngle
+      );
+      return { lat: offsetLatLng.lat(), lng: offsetLatLng.lng() };
+    }
     function startPositionSimulation() {
-      if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
-        showToast('No route to simulate.');
-        console.error('No route for simulation');
+      if (!navState.currentRoute || !navState.currentRoute.routes[0] || !navState.destination) {
+        console.error('Cannot start simulation: No route or destination');
+        showToast('Please select a destination to simulate.');
         return;
       }
+      navState.isNavigating = true;
+      navState.isFollowing = true;
+      localStorage.setItem('isFollowing', navState.isFollowing);
+      sessionStorage.setItem('isFollowing', navState.isFollowing);
+      document.getElementById('search-container').classList.add('hidden');
+      document.getElementById('hud-container').style.display = 'flex';
+      document.getElementById('bottom-hud-container').style.display = 'flex';
+      lockNavigation();
+      requestWakeLock();
       const path = navState.currentRoute.routes[0].overview_path;
-      let index = 0;
+      const legs = navState.currentRoute.routes[0].legs[0];
+      let simIndex = 0;
+      let isPaused = false;
+      let pauseTimeout = null;
+      let isOffRoute = false;
+      let offRouteCounter = 0;
+      const SIM_INTERVAL = 1000; // Update every 1s
+      const OFF_ROUTE_INTERVAL = 5; // Go off-route every 5 updates
+      const OFF_ROUTE_DURATION = 3; // Stay off-route for 3 updates
+      const STOP_DURATION = 3000; // Pause 3s at turns
       mockSimulationInterval = setInterval(() => {
-        if (index >= path.length) {
+        if (simIndex >= path.length) {
           clearInterval(mockSimulationInterval);
           mockSimulationInterval = null;
           document.getElementById('simulate-position-button').textContent = 'Simulate';
-          console.log('Simulation completed');
-          document.getElementById('arrival-hud-container').classList.add('active');
-          document.getElementById('arrival-hud').classList.add('active');
+          document.getElementById('hud-container').style.display = 'none';
+          document.getElementById('bottom-hud-container').style.display = 'none';
+          if (routePolyline) {
+            routePolyline.setMap(null);
+            routePolyline = null;
+          }
+          if (offRoadPolyline) {
+            offRoadPolyline.setMap(null);
+            offRoadPolyline = null;
+          }
+          directionsRenderer.setMap(map);
+          navState.isFollowing = false;
+          navState.isNavigating = false;
+          localStorage.setItem('isFollowing', navState.isFollowing);
+          sessionStorage.setItem('isFollowing', navState.isFollowing);
+          map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+          requestAnimationFrame(() => {
+            map.setCenter(navState.userLocation);
+            map.setZoom(navState.navigationZoom);
+            map.setHeading(navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading);
+            console.log('Simulation completed, map re-centered to user location');
+          });
           return;
         }
-        const point = path[index];
-        const nextPoint = index < path.length - 1 ? path[index + 1] : point;
-        const heading = google.maps.geometry.spherical.computeHeading(
-          new google.maps.LatLng(point),
-          new google.maps.LatLng(nextPoint)
-        );
+        if (isPaused) return;
+        const currentPoint = path[simIndex];
+        let currentStep = null;
+        for (let i = 0; i < legs.steps.length; i++) {
+          const stepPath = legs.steps[i].path;
+          if (stepPath.some(pt => google.maps.geometry.spherical.computeDistanceBetween(pt, currentPoint) < 20)) {
+            currentStep = legs.steps[i];
+            break;
+          }
+        }
+        const speed = calculateSimulationSpeed(currentStep);
+        let pos = { lat: currentPoint.lat(), lng: currentPoint.lng() };
+        let heading = simIndex < path.length - 1
+          ? google.maps.geometry.spherical.computeHeading(currentPoint, path[simIndex + 1])
+          : navState.currentHeading;
+        offRouteCounter++;
+        if (offRouteCounter >= OFF_ROUTE_INTERVAL && !isOffRoute) {
+          isOffRoute = true;
+          offRouteCounter = 0;
+          pos = offsetPosition(pos, heading, 50); // 50m offset
+          console.log('Simulating off-route:', pos);
+        } else if (isOffRoute && offRouteCounter >= OFF_ROUTE_DURATION) {
+          isOffRoute = false;
+          offRouteCounter = 0;
+          console.log('Returning to route:', pos);
+        }
+        if (currentStep && currentStep.maneuver && !isOffRoute) {
+          isPaused = true;
+          console.log('Pausing at turn for 3s:', currentStep.maneuver);
+          pauseTimeout = setTimeout(() => {
+            isPaused = false;
+            clearTimeout(pauseTimeout);
+            console.log('Resuming after turn pause');
+          }, STOP_DURATION);
+        }
         onPositionUpdate({
           coords: {
-            latitude: point.lat(),
-            longitude: point.lng(),
-            speed: 10,
-            heading: heading
+            latitude: pos.lat,
+            longitude: pos.lng,
+            speed,
+            heading
           }
         }, true);
-        index += 1;
-        console.log('Simulated position:', { lat: point.lat(), lng: point.lng(), index, totalPoints: path.length });
-      }, 1000);
+        console.log('Simulated position update:', { pos, speed, heading, simIndex });
+        if (!isPaused) simIndex++;
+      }, SIM_INTERVAL);
     }
-    function restoreNavigationView() {
-      if (!navState.isNavigating || !navState.isFollowing || !navState.userLocation) {
-        console.log('Cannot restore navigation view:', {
-          isNavigating: navState.isNavigating,
-          isFollowing: navState.isFollowing,
-          userLocation: !!navState.userLocation
-        });
-        return;
-      }
-      const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
-      navState.navigationZoom = zoom;
-      const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-      const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
-      requestAnimationFrame(() => {
-        isProgrammaticUpdate = true;
-        if (isMobile && typeof TWEEN !== 'undefined') {
-          new TWEEN.Tween(map.getCenter())
-            .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
-            .easing(TWEEN.Easing.Quadratic.Out)
-            .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
-            .start();
-          if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
-            const currentHeading = map.getHeading() || 0;
-            const delta = normalizeHeadingDelta(currentHeading, heading);
-            isHeadingTweening = true;
-            new TWEEN.Tween({ heading: currentHeading })
-              .to({ heading: currentHeading + delta }, 300)
-              .easing(TWEEN.Easing.Quadratic.Out)
-              .onUpdate(obj => map.setHeading(obj.heading))
-              .onComplete(() => { isHeadingTweening = false; })
-              .start();
-          }
-        } else {
-          map.panTo(lookaheadPoint);
-          if (!isHeadingTweening) map.setHeading(heading);
-        }
-        map.setZoom(zoom);
-        map.setTilt(tilt);
-        userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-        console.log('Navigation view restored:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
-        setTimeout(() => { isProgrammaticUpdate = false; }, 100);
-      });
-    }
-    async function fetchUsers(query = '') {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Fetching users with token:', token.substring(0, 20) + '...', 'Query:', query);
-        const url = query ? `/api/users/search?query=${encodeURIComponent(query)}` : '/api/users';
-        const response = await fetchWithRetry(url, {
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('Users fetch response:', { status: response.status, ok: response.ok });
-        const users = await response.json();
-        displayUsers(users);
-      } catch (error) {
-        console.error('Error fetching users:', error);
-        showToast('Failed to fetch users.');
-      }
-    }
-    function displayUsers(users) {
-      const usersList = document.getElementById('users-list');
-      usersList.innerHTML = `
-        <table>
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${users.map(user => `
-              <tr>
-                <td>${user.username}</td>
-                <td>${user.email}</td>
-                <td>${user.isAdmin ? 'Admin' : 'User'}</td>
-                <td>
-                  <button class="view-activity-btn" onclick="loadUserActivity('${user._id}')">View Activity</button>
-                  ${user.isAdmin ? `<button class="demote-btn" onclick="demoteUser('${user._id}')">Demote</button>` : `<button class="promote-btn" onclick="promoteUser('${user._id}')">Promote</button>`}
-                  <button class="delete-btn" onclick="deleteUser('${user._id}')">Delete</button>
-                  <button class="ban-btn" onclick="banUser('${user._id}')">Ban</button>
-                  <button class="ipban-btn" onclick="ipBanUser('${user._id}')">IP Ban</button>
-                </td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-      `;
-      console.log('Users displayed:', users.length);
-    }
-    async function loadUserActivity(userId) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Fetching user activity with token:', token.substring(0, 20) + '...', 'User ID:', userId);
-        const response = await fetchWithRetry(`/api/users/${userId}/activity`, {
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('User activity fetch response:', { status: response.status, ok: response.ok });
-        const activities = await response.json();
-        selectedUserId = userId;
-        document.querySelector('.admin-tab[data-tab="activity"]').click();
-        const activityList = document.getElementById('user-activity-list');
-        activityList.innerHTML = activities.length > 0 ? activities.map(activity => `
-          <li><strong>${activity.type}</strong> - ${activity.description} at ${new Date(activity.timestamp).toLocaleString()}</li>
-        `).join('') : '<li class="no-activity">No activity found</li>';
-        console.log('User activity displayed:', activities.length);
-      } catch (error) {
-        console.error('Error fetching user activity:', error);
-        showToast('Failed to fetch user activity.');
-      }
-    }
-    async function promoteUser(userId) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Promoting user with token:', token.substring(0, 20) + '...', 'User ID:', userId);
-        const response = await fetchWithRetry(`/api/users/${userId}/promote`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('Promote user response:', { status: response.status, ok: response.ok });
-        if (response.ok) {
-          showToast('User promoted to admin.');
-          fetchUsers();
-        } else {
-          throw new Error('Failed to promote user');
-        }
-      } catch (error) {
-        console.error('Error promoting user:', error);
-        showToast('Failed to promote user.');
-      }
-    }
-    async function demoteUser(userId) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Demoting user with token:', token.substring(0, 20) + '...', 'User ID:', userId);
-        const response = await fetchWithRetry(`/api/users/${userId}/demote`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('Demote user response:', { status: response.status, ok: response.ok });
-        if (response.ok) {
-          showToast('User demoted from admin.');
-          fetchUsers();
-        } else {
-          throw new Error('Failed to demote user');
-        }
-      } catch (error) {
-        console.error('Error demoting user:', error);
-        showToast('Failed to demote user.');
-      }
-    }
-    async function deleteUser(userId) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Deleting user with token:', token.substring(0, 20) + '...', 'User ID:', userId);
-        const response = await fetchWithRetry(`/api/users/${userId}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('Delete user response:', { status: response.status, ok: response.ok });
-        if (response.ok) {
-          showToast('User deleted.');
-          fetchUsers();
-        } else {
-          throw new Error('Failed to delete user');
-        }
-      } catch (error) {
-        console.error('Error deleting user:', error);
-        showToast('Failed to delete user.');
-      }
-    }
-    async function banUser(userId) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Banning user with token:', token.substring(0, 20) + '...', 'User ID:', userId);
-        const response = await fetchWithRetry(`/api/users/${userId}/ban`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('Ban user response:', { status: response.status, ok: response.ok });
-        if (response.ok) {
-          showToast('User banned.');
-          fetchUsers();
-        } else {
-          throw new Error('Failed to ban user');
-        }
-      } catch (error) {
-        console.error('Error banning user:', error);
-        showToast('Failed to ban user.');
-      }
-    }
-    async function ipBanUser(userId) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('IP banning user with token:', token.substring(0, 20) + '...', 'User ID:', userId);
-        const response = await fetchWithRetry(`/api/users/${userId}/ipban`, {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('IP ban user response:', { status: response.status, ok: response.ok });
-        if (response.ok) {
-          showToast('User IP banned.');
-          fetchUsers();
-        } else {
-          throw new Error('Failed to IP ban user');
-        }
-      } catch (error) {
-        console.error('Error IP banning user:', error);
-        showToast('Failed to IP ban user.');
-      }
-    }
-    async function loadAllUsers() {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Fetching all users with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry('/api/users', {
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('All users fetch response:', { status: response.status, ok: response.ok });
-        const users = await response.json();
-        displayUsers(users);
-      } catch (error) {
-        console.error('Error fetching all users:', error);
-        showToast('Failed to fetch all users.');
-      }
-    }
-    async function fetchUserForActivity(query) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, showing auth form');
-          localStorage.removeItem('token');
-          localStorage.removeItem('userId');
-          sessionStorage.removeItem('token');
-          sessionStorage.removeItem('userId');
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
-        }
-        console.log('Fetching user for activity with token:', token.substring(0, 20) + '...', 'Query:', query);
-        const response = await fetchWithRetry(`/api/users/search?query=${encodeURIComponent(query)}`, {
-          headers: { 'Authorization': `Bearer ${token.trim()}` }
-        });
-        console.log('User for activity fetch response:', { status: response.status, ok: response.ok });
-        const users = await response.json();
-        if (users.length > 0) {
-          loadUserActivity(users[0]._id);
-        } else {
-          showToast('No user found for activity.');
-        }
-      } catch (error) {
-        console.error('Error fetching user for activity:', error);
-        showToast('Failed to fetch user for activity.');
+    function checkAuth() {
+      if (isInitialized) return;
+      isInitialized = true;
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+      if (token && token.includes('.') && token !== 'undefined') {
+        console.log('Token found, initializing app:', token.substring(0, 20) + '...');
+        document.getElementById('auth-container').style.display = 'none';
+        initApp();
+      } else {
+        console.log('No valid token found, showing auth form');
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+        sessionStorage.removeItem('token');
+        sessionStorage.removeItem('userId');
+        document.getElementById('auth-container').style.display = 'flex';
       }
     }
     function initApp() {
       console.log('Initializing app...');
       const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-      const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-      if (!token || !userId || !token.includes('.') || token === 'undefined' || userId === 'undefined') {
-        console.log('No valid token or userId, showing auth form');
+      if (!token || !token.includes('.') || token === 'undefined') {
+        console.error('Invalid token in initApp, showing auth form');
         localStorage.removeItem('token');
         localStorage.removeItem('userId');
         sessionStorage.removeItem('token');
@@ -4758,107 +4718,174 @@
         document.getElementById('auth-container').style.display = 'flex';
         return;
       }
-      console.log('Token and userId found:', { token: token.substring(0, 20) + '...', userId });
-      isInitialized = true;
-      socket = io({ auth: { token } });
-      socket.on('connect', () => {
-        console.log('Socket.IO connected');
-        showToast('Connected to server.');
-        socket.emit('join', userId);
+      if (typeof io === 'undefined') {
+        console.error('Socket.IO not loaded, retrying in 1s');
+        showToast('Failed to load Socket.IO. Retrying...');
+        setTimeout(initApp, 1000);
+        return;
+      }
+      socket = io({
+        auth: { token: token.trim() },
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
       });
-      socket.on('connect_error', (error) => {
-        console.error('Socket.IO connection error:', error);
-        showToast('Failed to connect to server.');
+      socket.on('connect', () => {
+        console.log('Socket.IO connected for user:', localStorage.getItem('userId') || sessionStorage.getItem('userId'));
+      });
+      socket.on('connect_error', (err) => {
+        console.error('Socket connection error:', err.message);
+        if (err.message.includes('Authentication')) {
+          console.log('Invalid token, clearing storage and showing auth form');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+        } else {
+          showToast('Server connection lost. Attempting to reconnect...');
+          setTimeout(() => pollAlerts(), 1000);
+        }
+      });
+      socket.on('reconnect_attempt', () => {
+        console.log('Attempting to reconnect to Socket.IO server');
       });
       socket.on('alert', (alert) => {
-        console.log('Received new alert via Socket.IO:', alert._id);
-        if (alert.type === 'Traffic Camera' && !showTrafficCameras) return;
-        const filterKey = alert.type.toLowerCase().replace(' ', '-');
-        if (navState.alertFilters[filterKey] === false) return;
-        if (!currentAlerts.some(a => a._id === alert._id)) {
-          currentAlerts.push(alert);
-          displayAlertsInHud(currentAlerts);
+        const isTrafficCamera = alert.type === 'Traffic Camera';
+        if (isTrafficCamera && !showTrafficCameras) return;
+        if (!google.maps.marker) {
+          console.error('AdvancedMarkerElement not defined, cannot place alert marker');
+          showToast('Failed to place alert: Google Maps library not loaded');
+          return;
         }
         const marker = new google.maps.marker.AdvancedMarkerElement({
           map,
-          position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
-          content: alert.type === 'Traffic Camera' ? createTrafficCameraContent() : createAlertContent(),
+          position: {
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          },
+          content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
           title: `${alert.type} Alert`
         });
         markers.set(alert._id, marker);
-        if (alert.type !== 'Traffic Camera' && navState.isNavigating) {
+        console.log('Received real-time alert:', alert);
+        if (isTrafficCamera) {
+          cameraPositions.push({
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          });
+        }
+        if (navState.isNavigating) {
+          currentAlerts.push(alert);
           checkHazardsAndOfferReroute();
+        } else if (pushNotificationsEnabled) {
+          navigator.serviceWorker.controller?.postMessage({
+            type: 'SHOW_NOTIFICATION',
+            title: `${alert.type} Alert`,
+            body: `${alert.type} reported at ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`}`,
+            alertId: alert._id,
+            lat: alert.location.coordinates[1],
+            lng: alert.location.coordinates[0]
+          });
+          console.log('Push notification sent for alert:', { alertId: alert._id, type: alert.type });
         }
-        showToast(`New ${alert.type} alert received.`);
+        const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+        if (alert.userId && alert.userId._id === ownId) {
+          fetchProfile(ownId, true).then(populateAccountProfile);
+        }
       });
-      socket.on('alertDeleted', (alertId) => {
-        console.log('Alert deleted via Socket.IO:', alertId);
-        const marker = markers.get(alertId);
-        if (marker) {
-          marker.setMap(null);
-          markers.delete(alertId);
+      socket.on('alertDeleted', (id) => {
+        console.log('Alert deleted via socket:', id);
+        if (!id || typeof id !== 'string') {
+          console.warn('Invalid alert ID received:', id);
+          setTimeout(() => pollAlerts(), 1000);
+          return;
         }
-        currentAlerts = currentAlerts.filter(a => a._id !== alertId);
-        displayAlertsInHud(currentAlerts);
-        if (alertId === navState.currentHazard?._id) {
-          navState.currentHazard = null;
-          navState.alternativeRoute = null;
-          alternativeRenderer.setMap(null);
-          document.getElementById('reroute-hud-container').classList.remove('active');
-          document.getElementById('reroute-hud').classList.remove('active');
-          navState.alertState = 'IDLE';
-          if (navState.isFollowing) {
-            lockNavigation();
+        try {
+          const marker = markers.get(id);
+          if (marker) {
+            marker.setMap(null);
+            markers.delete(id);
+            console.log('Alert deletion synced:', id);
+          } else {
+            console.warn('Marker not found for alert:', id);
+            setTimeout(() => pollAlerts(), 1000);
           }
+          const alert = currentAlerts.find(a => a._id === id);
+          if (alert && alert.type === 'Traffic Camera') {
+            cameraPositions = cameraPositions.filter(pos =>
+              pos.lat !== alert.location.coordinates[1] || pos.lng !== alert.location.coordinates[0]
+            );
+            cameraAlertShown.delete(`mongo-${id}`);
+          }
+          currentAlerts = currentAlerts.filter(a => a._id !== id);
+          displayAlertsInHud(currentAlerts);
+          if (pushNotificationsEnabled && !navState.isNavigating) {
+            navigator.serviceWorker.controller?.postMessage({
+              type: 'SHOW_NOTIFICATION',
+              title: 'Alert Removed',
+              body: `Alert at ${alert?.address || 'unknown location'} has been removed.`,
+              alertId: id,
+              lat: alert?.location.coordinates[1],
+              lng: alert?.location.coordinates[0]
+            });
+            console.log('Push notification sent for alert deletion:', { alertId: id });
+          }
+          const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+          if (alert && alert.userId && alert.userId._id === ownId) {
+            fetchProfile(ownId, true).then(populateAccountProfile);
+          }
+        } catch (error) {
+          console.error('Marker removal failed:', { id, reason: error.message });
+          showToast('Failed to sync alert deletion. Retrying...');
+          setTimeout(() => pollAlerts(), 1000);
         }
-        showToast('Alert removed.');
       });
-      socket.on('extendAlert', (alertId) => {
-        console.log('Alert duration extended:', alertId);
-        showToast('Alert duration extended.');
+      socket.on('userLocation', (data) => {
+        console.log('Received user location:', data);
+        if (trackingUsers.includes(data.userId)) {
+          let marker = trackedMarkers.get(data.userId);
+          if (!marker) {
+            marker = new google.maps.marker.AdvancedMarkerElement({
+              map,
+              position: data.location,
+              content: createUserMarkerContent(),
+              title: 'Tracked User'
+            });
+            trackedMarkers.set(data.userId, marker);
+          } else {
+            marker.position = data.location;
+          }
+          console.log('Updated tracked user marker:', { userId: data.userId, position: data.location });
+        }
+      });
+      socket.on('pointsUpdate', (data) => {
+        const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+        if (data.userId === ownId) {
+          fetchProfile(ownId, true).then(populateAccountProfile);
+        }
       });
       socket.on('familyAlert', (data) => {
+        showToast(`Family alert: ${data.type} from ${data.user}`);
         console.log('Received family alert:', data);
-        if (navState.familyMembers.some(m => m.email === data.user.email)) {
-          showToast(`Family alert: ${data.alert.type} from ${data.user.username}`);
-          if (!currentAlerts.some(a => a._id === data.alert._id)) {
-            currentAlerts.push(data.alert);
-            displayAlertsInHud(currentAlerts);
-          }
-          const marker = new google.maps.marker.AdvancedMarkerElement({
-            map,
-            position: { lat: data.alert.location.coordinates[1], lng: data.alert.location.coordinates[0] },
-            content: data.alert.type === 'Traffic Camera' ? createTrafficCameraContent() : createAlertContent(),
-            title: `${data.alert.type} Alert`
-          });
-          markers.set(data.alert._id, marker);
-          if (data.alert.type !== 'Traffic Camera' && navState.isNavigating) {
-            checkHazardsAndOfferReroute();
-          }
+      });
+      if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js?v=1.0.3').then(reg => { console.log('Service worker registered:', reg); reg.addEventListener('updatefound', () => { const newWorker = reg.installing; console.log('Service worker update found'); newWorker.addEventListener('statechange', () => { if (newWorker.state === 'installed' && navigator.serviceWorker.controller) { console.log('New service worker installed, prompting reload'); showToast('New version available. Reloading...'); setTimeout(() => location.reload(), 1000); } }); }); }).catch(err => console.error('Service worker registration failed:', err)); }
+      // Add message listener for service worker errors
+      navigator.serviceWorker.addEventListener('message', event => {
+        if (event.data.type === 'ERROR') {
+          showToast(event.data.message);
+        } else if (event.data.type === 'FAMILY_SHARE_QUEUED') {
+          showToast('Family share queued for sync');
+        } else if (event.data.type === 'FAMILY_SYNC_COMPLETE') {
+          showToast(`Synced ${event.data.count} family shares`);
+        } else if (event.data.type === 'LOCATION_SYNC_COMPLETE') {
+          showToast(`Synced ${event.data.count} locations`);
+        } else if (event.data.type === 'REGION_CACHED') {
+          showToast('Offline region cached');
         }
       });
-      socket.on('locationUpdate', (data) => {
-        if (!isAdmin || !trackingUsers.includes(data.userId)) return;
-        const marker = trackedMarkers.get(data.userId);
-        if (marker) {
-          marker.position = data.location;
-        } else {
-          const markerElement = document.createElement('div');
-          markerElement.style.width = '15px';
-          markerElement.style.height = '15px';
-          markerElement.style.backgroundColor = 'purple';
-          markerElement.style.borderRadius = '50%';
-          markerElement.style.border = '2px solid white';
-          const newMarker = new google.maps.marker.AdvancedMarkerElement({
-            map,
-            position: data.location,
-            content: markerElement,
-            title: `User ${data.userId}`
-          });
-          trackedMarkers.set(data.userId, newMarker);
-        }
-        console.log('Received location update for tracked user:', data.userId, data.location);
-      });
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'INIT' });
+      }
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (position) => {
@@ -4882,25 +4909,227 @@
           }
         );
       } else {
-        console.error('Geolocation not supported');
-        showToast('Geolocation not supported by this browser.');
-        navState.userLocation = { lat: 33.083270, lng: -83.233040 };
-        rawUserLocation = navState.userLocation;
-        loadGoogleMaps();
+        showToast('Geolocation is not supported by this browser.');
+        handleGeolocationError({ code: 0 }, true);
       }
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(reg => {
-          console.log('Service Worker registered:', reg);
-          if (pushNotificationsEnabled) {
-            requestPushPermission();
-          }
-        }).catch(err => {
-          console.error('Service Worker registration failed:', err);
-        });
+      const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      if (connection && connection.effectiveType === '2g') {
+        trafficLayer.setMap(null);
+        showToast('Slow connection detected. Traffic layer disabled.');
       }
-      console.log('App initialization complete');
     }
-    initApp();
+    window.addEventListener('load', () => {
+      console.log('Window loaded, checking auth...');
+      if (typeof io === 'undefined') {
+        console.error('Socket.IO not loaded on window load, retrying in 1s');
+        showToast('Failed to load Socket.IO. Retrying...');
+        setTimeout(() => {
+          if (typeof io === 'undefined') {
+            console.error('Socket.IO still not loaded, check CDN');
+            showToast('Failed to load Socket.IO. Some features may be unavailable.');
+            checkAuth();
+          } else {
+            checkAuth();
+          }
+        }, 1000);
+      } else {
+        checkAuth();
+      }
+      requestPushPermission();
+    });
+    async function fetchUsers(query = '') {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const response = await fetch(`/api/users?search=${encodeURIComponent(query)}`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (!response.ok) throw new Error('Failed to fetch users');
+        const users = await response.json();
+        const list = document.getElementById('users-list');
+        list.innerHTML = '<table><thead><tr><th>Username</th><th>Email</th><th>Admin</th><th>Banned</th><th>Actions</th></tr></thead><tbody>';
+        users.forEach(user => {
+          list.innerHTML += `
+            <tr>
+              <td>${user.username}</td>
+              <td>${user.email}</td>
+              <td>${user.isAdmin ? 'Yes' : 'No'}</td>
+              <td>${user.banned ? 'Yes' : 'No'}</td>
+              <td>
+                <button onclick="deleteUser('${user._id}')">Delete</button>
+                <button onclick="banUser('${user._id}')">Ban</button>
+                <button onclick="ipBanUser('${user._id}')">IP Ban</button>
+                <button onclick="toggleAdmin('${user._id}', ${user.isAdmin})">${user.isAdmin ? 'Demote' : 'Promote'}</button>
+                <button onclick="viewLocation('${user._id}')">View Location</button>
+                <button onclick="viewAlerts('${user._id}')">View Alerts</button>
+                <button onclick="trackLive('${user._id}')">Track Live</button>
+                <button onclick="stopTrack('${user._id}')">Stop Track</button>
+              </td>
+            </tr>
+          `;
+        });
+        list.innerHTML += '</tbody></table>';
+        console.log('Fetched users:', users.length);
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        showToast('Failed to load users.');
+      }
+    }
+    async function deleteUser(id) {
+      if (confirm('Delete user?')) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const response = await fetch(`/api/users/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast('User deleted');
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to delete user');
+        }
+      }
+    }
+    async function banUser(id) {
+      if (confirm('Ban user?')) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const response = await fetch(`/api/users/${id}/ban`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast('User banned');
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to ban user');
+        }
+      }
+    }
+    async function ipBanUser(id) {
+      if (confirm('IP Ban user?')) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const response = await fetch(`/api/users/${id}/ipban`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast('User IP banned');
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to IP ban user');
+        }
+      }
+    }
+    async function toggleAdmin(id, isCurrentAdmin) {
+      if (confirm(`${isCurrentAdmin ? 'Demote' : 'Promote'} user to admin?`)) {
+        try {
+          const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+          const endpoint = isCurrentAdmin ? `/api/users/${id}/demote` : `/api/users/${id}/promote`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token.trim()}` }
+          });
+          if (response.ok) {
+            showToast(`User ${isCurrentAdmin ? 'demoted' : 'promoted'}`);
+            fetchUsers(document.getElementById('user-search').value);
+          }
+        } catch (error) {
+          showToast('Failed to toggle admin status');
+        }
+      }
+    }
+    async function viewLocation(id) {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const response = await fetch(`/api/users/${id}/location`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const { location } = await response.json();
+          if (location) {
+            const pos = { lat: location.coordinates[1], lng: location.coordinates[0] };
+            map.setCenter(pos);
+            map.setZoom(15);
+            showToast('Centered on user location');
+          } else {
+            showToast('User location not available');
+          }
+        }
+      } catch (error) {
+        showToast('Failed to view user location');
+      }
+    }
+    async function viewAlerts(id) {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        const response = await fetch(`/api/alerts/user/${id}?since=${since}`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const alerts = await response.json();
+          const list = document.getElementById('users-list');
+          list.innerHTML += '<h4>User Alerts This Week</h4><ul>';
+          alerts.forEach(alert => {
+            list.innerHTML += `<li>${alert.type} at ${alert.address || 'unknown'} (${new Date(alert.timestamp).toLocaleString()})</li>`;
+          });
+          list.innerHTML += '</ul>';
+          showToast('User alerts loaded');
+        }
+      } catch (error) {
+        showToast('Failed to view user alerts');
+      }
+    }
+    function trackLive(id) {
+      if (!trackingUsers.includes(id)) {
+        trackingUsers.push(id);
+        showToast('Tracking user live');
+      }
+    }
+    function stopTrack(id) {
+      trackingUsers = trackingUsers.filter(u => u !== id);
+      const marker = trackedMarkers.get(id);
+      if (marker) {
+        marker.setMap(null);
+        trackedMarkers.delete(id);
+      }
+      showToast('Stopped tracking user');
+    }
+    async function showNearbyUsers() {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        const response = await fetch(`/api/users/nearby?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&radius=48280`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const users = await response.json();
+          users.forEach(user => trackLive(user._id));
+          showToast('Showing nearby users on map');
+        }
+      } catch (error) {
+        showToast('Failed to show nearby users');
+      }
+    }
+    function clearTrackedMarkers() {
+      trackedMarkers.forEach(marker => marker.setMap(null));
+      trackedMarkers.clear();
+      trackingUsers = [];
+    }
+    function toggleAccordion(header) {
+      const content = header.nextElementSibling;
+      const isOpen = content.classList.contains('active');
+      document.querySelectorAll('.accordion-content').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.accordion-header').forEach(h => h.classList.remove('active'));
+      if (!isOpen) {
+        content.classList.add('active');
+        header.classList.add('active');
+      }
+    }
   </script>
 </body>
 </html>
