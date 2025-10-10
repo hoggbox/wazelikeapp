@@ -1,16 +1,15 @@
-// sw.js
-const CACHE_NAME = 'waze-like-app-v1.3'; // Bumped for updates
+const CACHE_NAME = 'waze-like-app-v1.3';
 const urlsToCache = [
   '/',
   '/index.html',
   '/icon.png',
   '/manifest.json?v=1.0.3',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css', // Updated to stable v6.6.0 (2025 latest)
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css',
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js',
   'https://cdn.socket.io/4.7.5/socket.io.min.js',
-  'https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=2666b5bd496d9c6026f43f82&v=beta&libraries=places,geometry,marker,routes&loading=async&callback=initMap', // Explicit callback for Maps
-  'https://i.postimg.cc/YS0h0m7R/compass.png', // Added compass image
-  'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png' // Added traffic camera marker image
+  'https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=2666b5bd496d9c6026f43f82&v=beta&libraries=places,geometry,marker,routes&loading=async&callback=initMap',
+  'https://i.postimg.cc/YS0h0m7R/compass.png',
+  'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
 ];
 
 // Install event: Cache essential assets
@@ -20,7 +19,6 @@ self.addEventListener('install', event => {
     caches.open(CACHE_NAME)
       .then(cache => {
         console.log('[Service Worker] Caching app shell and assets');
-        // Check network conditions before caching
         const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
         if (connection && connection.effectiveType === '2g') {
           console.log('[Service Worker] Slow connection detected, caching minimal assets only');
@@ -55,10 +53,9 @@ self.addEventListener('activate', event => {
       console.log('[Service Worker] Claiming clients');
       return self.clients.claim();
     }).then(() => {
-      // Register periodic sync if supported (2025 enhancement for periodic location sync)
       if ('periodicSync' in self.registration) {
         return self.registration.periodicSync.register('sync-location', {
-          minInterval: 24 * 60 * 60 * 1000 // Daily
+          minInterval: 24 * 60 * 60 * 1000
         }).then(() => {
           console.log('[Service Worker] Periodic sync registered');
         }).catch(error => {
@@ -76,10 +73,8 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   console.log(`[Service Worker] Fetching: ${url.pathname} (${event.request.method})`);
 
-  // Bypass service worker for API calls and WebSocket connections
   if (url.pathname.startsWith('/api/') || url.pathname === '/socket.io/') {
     console.log('[Service Worker] Bypassing cache for:', url.pathname);
-    // Added origin check for security (2025 best practice)
     if (url.origin !== self.location.origin && !url.pathname.startsWith('/api/public')) {
       console.warn('[Service Worker] Cross-origin API fetch blocked:', url.origin);
       return event.respondWith(new Response('Cross-origin request blocked', { status: 403 }));
@@ -96,11 +91,9 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Cache-first strategy for static assets, with network condition check
   event.respondWith(
     caches.match(event.request).then(cachedResponse => {
       if (cachedResponse) {
-        // Check Cache-Control for freshness (added for 2025 compatibility)
         const cacheControl = cachedResponse.headers.get('Cache-Control');
         if (cacheControl && cacheControl.includes('no-cache')) {
           console.log('[Service Worker] Cache stale (no-cache header), refetching:', url.pathname);
@@ -110,7 +103,7 @@ self.addEventListener('fetch', event => {
               cache.put(event.request, responseToCache);
             });
             return networkResponse;
-          }).catch(() => cachedResponse); // Fallback to cache if network fails
+          }).catch(() => cachedResponse);
         }
         console.log('[Service Worker] Serving from cache:', url.pathname);
         return cachedResponse;
@@ -120,13 +113,12 @@ self.addEventListener('fetch', event => {
         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
           return networkResponse;
         }
-        // Check battery level before caching
         const battery = await navigator.getBattery?.();
         if (battery && battery.level < 0.2) {
           console.log('[Service Worker] Low battery, skipping cache update:', url.pathname);
           return networkResponse;
         }
-        const responseToCache = structuredClone ? structuredClone(networkResponse) : networkResponse.clone(); // ES2022+ for large blobs
+        const responseToCache = structuredClone ? structuredClone(networkResponse) : networkResponse.clone();
         caches.open(CACHE_NAME).then(cache => {
           cache.put(event.request, responseToCache);
           console.log('[Service Worker] Cached network response:', url.pathname);
@@ -149,14 +141,13 @@ self.addEventListener('push', event => {
   if (event.data) {
     try {
       data = event.data.json();
-      // Added sanitization (2025 security: prevent malformed JSON)
       if (typeof data !== 'object' || !data.title || typeof data.body !== 'string') {
         throw new Error('Invalid push data structure');
       }
       console.log('[Service Worker] Push data:', data);
     } catch (error) {
       console.error('[Service Worker] Error parsing push data:', error.message, error.stack);
-      data = { title: 'Alert', body: 'New alert received' }; // Fallback
+      data = { title: 'Alert', body: 'New alert received' };
     }
   }
   event.waitUntil(
@@ -170,7 +161,7 @@ self.addEventListener('push', event => {
         lat: data.lat,
         lng: data.lng
       },
-      actions: [ // Added actions for better UX (2025 standard)
+      actions: [
         {
           action: 'view_alert',
           title: 'View Alert',
@@ -192,7 +183,6 @@ self.addEventListener('notificationclick', event => {
   const { alertId, lat, lng } = event.notification.data || {};
   const url = alertId && !isNaN(lat) && !isNaN(lng) ? `/?alertId=${alertId}&lat=${lat}&lng=${lng}` : '/';
   
-  // Handle action buttons (added for 2025 UX)
   if (event.action === 'view_alert') {
     console.log('[Service Worker] Action button clicked: view_alert');
   }
@@ -240,7 +230,6 @@ async function syncLocationUpdates() {
     const tx = db.transaction('location-queue', 'readonly');
     const store = tx.objectStore('location-queue');
 
-    // Get all keys and values to pair them
     const keys = await store.getAllKeys();
     if (keys.length === 0) {
       console.log('[Service Worker] No queued locations to sync');
@@ -251,11 +240,9 @@ async function syncLocationUpdates() {
     const items = await Promise.all(keyPromises);
     await tx.done;
 
-    // Request token from main client
     const token = await getStoredToken();
     if (!token) {
       console.error('[Service Worker] No valid token for location sync - cannot proceed');
-      // Re-register sync for retry (main app will handle re-registration on load)
       return;
     }
 
@@ -263,7 +250,6 @@ async function syncLocationUpdates() {
     const maxRetries = 3;
     const baseBackoff = 5000;
 
-    // Sync each item
     for (const { key, value } of items) {
       let success = false;
       let localRetryCount = 0;
@@ -281,7 +267,6 @@ async function syncLocationUpdates() {
 
           if (response.ok) {
             console.log('[Service Worker] Synced location:', value.data);
-            // Delete from DB
             const deleteTx = db.transaction('location-queue', 'readwrite');
             const deleteStore = deleteTx.objectStore('location-queue');
             await deleteStore.delete(key);
@@ -318,7 +303,7 @@ async function syncLocationUpdates() {
   }
 }
 
-// Helper to open IndexedDB (added error handling for quota/storage)
+// Helper to open IndexedDB
 function openDB(name, version, upgradeCallback) {
   return new Promise((resolve, reject) => {
     try {
@@ -333,9 +318,8 @@ function openDB(name, version, upgradeCallback) {
       };
       request.onsuccess = event => resolve(event.target.result);
       request.onerror = event => reject(event.target.error || new Error('IndexedDB open failed'));
-      // Added storage quota listener (2025 best practice)
       navigator.storage?.estimate().then(estimate => {
-        if (estimate.quota < 50000000) { // <50MB
+        if (estimate.quota < 50000000) {
           console.warn('[Service Worker] Low storage quota:', estimate.usage, '/', estimate.quota);
         }
       });
@@ -345,18 +329,17 @@ function openDB(name, version, upgradeCallback) {
   });
 }
 
-// Get token from main client via postMessage (added no-clients fallback)
+// Get token from main client via postMessage
 async function getStoredToken() {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error('Token request timeout'));
-    }, 5000);  // 5s timeout to avoid hanging
+    }, 5000);
 
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       if (clients.length === 0) {
         console.warn('[Service Worker] No clients available for token request - using cached token if available');
         clearTimeout(timeout);
-        // Fallback: Check cache for stored token (app should cache it)
         caches.open(CACHE_NAME).then(cache => {
           cache.match('/token-cache').then(response => {
             if (response) {
@@ -368,7 +351,7 @@ async function getStoredToken() {
         });
         return;
       }
-      const mainClient = clients[0];  // Assume first client is main app
+      const mainClient = clients[0];
       mainClient.postMessage({ type: 'GET_TOKEN_FOR_SYNC' });
 
       const handler = event => {
@@ -392,7 +375,6 @@ self.addEventListener('message', event => {
   if (event.data.type === 'INIT') {
     console.log('[Service Worker] Initialization message received');
   } else if (event.data.type === 'SHOW_NOTIFICATION') {
-    // Added sanitization
     if (typeof event.data !== 'object' || !event.data.title || typeof event.data.body !== 'string') {
       console.error('[Service Worker] Invalid SHOW_NOTIFICATION data');
       return;
@@ -407,7 +389,7 @@ self.addEventListener('message', event => {
         lat: event.data.lat,
         lng: event.data.lng
       },
-      actions: [ // Added actions for better UX (2025 standard)
+      actions: [
         {
           action: 'view_alert',
           title: 'View Alert',
@@ -419,10 +401,9 @@ self.addEventListener('message', event => {
     }).catch(error => {
       console.error('[Service Worker] Client-initiated notification error:', error.message, error.stack);
     });
-  } else if (event.data.type === 'RELEASE_WAKELOCK') {  // Coordinate wake lock release on app close
+  } else if (event.data.type === 'RELEASE_WAKELOCK') {
     console.log('[Service Worker] Releasing wake lock via message');
-    // Forward to clients if needed
-  } else if (event.data.type === 'CACHE_REGION') {  // Added for offline regions
+  } else if (event.data.type === 'CACHE_REGION') {
     console.log('[Service Worker] Caching region:', event.data.region);
     caches.open(CACHE_NAME + '-regions').then(cache => {
       const regionKey = `region-${event.data.region.timestamp}`;
@@ -443,7 +424,7 @@ self.addEventListener('message', event => {
   }
 });
 
-// Periodically sync (stub for future; register in activate)
+// Periodically sync
 self.addEventListener('periodicsync', event => {
   if (event.tag === 'sync-location') {
     console.log('[Service Worker] Periodic sync triggered');

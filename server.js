@@ -3,7 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const helmet = require('helmet'); // Added for security headers
+const helmet = require('helmet');
 const webpush = require('web-push');
 const rateLimit = require('express-rate-limit');
 const http = require('http');
@@ -27,7 +27,7 @@ const io = new Server(server, {
 app.set('trust proxy', 1);
 
 // Middleware
-app.use(helmet()); // Added security headers
+app.use(helmet());
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
@@ -65,7 +65,7 @@ async function connectDB() {
     try {
       console.log('Attempting MongoDB connection with URI:', uri.replace(/:\/\/[^@]+@/, '://<redacted>@'));
       await mongoose.connect(uri, {
-        dbName: 'pinmap', // Explicitly specify the database name
+        dbName: 'pinmap',
         serverSelectionTimeoutMS: 5000,
         connectTimeoutMS: 10000,
         socketTimeoutMS: 45000
@@ -127,7 +127,7 @@ app.get('/api/test-db', async (req, res) => {
     res.json({ message: 'MongoDB connection successful' });
   } catch (error) {
     console.error('MongoDB test error:', error.message, error.stack);
-    res.status(500).json({ error: 'MongoDB connection failed' }); // Sanitized
+    res.status(500).json({ error: 'MongoDB connection failed' });
   }
 });
 
@@ -216,7 +216,7 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       address: address || 'Unknown',
       timestamp: timestampDate,
       votes: { up: 0, down: 0, upVoters: [], downVoters: [] },
-      expiry: new Date(Date.now() + 3600000) // 1 hour expiry
+      expiry: new Date(Date.now() + 3600000)
     };
 
     // Add alert to user and update stats
@@ -316,7 +316,7 @@ app.get('/api/markers', authMiddleware, async (req, res) => {
   }
 });
 
-// Fetch Hazards Near Route (fixed distance to radians)
+// Fetch Hazards Near Route (fixed: use bounding Polygon + JS distance filter)
 app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
   try {
     const { polyline, maxDistance = 50 } = req.body;
@@ -324,29 +324,65 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
       console.error('Invalid polyline data:', polyline);
       return res.status(400).json({ error: 'Invalid polyline data' });
     }
-    const maxDistRadians = parseFloat(maxDistance) / 6378137; // Fixed: Convert meters to radians
-    console.log('Fetching hazards for polyline:', { points: polyline.length, maxDistance, maxDistRadians });
-    const lineString = {
-      type: 'LineString',
-      coordinates: polyline.map(pt => [pt.lng || pt[0], pt.lat || pt[1]]) // Handle both {lng,lat} and [lng,lat]
+    const maxDistMeters = parseFloat(maxDistance);
+    if (isNaN(maxDistMeters) || maxDistMeters <= 0) {
+      return res.status(400).json({ error: 'Invalid maxDistance' });
+    }
+    console.log('Fetching hazards for polyline:', { points: polyline.length, maxDistance: maxDistMeters });
+
+    // Validate/normalize polyline points (handle {lng,lat} or [lng,lat])
+    const normalizedPolyline = polyline.map(pt => {
+      const lng = pt.lng ?? pt[0];
+      const lat = pt.lat ?? pt[1];
+      if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+        throw new Error(`Invalid point in polyline: [${lng}, ${lat}]`);
+      }
+      return [lng, lat];
+    });
+
+    // Compute bounding Polygon: min/max + buffer (rough degrees conversion)
+    const lats = normalizedPolyline.map(pt => pt[1]);
+    const lngs = normalizedPolyline.map(pt => pt[0]);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs);
+    const maxLng = Math.max(...lngs);
+    const avgLat = (minLat + maxLat) / 2;
+    const bufferDeg = maxDistMeters / 111000; // ~1 deg lat = 111km; adjust lng by cos(lat)
+    const bufferLng = bufferDeg / Math.cos(avgLat * Math.PI / 180);
+
+    const boundingPolygon = {
+      type: 'Polygon',
+      coordinates: [[
+        [minLng - bufferLng, minLat - bufferDeg],
+        [maxLng + bufferLng, minLat - bufferDeg],
+        [maxLng + bufferLng, maxLat + bufferDeg],
+        [minLng - bufferLng, maxLat + bufferDeg],
+        [minLng - bufferLng, minLat - bufferDeg]
+      ]]
     };
+
+    console.log('Using bounding Polygon for initial fetch:', JSON.stringify(boundingPolygon));
+
+    // Fetch candidates with $geoWithin (uses 2dsphere index)
     const users = await User.find({
       'alerts.location': {
         $geoWithin: {
-          $geometry: lineString,
-          $maxDistance: maxDistRadians // Fixed radians
+          $geometry: boundingPolygon
         }
       },
       'alerts.expiry': { $gt: new Date() },
       'alerts.type': { $ne: 'Traffic Camera' }
     });
-    const hazards = users.flatMap(user =>
+
+    // Extract all candidate alerts
+    let candidateHazards = users.flatMap(user =>
       user.alerts
         .filter(alert => alert.expiry > new Date() && alert.type !== 'Traffic Camera')
         .map(alert => ({
           _id: alert._id,
           type: alert.type,
-          location: alert.location,
+          location: { type: 'Point', coordinates: alert.location.coordinates },
           address: alert.address,
           timestamp: alert.timestamp,
           votes: alert.votes,
@@ -354,8 +390,26 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
           userId: { _id: user._id, username: user.username }
         }))
     );
-    console.log('Returning hazards:', hazards.length);
-    res.json(hazards);
+
+    // Post-filter: Min distance to any polyline segment < maxDistance
+    const filteredHazards = candidateHazards.filter(hazard => {
+      const hazardPoint = { lat: hazard.location.coordinates[1], lng: hazard.location.coordinates[0] };
+      let minDist = Infinity;
+
+      for (let i = 0; i < normalizedPolyline.length - 1; i++) {
+        const segStart = { lat: normalizedPolyline[i][1], lng: normalizedPolyline[i][0] };
+        const segEnd = { lat: normalizedPolyline[i + 1][1], lng: normalizedPolyline[i + 1][0] };
+        // Project hazard to segment and get closest dist
+        const projDist = projectToSegment(hazardPoint, segStart, segEnd);
+        minDist = Math.min(minDist, projDist);
+        if (minDist <= maxDistMeters) break;
+      }
+
+      return minDist <= maxDistMeters;
+    });
+
+    console.log(`Filtered to ${filteredHazards.length} hazards within ${maxDistMeters}m of route (from ${candidateHazards.length} candidates)`);
+    res.json(filteredHazards);
   } catch (error) {
     console.error('Error fetching hazards near route:', error.message, error.stack);
     const status = error.name === 'TokenExpiredError' ? 401 : 500;
@@ -364,7 +418,7 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
   }
 });
 
-// Vote on Alert (added expiry check)
+// Vote on Alert
 app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
   try {
     const { voteType } = req.body;
@@ -387,7 +441,7 @@ app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
       console.error('Alert not found in user document:', req.params.id);
       return res.status(404).json({ error: 'Alert not found' });
     }
-    if (alert.expiry <= new Date()) { // Added expiry check
+    if (alert.expiry <= new Date()) {
       console.error('Voting on expired alert:', req.params.id);
       return res.status(410).json({ error: 'Alert expired' });
     }
@@ -433,7 +487,7 @@ app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
   }
 });
 
-// Delete Alert (added expiry check and logging)
+// Delete Alert
 app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -452,7 +506,7 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
       console.error('Alert not found in owner document:', req.params.id);
       return res.status(404).json({ error: 'Alert not found' });
     }
-    if (alert.expiry <= new Date()) { // Added expiry check
+    if (alert.expiry <= new Date()) {
       console.error('Deleting expired alert:', req.params.id);
       return res.status(410).json({ error: 'Alert expired' });
     }
@@ -466,7 +520,7 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     owner.alerts.pull({ _id: req.params.id });
     owner.activeAlerts = Math.max(0, (owner.activeAlerts || 0) - 1);
     await owner.save();
-    console.log(`Alert deleted by ${req.user.username} (${req.user._id}) for owner ${owner.username} (${owner._id}):`, { alertId: req.params.id }); // Added logging
+    console.log(`Alert deleted by ${req.user.username} (${req.user._id}) for owner ${owner.username} (${owner._id}):`, { alertId: req.params.id });
     req.io.emit('alertDeleted', req.params.id);
     res.json({ message: 'Alert deleted successfully' });
   } catch (error) {
@@ -617,7 +671,7 @@ app.post('/api/users/:id/promote', authMiddleware, async (req, res) => {
     }
     user.isAdmin = true;
     await user.save();
-    console.log(`${req.user.username} promoted user ${user.username}:`, req.params.id); // Added logging
+    console.log(`${req.user.username} promoted user ${user.username}:`, req.params.id);
     res.json({ message: 'User promoted to admin' });
   } catch (error) {
     console.error('Error promoting user:', error.message, error.stack);
@@ -640,7 +694,7 @@ app.post('/api/users/:id/demote', authMiddleware, async (req, res) => {
     }
     user.isAdmin = false;
     await user.save();
-    console.log(`${req.user.username} demoted user ${user.username}:`, req.params.id); // Added logging
+    console.log(`${req.user.username} demoted user ${user.username}:`, req.params.id);
     res.json({ message: 'User demoted from admin' });
   } catch (error) {
     console.error('Error demoting user:', error.message, error.stack);
@@ -663,7 +717,7 @@ app.post('/api/users/:id/ban', authMiddleware, async (req, res) => {
     }
     user.isBanned = true;
     await user.save();
-    console.log(`${req.user.username} banned user ${user.username}:`, req.params.id); // Added logging
+    console.log(`${req.user.username} banned user ${user.username}:`, req.params.id);
     req.io.emit('userBanned', { userId: req.params.id });
     res.json({ message: 'User banned' });
   } catch (error) {
@@ -688,7 +742,7 @@ app.post('/api/users/:id/ipban', authMiddleware, async (req, res) => {
     user.isBanned = true;
     user.ipBanned = req.ip || 'unknown';
     await user.save();
-    console.log(`${req.user.username} IP banned user ${user.username} (${req.ip}):`, req.params.id); // Added logging
+    console.log(`${req.user.username} IP banned user ${user.username} (${req.ip}):`, req.params.id);
     req.io.emit('userBanned', { userId: req.params.id });
     res.json({ message: 'User IP banned' });
   } catch (error) {
@@ -710,7 +764,7 @@ app.delete('/api/users/:id', authMiddleware, async (req, res) => {
       console.error('User not found for delete:', req.params.id);
       return res.status(404).json({ error: 'User not found' });
     }
-    console.log(`${req.user.username} deleted user ${user.username}:`, req.params.id); // Added logging
+    console.log(`${req.user.username} deleted user ${user.username}:`, req.params.id);
     req.io.emit('userBanned', { userId: req.params.id });
     res.json({ message: 'User deleted' });
   } catch (error) {
@@ -734,7 +788,24 @@ function getDistance(point1, point2) {
   return R * c;
 }
 
-// Error Handling Middleware (sanitized)
+function projectToSegment(point, segStart, segEnd) {
+  const dx = segEnd.lng - segStart.lng;
+  const dy = segEnd.lat - segStart.lat;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return getDistance(point, segStart);
+
+  let t = ((point.lng - segStart.lng) * dx + (point.lat - segStart.lat) * dy) / lenSq;
+  t = Math.max(0, Math.min(1, t));
+
+  const proj = {
+    lng: segStart.lng + t * dx,
+    lat: segStart.lat + t * dy
+  };
+
+  return getDistance(point, proj);
+}
+
+// Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message, err.stack);
   const status = err.name === 'TokenExpiredError' ? 401 : 500;
@@ -742,13 +813,13 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: 'Internal server error', details });
 });
 
-// Socket.IO Auth Middleware (added)
+// Socket.IO Auth Middleware
 io.use((socket, next) => {
   const token = socket.handshake.auth.token;
   if (!token) return next(new Error('Auth token required'));
   jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
     if (err) return next(new Error('Invalid token'));
-    socket.user = decoded; // Attach user to socket
+    socket.user = decoded;
     next();
   });
 });
@@ -757,7 +828,7 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id, 'User:', socket.user.id);
   socket.on('join', (userId) => {
-    if (userId !== socket.user.id) return socket.disconnect(true); // Security
+    if (userId !== socket.user.id) return socket.disconnect(true);
     socket.join(userId);
     console.log(`User ${userId} joined room`);
   });

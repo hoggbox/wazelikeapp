@@ -12,7 +12,6 @@ const webpush = require('web-push');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = 'public/uploads/';
-    // Ensure directory exists
     require('fs').mkdirSync(uploadDir, { recursive: true });
     cb(null, uploadDir);
   },
@@ -28,9 +27,9 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
+const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } });
 
-// VAPID keys (use env vars for production)
+// VAPID keys
 const vapidEmail = process.env.VAPID_EMAIL || 'your-email@example.com';
 webpush.setVapidDetails(
   `mailto:${vapidEmail}`,
@@ -53,7 +52,6 @@ router.post('/register', async (req, res) => {
     if (password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
-    // Check for existing user (case-insensitive for email)
     const existingUser = await User.findOne({ 
       $or: [
         { username: { $regex: new RegExp(`^${cleanUsername}$`, 'i') } },
@@ -72,12 +70,12 @@ router.post('/register', async (req, res) => {
         id: user._id, 
         username: user.username, 
         email: user.email,
-        avatar: gravatar.url(cleanEmail, { s: '200', r: 'pg', d: 'mm' }) // Gravatar with defaults
+        avatar: gravatar.url(cleanEmail, { s: '200', r: 'pg', d: 'mm' })
       } 
     });
   } catch (error) {
     console.error('Register error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to register user' }); // Sanitized
+    res.status(500).json({ error: 'Failed to register user' });
   }
 });
 
@@ -105,7 +103,7 @@ router.post('/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to login' }); // Sanitized
+    res.status(500).json({ error: 'Failed to login' });
   }
 });
 
@@ -114,14 +112,13 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    // Populate alerts if needed (optional enhancement, safePopulate avoids CVE)
     await user.safePopulate(['alerts']);
     user.activeAlerts = user.alerts?.filter(alert => alert.expiry > new Date())?.length || 0;
     user.totalAlerts = user.alerts?.length || 0;
     res.json(user);
   } catch (error) {
     console.error('Profile fetch error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to fetch profile' }); // Sanitized
+    res.status(500).json({ error: 'Failed to fetch profile' });
   }
 });
 
@@ -138,13 +135,12 @@ router.post('/upload-avatar', authMiddleware, upload.single('avatar'), async (re
     res.json({ avatar: user.avatar });
   } catch (error) {
     console.error('Avatar upload error:', error.message, { stack: error.stack });
-    // Cleanup uploaded file on error
     if (req.file) require('fs').unlinkSync(req.file.path);
-    res.status(500).json({ error: 'Failed to upload avatar' }); // Sanitized
+    res.status(500).json({ error: 'Failed to upload avatar' });
   }
 });
 
-// Subscribe to push (added validation)
+// Subscribe to push
 router.post('/subscribe', authMiddleware, async (req, res) => {
   try {
     const { endpoint, keys } = req.body;
@@ -158,11 +154,11 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
     res.status(201).json({ message: 'Subscribed successfully' });
   } catch (error) {
     console.error('Push subscription error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to subscribe' }); // Sanitized
+    res.status(500).json({ error: 'Failed to subscribe' });
   }
 });
 
-// Refresh token (optional enhancement for longer sessions)
+// Refresh token
 router.post('/refresh', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -171,7 +167,7 @@ router.post('/refresh', authMiddleware, async (req, res) => {
     res.json({ token });
   } catch (error) {
     console.error('Token refresh error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to refresh token' }); // Sanitized
+    res.status(500).json({ error: 'Failed to refresh token' });
   }
 });
 
