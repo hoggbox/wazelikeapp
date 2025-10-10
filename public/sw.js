@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'waze-like-app-v1.2'; // Bumped version to clear old caches after app updates
+const CACHE_NAME = 'waze-like-app-v1.3'; // Bumped for updates
 const urlsToCache = [
   '/',
   '/index.html',
@@ -54,6 +54,17 @@ self.addEventListener('activate', event => {
     }).then(() => {
       console.log('[Service Worker] Claiming clients');
       return self.clients.claim();
+    }).then(() => {
+      // Register periodic sync if supported (2025 enhancement for periodic location sync)
+      if ('periodicSync' in self.registration) {
+        return self.registration.periodicSync.register('sync-location', {
+          minInterval: 24 * 60 * 60 * 1000 // Daily
+        }).then(() => {
+          console.log('[Service Worker] Periodic sync registered');
+        }).catch(error => {
+          console.warn('[Service Worker] Periodic sync registration failed:', error.message);
+        });
+      }
     }).catch(error => {
       console.error('[Service Worker] Activation failed:', error.message, error.stack);
     })
@@ -63,15 +74,20 @@ self.addEventListener('activate', event => {
 // Fetch event: Serve cached assets or fetch from network
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  console.log('[Service Worker] Fetching:', url.pathname);
+  console.log(`[Service Worker] Fetching: ${url.pathname} (${event.request.method})`);
 
   // Bypass service worker for API calls and WebSocket connections
   if (url.pathname.startsWith('/api/') || url.pathname === '/socket.io/') {
     console.log('[Service Worker] Bypassing cache for:', url.pathname);
+    // Added origin check for security (2025 best practice)
+    if (url.origin !== self.location.origin && !url.pathname.startsWith('/api/public')) {
+      console.warn('[Service Worker] Cross-origin API fetch blocked:', url.origin);
+      return event.respondWith(new Response('Cross-origin request blocked', { status: 403 }));
+    }
     event.respondWith(
       fetch(event.request).catch(error => {
         console.error('[Service Worker] Fetch failed for API/WebSocket:', error.message, error.stack);
-        return new Response(JSON.stringify({ error: 'Network unavailable', details: error.message }), {
+        return new Response(JSON.stringify({ error: 'Network unavailable' }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -110,7 +126,7 @@ self.addEventListener('fetch', event => {
           console.log('[Service Worker] Low battery, skipping cache update:', url.pathname);
           return networkResponse;
         }
-        const responseToCache = networkResponse.clone();
+        const responseToCache = structuredClone ? structuredClone(networkResponse) : networkResponse.clone(); // ES2022+ for large blobs
         caches.open(CACHE_NAME).then(cache => {
           cache.put(event.request, responseToCache);
           console.log('[Service Worker] Cached network response:', url.pathname);
@@ -133,9 +149,14 @@ self.addEventListener('push', event => {
   if (event.data) {
     try {
       data = event.data.json();
+      // Added sanitization (2025 security: prevent malformed JSON)
+      if (typeof data !== 'object' || !data.title || typeof data.body !== 'string') {
+        throw new Error('Invalid push data structure');
+      }
       console.log('[Service Worker] Push data:', data);
     } catch (error) {
       console.error('[Service Worker] Error parsing push data:', error.message, error.stack);
+      data = { title: 'Alert', body: 'New alert received' }; // Fallback
     }
   }
   event.waitUntil(
@@ -297,17 +318,34 @@ async function syncLocationUpdates() {
   }
 }
 
-// Helper to open IndexedDB
+// Helper to open IndexedDB (added error handling for quota/storage)
 function openDB(name, version, upgradeCallback) {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(name, version);
-    request.onupgradeneeded = event => upgradeCallback(event.target.result);
-    request.onsuccess = event => resolve(event.target.result);
-    request.onerror = event => reject(event.target.error);
+    try {
+      const request = indexedDB.open(name, version);
+      request.onupgradeneeded = event => {
+        try {
+          upgradeCallback(event.target.result);
+        } catch (error) {
+          console.error('[Service Worker] IndexedDB upgrade error:', error.message, error.stack);
+          reject(error);
+        }
+      };
+      request.onsuccess = event => resolve(event.target.result);
+      request.onerror = event => reject(event.target.error || new Error('IndexedDB open failed'));
+      // Added storage quota listener (2025 best practice)
+      navigator.storage?.estimate().then(estimate => {
+        if (estimate.quota < 50000000) { // <50MB
+          console.warn('[Service Worker] Low storage quota:', estimate.usage, '/', estimate.quota);
+        }
+      });
+    } catch (error) {
+      reject(error);
+    }
   });
 }
 
-// Get token from main client via postMessage
+// Get token from main client via postMessage (added no-clients fallback)
 async function getStoredToken() {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -316,8 +354,18 @@ async function getStoredToken() {
 
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
       if (clients.length === 0) {
+        console.warn('[Service Worker] No clients available for token request - using cached token if available');
         clearTimeout(timeout);
-        resolve(null);
+        // Fallback: Check cache for stored token (app should cache it)
+        caches.open(CACHE_NAME).then(cache => {
+          cache.match('/token-cache').then(response => {
+            if (response) {
+              response.text().then(token => resolve(token)).catch(() => resolve(null));
+            } else {
+              resolve(null);
+            }
+          });
+        });
         return;
       }
       const mainClient = clients[0];  // Assume first client is main app
@@ -344,6 +392,11 @@ self.addEventListener('message', event => {
   if (event.data.type === 'INIT') {
     console.log('[Service Worker] Initialization message received');
   } else if (event.data.type === 'SHOW_NOTIFICATION') {
+    // Added sanitization
+    if (typeof event.data !== 'object' || !event.data.title || typeof event.data.body !== 'string') {
+      console.error('[Service Worker] Invalid SHOW_NOTIFICATION data');
+      return;
+    }
     self.registration.showNotification(event.data.title, {
       body: event.data.body,
       icon: '/icon.png',
@@ -369,5 +422,31 @@ self.addEventListener('message', event => {
   } else if (event.data.type === 'RELEASE_WAKELOCK') {  // Coordinate wake lock release on app close
     console.log('[Service Worker] Releasing wake lock via message');
     // Forward to clients if needed
+  } else if (event.data.type === 'CACHE_REGION') {  // Added for offline regions
+    console.log('[Service Worker] Caching region:', event.data.region);
+    caches.open(CACHE_NAME + '-regions').then(cache => {
+      const regionKey = `region-${event.data.region.timestamp}`;
+      const regionData = new Response(JSON.stringify(event.data.region), {
+        headers: { 'Content-Type': 'application/json' }
+      });
+      cache.put(regionKey, regionData).then(() => {
+        self.clients.matchAll().then(clients => {
+          clients.forEach(client => client.postMessage({ type: 'REGION_CACHED' }));
+        });
+      }).catch(error => {
+        console.error('[Service Worker] Region cache failed:', error);
+        self.clients.matchAll().then(clients => {
+          clients.forEach(client => client.postMessage({ type: 'ERROR', message: 'Failed to cache region' }));
+        });
+      });
+    });
+  }
+});
+
+// Periodically sync (stub for future; register in activate)
+self.addEventListener('periodicsync', event => {
+  if (event.tag === 'sync-location') {
+    console.log('[Service Worker] Periodic sync triggered');
+    event.waitUntil(syncLocationUpdates());
   }
 });
