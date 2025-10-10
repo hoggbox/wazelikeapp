@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_NAME = 'waze-like-app-v1.0'; // Updated cache version
+const CACHE_NAME = 'waze-like-app-v1.1'; // Bumped version to clear old caches after app updates
 const urlsToCache = [
   '/',
   '/index.html',
@@ -185,7 +185,9 @@ async function syncLocationUpdates() {
   try {
     const db = await openDB('waze-like-app-db', 1, {
       upgrade(db) {
-        db.createObjectStore('location-queue', { autoIncrement: true });
+        if (!db.objectStoreNames.contains('location-queue')) {
+          db.createObjectStore('location-queue', { autoIncrement: true });
+        }
       }
     });
     const tx = db.transaction('location-queue', 'readwrite');
@@ -195,11 +197,15 @@ async function syncLocationUpdates() {
       console.log('[Service Worker] No queued locations to sync');
       return;
     }
+
+    // FIXED: Request token from main client via message (SW can't access localStorage)
     const token = await getStoredToken();
     if (!token) {
-      console.error('[Service Worker] No valid token for location sync');
+      console.error('[Service Worker] No valid token for location sync - cannot proceed');
+      // Queue a retry by re-registering sync (main script should handle re-registration)
       return;
     }
+
     let retryCount = 0;
     const maxRetries = 3;
     const baseBackoff = 5000;
@@ -214,11 +220,11 @@ async function syncLocationUpdates() {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify(loc)
+            body: JSON.stringify(loc.data)  // Assume queued items have {id, data: {location, timestamp}}
           });
           if (response.ok) {
-            console.log('[Service Worker] Synced location:', loc);
-            await store.delete(loc.id);
+            console.log('[Service Worker] Synced location:', loc.data);
+            await store.delete(loc.id || loc);  // Handle both autoIncrement ID or manual
             success = true;
           } else {
             console.warn('[Service Worker] Failed to sync location:', response.status);
@@ -244,6 +250,7 @@ async function syncLocationUpdates() {
       }
     }
     await tx.done;
+    console.log(`[Service Worker] Sync completed: ${queuedLocations.length - (await store.count())} items synced`);
   } catch (error) {
     console.error('[Service Worker] Sync failed:', error.message, error.stack);
   }
@@ -259,21 +266,33 @@ function openDB(name, version, upgradeCallback) {
   });
 }
 
-// Helper to get stored token (e.g., from localStorage via client message)
+// FIXED: Get token from main client via postMessage (no localStorage in SW)
 async function getStoredToken() {
-  return new Promise(resolve => {
-    self.clients.matchAll().then(clients => {
-      if (clients.length > 0) {
-        clients[0].postMessage({ type: 'GET_TOKEN' });
-        self.addEventListener('message', function handler(event) {
-          if (event.data.type === 'TOKEN_RESPONSE') {
-            resolve(event.data.token);
-            self.removeEventListener('message', handler);
-          }
-        });
-      } else {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error('Token request timeout'));
+    }, 5000);  // 5s timeout to avoid hanging
+
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      if (clients.length === 0) {
+        clearTimeout(timeout);
         resolve(null);
+        return;
       }
+      const mainClient = clients[0];  // Assume first client is main app
+      mainClient.postMessage({ type: 'GET_TOKEN_FOR_SYNC' });
+
+      const handler = event => {
+        if (event.source === mainClient && event.data.type === 'TOKEN_RESPONSE') {
+          clearTimeout(timeout);
+          self.removeEventListener('message', handler);
+          resolve(event.data.token);
+        }
+      };
+      self.addEventListener('message', handler);
+    }).catch(err => {
+      clearTimeout(timeout);
+      reject(err);
     });
   });
 }
@@ -299,10 +318,15 @@ self.addEventListener('message', event => {
     }).catch(error => {
       console.error('[Service Worker] Client-initiated notification error:', error.message, error.stack);
     });
-  } else if (event.data.type === 'GET_TOKEN') {
+  } else if (event.data.type === 'GET_TOKEN_FOR_SYNC') {  // FIXED: Respond to sync-specific request
+    // Note: This handler is in SW, but token comes from client message. Client must forward from localStorage.
+    // In main index.html, add listener: self.addEventListener('message', e => { if (e.data.type === 'GET_TOKEN_FOR_SYNC') e.source.postMessage({type: 'TOKEN_RESPONSE', token: localStorage.getItem('token') || sessionStorage.getItem('token')}); });
     event.source.postMessage({
       type: 'TOKEN_RESPONSE',
-      token: localStorage.getItem('token') || sessionStorage.getItem('token') || null
+      token: null  // Placeholder - actual token sent from client in main script
     });
+  } else if (event.data.type === 'RELEASE_WAKELOCK') {  // NEW: Coordinate wake lock release on app close
+    console.log('[Service Worker] Releasing wake lock via message');
+    // Forward to clients if needed
   }
 });

@@ -605,7 +605,7 @@
     const CAMERA_CHECK_INTERVAL = 10000;
     const ALERT_POLL_INTERVAL = 5000;
     const HEADING_SMOOTHING_WINDOW = 15;
-    const POSITION_HISTORY_WINDOW = 5;
+    const POSITION_SMOOTHING_WINDOW = 3;
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
     const TURN_ZOOM = 19;
@@ -657,6 +657,7 @@
     };
     let mockSimulationInterval = null;
     let isRegister = false;
+    let wakeLock = null;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const LOCATION_UPDATE_THRESHOLD = isMobile ? 500 : 100;
     let isProgrammaticUpdate = false;
@@ -1374,10 +1375,10 @@
         if (navState.isFollowing && navState.isNavigating) {
           lockNavigation();
         } else if (navState.isNavigating) {
-          map.setOptions({ 
-            gestureHandling: 'cooperative', 
-            zoomControl: false, 
-            disableDoubleClickZoom: true 
+          map.setOptions({
+            gestureHandling: 'cooperative',
+            zoomControl: false,
+            disableDoubleClickZoom: true
           });
         }
       });
@@ -2544,6 +2545,19 @@
           let pos = rawUserLocation;
           let snapped = navState.isInitialSnap;
           let computedHeading = heading;
+          positionHistory.push(rawUserLocation);
+          if (positionHistory.length > POSITION_SMOOTHING_WINDOW) {
+            positionHistory.shift();
+          }
+          let smoothedLat = 0, smoothedLng = 0;
+          positionHistory.forEach(p => {
+            smoothedLat += p.lat;
+            smoothedLng += p.lng;
+          });
+          smoothedLat /= positionHistory.length;
+          smoothedLng /= positionHistory.length;
+          pos = { lat: smoothedLat, lng: smoothedLng };
+          console.log('Position smoothed:', { raw: rawUserLocation, smoothed: pos });
           if (navState.currentRoute && navState.currentRoute.routes && navState.currentRoute.routes[0]) {
             if (navState.isNavigating && checkArrival(pos)) {
               return;
@@ -2676,7 +2690,7 @@
         map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
         console.log('Navigation unlocked');
       }
-      function startGPS() {
+      async function startGPS() {
         if (!navigator.geolocation) {
           showToast('Geolocation is not supported by this browser.');
           console.error('Geolocation not supported');
@@ -2697,6 +2711,7 @@
         document.getElementById('bottom-hud-container').style.display = 'flex';
         lockNavigation();
         if (navState.currentRoute) {
+          directionsRenderer.setMap(null);
           const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
           navState.routePolyline = navState.currentRoute.routes[0].overview_path;
           updateOffRoadPolyline(rawUserLocation || navState.userLocation, startLocation);
@@ -2709,8 +2724,6 @@
             userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
             console.log('Initial marker position set:', navState.userLocation);
           });
-          directionsRenderer.setMap(map);
-          directionsRenderer.setDirections(navState.currentRoute);
           updateHUD(navState.currentRoute, navState.userLocation);
           updateBottomHUD(navState.currentRoute);
           fetchCurrentAlerts();
@@ -2756,6 +2769,15 @@
               heading: navState.currentHeading
             }
           });
+          if ('wakeLock' in navigator) {
+            try {
+              wakeLock = await navigator.wakeLock.request('screen');
+              console.log('Screen wake lock acquired');
+            } catch (err) {
+              console.error('Wake lock request failed:', err);
+              showToast('Unable to prevent screen timeout. Keep screen on manually.');
+            }
+          }
         } else {
           console.error('No route available to start navigation');
           showToast('No route available. Please select a destination again.');
@@ -2871,6 +2893,14 @@
           offRoadPolyline.setMap(null);
           offRoadPolyline = null;
         }
+        if (wakeLock) {
+          wakeLock.release().then(() => {
+            wakeLock = null;
+            console.log('Screen wake lock released');
+          }).catch(err => {
+            console.error('Wake lock release failed:', err);
+          });
+        }
         navState.isNavigating = false;
         navState.isFollowing = false;
         navState.isInitialSnap = false;
@@ -2884,6 +2914,7 @@
         navState.currentHeading = 0;
         navState.lastValidHeading = 0;
         headingHistory = [];
+        positionHistory = [];
         lastLocationUpdate = 0;
         lastAlertFetchTime = 0;
         lastPosition = null;
@@ -2894,7 +2925,7 @@
         document.getElementById('bottom-hud-container').style.display = 'none';
         document.getElementById('simulate-position-button').style.display = 'none';
         alternativeRenderer.setMap(null);
-        directionsRenderer.setMap(null);
+        directionsRenderer.setMap(map);
         trafficLayer.setMap(null);
         if (destMarker) destMarker.setMap(null);
         document.getElementById('start-button').style.display = 'none';
