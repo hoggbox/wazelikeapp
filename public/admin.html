@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel - Waze-Like GPS App</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3">
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #333; }
+    #admin-container { 
+      padding: 2rem; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2rem; max-width: 1200px; margin: 0 auto; width: 100%; }
+    .header { text-align: center; color: white; margin-bottom: 1rem; }
+    .header h1 { font-size: 2.5rem; margin: 0; text-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    .header p { font-size: 1rem; opacity: 0.9; }
+    #user-search-container { display: flex; gap: 1rem; align-items: center; background: white; padding: 1rem; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    #user-search { flex: 1; padding: 0.75rem; border: 2px solid #e1e5e9; border-radius: 8px; font-size: 1rem; outline: none; transition: border-color 0.3s; }
+    #user-search:focus { border-color: #4CAF50; }
+    #search-users-btn { background: #4CAF50; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: background 0.3s; }
+    #search-users-btn:hover { background: #45a049; }
+    #users-table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    #users-table th { background: #f8f9fa; color: #495057; padding: 1rem; text-align: left; font-weight: 600; border-bottom: 2px solid #dee2e6; }
+    #users-table td { padding: 1rem; border-bottom: 1px solid #dee2e6; }
+    #users-table tr:hover { background: #f8f9fa; }
+    #users-table button { 
+      padding: 0.5rem 1rem; margin-right: 0.5rem; border: none; border-radius: 6px; cursor: pointer; font-size: 0.875rem; font-weight: 500; transition: all 0.3s; 
+      margin-bottom: 0.25rem; display: block; width: 100%; }
+    #users-table button.delete { background: #dc3545; color: white; }
+    #users-table button.delete:hover { background: #c82333; }
+    #users-table button.ban { background: #fd7e14; color: white; }
+    #users-table button.ban:hover { background: #e86a0d; }
+    #users-table button.ipban { background: #6f42c1; color: white; }
+    #users-table button.ipban:hover { background: #5a32a3; }
+    #users-table button.promote { background: #28a745; color: white; }
+    #users-table button.promote:hover { background: #218838; }
+    #users-table button.demote { background: #ffc107; color: #212529; }
+    #users-table button.demote:hover { background: #e0a800; }
+    #users-table button.location { background: #17a2b8; color: white; }
+    #users-table button.location:hover { background: #138496; }
+    #users-table button.alerts { background: #007bff; color: white; }
+    #users-table button.alerts:hover { background: #0056b3; }
+    #users-table button.track { background: #20c997; color: white; }
+    #users-table button.track:hover { background: #1ba87e; }
+    #users-table button.stoptrack { background: #6c757d; color: white; }
+    #users-table button.stoptrack:hover { background: #545b62; }
+    #show-nearby-users { background: #007bff; color: white; border: none; padding: 1rem 2rem; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: background 0.3s; align-self: center; }
+    #show-nearby-users:hover { background: #0056b3; }
+    #alerts-modal { 
+      display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); 
+      animation: fadeIn 0.3s; }
+    #alerts-modal.active { display: flex; align-items: center; justify-content: center; }
+    .modal-content { background: white; margin: auto; padding: 2rem; border-radius: 10px; width: 80%; max-width: 600px; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 16px rgba(0,0,0,0.3); }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid #dee2e6; padding-bottom: 0.5rem; }
+    .modal-header h3 { margin: 0; color: #333; }
+    .close-modal { background: #dc3545; color: white; border: none; padding: 0.5rem; border-radius: 50%; cursor: pointer; font-size: 1.2rem; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; }
+    .close-modal:hover { background: #c82333; }
+    .alert-item { padding: 1rem; border: 1px solid #dee2e6; border-radius: 6px; margin-bottom: 1rem; background: #f8f9fa; }
+    #toast {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: #4CAF50;
+      color: white; padding: 1rem 2rem; border-radius: 8px; z-index: 1003; transition: opacity 0.5s;
+      opacity: 0; pointer-events: none; max-width: 90vw; text-align: center; font-weight: 500;
+    }
+    #toast.visible-toast { opacity: 1; }
+    #return-app { background: #2196F3; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 600; transition: background 0.3s; align-self: center; }
+    #return-app:hover { background: #1976D2; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @media (max-width: 768px) {
+      #admin-container { padding: 1rem; }
+      .header h1 { font-size: 2rem; }
+      #user-search-container { flex-direction: column; }
+      #users-table button { width: auto; margin: 0.25rem 0.5rem 0.25rem 0; }
+    }
+  </style>
+</head>
+<body>
+  <div id="admin-container">
+    <div class="header">
+      <h1><i class="fas fa-user-shield"></i> Admin Panel</h1>
+      <p>Manage users, moderation, and app activity</p>
+    </div>
+    <button id="return-app"><i class="fas fa-arrow-left"></i> Return to Main App</button>
+    <div id="user-search-container">
+      <input id="user-search" type="text" placeholder="Search users by username or email">
+      <button id="search-users-btn"><i class="fas fa-search"></i> Search</button>
+    </div>
+    <table id="users-table">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Email</th>
+          <th>IP Address</th>
+          <th>Admin</th>
+          <th>Banned</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <button id="show-nearby-users"><i class="fas fa-map-marker-alt"></i> Show All Nearby Users (30 miles)</button>
+  </div>
+  <div id="alerts-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title">User Alerts</h3>
+        <button class="close-modal" onclick="closeAlertsModal()">&times;</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <script>
+    let socket;
+    let trackingUsers = JSON.parse(localStorage.getItem('trackingUsers')) || [];
+    let isAdmin = localStorage.getItem('isAdmin') === 'true';
+    let userLocation = { lat: 33.083270, lng: -83.233040 };
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+
+    if (!token || !isAdmin) {
+      location.href = '/';
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('visible-toast');
+      setTimeout(() => toast.classList.remove('visible-toast'), 3000);
+    }
+
+    function closeAlertsModal() {
+      document.getElementById('alerts-modal').classList.remove('active');
+    }
+
+    function setupSocket() {
+      socket = io({ auth: { token: token.trim() } });
+      // No 'userLocation' listener needed here since no map in admin; tracking is for main app
+    }
+
+    function setupEventListeners() {
+      document.getElementById('search-users-btn').addEventListener('click', () => {
+        const query = document.getElementById('user-search').value;
+        fetchUsers(query);
+      });
+      document.getElementById('show-nearby-users').addEventListener('click', showNearbyUsers);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeAlertsModal();
+      });
+      document.getElementById('return-app').addEventListener('click', () => {
+        window.location.href = 'index.html';
+      });
+    }
+
+    async function fetchUsers(query = '') {
+      try {
+        const response = await fetch(`/api/users?search=${encodeURIComponent(query)}`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (!response.ok) throw new Error('Failed to fetch users');
+        const users = await response.json();
+        const tbody = document.querySelector('#users-table tbody');
+        tbody.innerHTML = '';
+        users.forEach(user => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${user.username || 'N/A'}</td>
+            <td>${user.email}</td>
+            <td>${user.lastIp || 'N/A'}</td>
+            <td>${user.isAdmin ? 'Yes' : 'No'}</td>
+            <td>${user.banned ? 'Yes' : 'No'}</td>
+            <td>
+              <button class="delete" onclick="deleteUser('${user._id}')">Delete</button>
+              <button class="ban" onclick="banUser('${user._id}')">Ban</button>
+              <button class="ipban" onclick="ipBanUser('${user._id}')">IP Ban</button>
+              <button class="${user.isAdmin ? 'demote' : 'promote'}" onclick="toggleAdmin('${user._id}', ${user.isAdmin})">${user.isAdmin ? 'Demote' : 'Promote'}</button>
+              <button class="location" onclick="viewLocation('${user._id}')">View Location</button>
+              <button class="alerts" onclick="viewAlerts('${user._id}')">View Alerts</button>
+              <button class="track" onclick="trackLive('${user._id}')">Track Live</button>
+              <button class="stoptrack" onclick="stopTrack('${user._id}')">Stop Track</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+        if (users.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 2rem;">No users found</td></tr>';
+        }
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        showToast('Failed to load users.');
+      }
+    }
+
+    async function deleteUser(id) {
+      if (!confirm('Are you sure you want to permanently delete this user?')) return;
+      try {
+        const response = await fetch(`/api/users/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          showToast('User deleted successfully');
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast('Failed to delete user');
+        }
+      } catch (error) {
+        console.error('Delete error:', error);
+        showToast('Failed to delete user');
+      }
+    }
+
+    async function banUser(id) {
+      if (!confirm('Ban this user from the app?')) return;
+      try {
+        const response = await fetch(`/api/users/${id}/ban`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          showToast('User banned successfully');
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast('Failed to ban user');
+        }
+      } catch (error) {
+        console.error('Ban error:', error);
+        showToast('Failed to ban user');
+      }
+    }
+
+    async function ipBanUser(id) {
+      if (!confirm('IP ban this user? This will block all IPs associated with the account.')) return;
+      try {
+        const response = await fetch(`/api/users/${id}/ipban`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          showToast('User IP banned successfully');
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast('Failed to IP ban user');
+        }
+      } catch (error) {
+        console.error('IP ban error:', error);
+        showToast('Failed to IP ban user');
+      }
+    }
+
+    async function toggleAdmin(id, isCurrentAdmin) {
+      const action = isCurrentAdmin ? 'demote' : 'promote';
+      if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} this user to admin?`)) return;
+      try {
+        const endpoint = isCurrentAdmin ? `/api/users/${id}/demote` : `/api/users/${id}/promote`;
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          showToast(`User ${action}d successfully`);
+          fetchUsers(document.getElementById('user-search').value);
+        } else {
+          showToast(`Failed to ${action} user`);
+        }
+      } catch (error) {
+        console.error('Toggle admin error:', error);
+        showToast('Failed to toggle admin status');
+      }
+    }
+
+    async function viewLocation(id) {
+      try {
+        const response = await fetch(`/api/users/${id}/location`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.location) {
+            showToast(`User location: ${data.location.coordinates[1].toFixed(4)}, ${data.location.coordinates[0].toFixed(4)}`);
+          } else {
+            showToast('No recent location available');
+          }
+        } else {
+          showToast('Failed to fetch location');
+        }
+      } catch (error) {
+        console.error('View location error:', error);
+        showToast('Failed to fetch location');
+      }
+    }
+
+    async function viewAlerts(id) {
+      try {
+        const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(); // Last week
+        const response = await fetch(`/api/alerts/user/${id}?since=${since}`, {
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const alerts = await response.json();
+          const modal = document.getElementById('alerts-modal');
+          const title = document.getElementById('modal-title');
+          const body = document.getElementById('modal-body');
+          title.textContent = 'User Alerts (Last Week)';
+          body.innerHTML = alerts.length > 0 
+            ? alerts.map(alert => `<div class="alert-item"><strong>${alert.type}</strong><br>${alert.address || 'No address'}<br><small>${new Date(alert.timestamp).toLocaleString()}</small></div>`).join('')
+            : '<p>No alerts in the last week.</p>';
+          modal.classList.add('active');
+        } else {
+          showToast('Failed to fetch alerts');
+        }
+      } catch (error) {
+        console.error('View alerts error:', error);
+        showToast('Failed to fetch alerts');
+      }
+    }
+
+    function trackLive(id) {
+      if (!trackingUsers.includes(id)) {
+        socket.emit('trackUser', id);
+        trackingUsers.push(id);
+        localStorage.setItem('trackingUsers', JSON.stringify(trackingUsers));
+        showToast('Live tracking started for user');
+      } else {
+        showToast('Already tracking this user');
+      }
+    }
+
+    function stopTrack(id) {
+      socket.emit('stopTracking', id);
+      trackingUsers = trackingUsers.filter(u => u !== id);
+      localStorage.setItem('trackingUsers', JSON.stringify(trackingUsers));
+      showToast('Live tracking stopped');
+    }
+
+    async function showNearbyUsers() {
+      try {
+        const response = await fetch(`/api/users/nearby?lat=${userLocation.lat}&lng=${userLocation.lng}&radius=48280`, { // 30 miles
+          headers: { 'Authorization': `Bearer ${token.trim()}` }
+        });
+        if (response.ok) {
+          const users = await response.json();
+          users.forEach(user => trackLive(user._id));
+          showToast(`${users.length} nearby users tracked`);
+        } else {
+          showToast('Failed to fetch nearby users');
+        }
+      } catch (error) {
+        console.error('Nearby users error:', error);
+        showToast('Failed to fetch nearby users');
+      }
+    }
+
+    // Initialize
+    setupSocket();
+    setupEventListeners();
+    fetchUsers(); // Load all users on start
+    window.deleteUser = deleteUser;
+    window.banUser = banUser;
+    window.ipBanUser = ipBanUser;
+    window.toggleAdmin = toggleAdmin;
+    window.viewLocation = viewLocation;
+    window.viewAlerts = viewAlerts;
+    window.trackLive = trackLive;
+    window.stopTrack = stopTrack;
+    window.showNearbyUsers = showNearbyUsers;
+    window.closeAlertsModal = closeAlertsModal;
+  </script>
+</body>
+</html>
