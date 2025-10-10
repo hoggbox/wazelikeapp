@@ -549,7 +549,7 @@ io.use((socket, next) => {
 io.on('connection', (socket) => {
   logger.info(`User connected via Socket.IO: ${socket.user.id}`, { ip: socket.handshake.address });
   socket.on('locationUpdate', async (data) => {
-    if (!data.location || (!data.location.lat || !data.location.lng)) {
+    if (data.location && Array.isArray(data.location) && data.location.length === 2) {
       logger.warn('Invalid location data in socket locationUpdate:', { location: data.location, userId: socket.user.id, ip: socket.handshake.address });
       return;
     }
