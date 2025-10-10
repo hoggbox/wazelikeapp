@@ -12,7 +12,7 @@ const webpush = require('web-push');
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = 'public/uploads/';
-    // Ensure directory exists (Node.js fs would handle this, but log for debugging)
+    // Ensure directory exists
     require('fs').mkdirSync(uploadDir, { recursive: true });
     cb(null, uploadDir);
   },
@@ -38,6 +38,9 @@ webpush.setVapidDetails(
   process.env.VAPID_PRIVATE_KEY
 );
 
+// Input sanitization helper
+const sanitizeInput = (str) => str ? str.trim().toLowerCase().replace(/[<>\"'&]/g, '') : '';
+
 // Register
 router.post('/register', async (req, res) => {
   try {
@@ -45,17 +48,22 @@ router.post('/register', async (req, res) => {
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
+    const cleanUsername = sanitizeInput(username);
+    const cleanEmail = sanitizeInput(email);
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
     // Check for existing user (case-insensitive for email)
     const existingUser = await User.findOne({ 
       $or: [
-        { username: { $regex: new RegExp(`^${username}$`, 'i') } },
-        { email: { $regex: new RegExp(`^${email}$`, 'i') } }
+        { username: { $regex: new RegExp(`^${cleanUsername}$`, 'i') } },
+        { email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } }
       ] 
     });
     if (existingUser) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
-    const user = new User({ username, email, password });
+    const user = new User({ username: cleanUsername, email: cleanEmail, password });
     await user.save();
     const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
     res.status(201).json({ 
@@ -64,12 +72,12 @@ router.post('/register', async (req, res) => {
         id: user._id, 
         username: user.username, 
         email: user.email,
-        avatar: gravatar.url(email, { s: '200', r: 'pg', d: 'mm' }) // Gravatar with defaults
+        avatar: gravatar.url(cleanEmail, { s: '200', r: 'pg', d: 'mm' }) // Gravatar with defaults
       } 
     });
   } catch (error) {
     console.error('Register error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to register user: ' + error.message });
+    res.status(500).json({ error: 'Failed to register user' }); // Sanitized
   }
 });
 
@@ -80,7 +88,8 @@ router.post('/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
-    const user = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
+    const cleanEmail = sanitizeInput(email);
+    const user = await User.findOne({ email: { $regex: new RegExp(`^${cleanEmail}$`, 'i') } });
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
@@ -91,12 +100,12 @@ router.post('/login', async (req, res) => {
         id: user._id, 
         username: user.username, 
         email: user.email,
-        avatar: user.avatar || gravatar.url(email, { s: '200', r: 'pg', d: 'mm' })
+        avatar: user.avatar || gravatar.url(cleanEmail, { s: '200', r: 'pg', d: 'mm' })
       } 
     });
   } catch (error) {
     console.error('Login error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to login: ' + error.message });
+    res.status(500).json({ error: 'Failed to login' }); // Sanitized
   }
 });
 
@@ -105,13 +114,14 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    // Populate alerts if needed (optional enhancement)
+    // Populate alerts if needed (optional enhancement, safePopulate avoids CVE)
+    await user.safePopulate(['alerts']);
     user.activeAlerts = user.alerts?.filter(alert => alert.expiry > new Date())?.length || 0;
     user.totalAlerts = user.alerts?.length || 0;
     res.json(user);
   } catch (error) {
     console.error('Profile fetch error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to fetch profile: ' + error.message });
+    res.status(500).json({ error: 'Failed to fetch profile' }); // Sanitized
   }
 });
 
@@ -128,13 +138,19 @@ router.post('/upload-avatar', authMiddleware, upload.single('avatar'), async (re
     res.json({ avatar: user.avatar });
   } catch (error) {
     console.error('Avatar upload error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to upload avatar: ' + error.message });
+    // Cleanup uploaded file on error
+    if (req.file) require('fs').unlinkSync(req.file.path);
+    res.status(500).json({ error: 'Failed to upload avatar' }); // Sanitized
   }
 });
 
-// Subscribe to push
+// Subscribe to push (added validation)
 router.post('/subscribe', authMiddleware, async (req, res) => {
   try {
+    const { endpoint, keys } = req.body;
+    if (!endpoint || !keys || !keys.p256dh || !keys.auth) {
+      return res.status(400).json({ error: 'Invalid subscription data' });
+    }
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     user.pushSubscription = req.body;
@@ -142,7 +158,7 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
     res.status(201).json({ message: 'Subscribed successfully' });
   } catch (error) {
     console.error('Push subscription error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to subscribe: ' + error.message });
+    res.status(500).json({ error: 'Failed to subscribe' }); // Sanitized
   }
 });
 
@@ -155,7 +171,7 @@ router.post('/refresh', authMiddleware, async (req, res) => {
     res.json({ token });
   } catch (error) {
     console.error('Token refresh error:', error.message, { stack: error.stack });
-    res.status(500).json({ error: 'Failed to refresh token: ' + error.message });
+    res.status(500).json({ error: 'Failed to refresh token' }); // Sanitized
   }
 });
 

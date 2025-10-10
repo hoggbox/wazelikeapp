@@ -13,8 +13,7 @@ const alertSubSchema = new mongoose.Schema({
     },
     coordinates: {
       type: [Number], // [lng, lat]
-      required: true,
-      index: '2dsphere'
+      required: true
     }
   },
   address: { type: String, default: 'Unknown' },
@@ -25,7 +24,7 @@ const alertSubSchema = new mongoose.Schema({
     upVoters: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     downVoters: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
   },
-  expiry: { type: Date, required: true, expires: '1h' } // TTL index via server
+  expiry: { type: Date, required: true } // TTL handled server-side
 }, { _id: false }); // No separate _id for subdocs, but allow manual
 
 const userSchema = new mongoose.Schema({
@@ -59,7 +58,6 @@ const userSchema = new mongoose.Schema({
     },
     coordinates: {
       type: [Number], // [lng, lat]
-      index: '2dsphere',
       sparse: true
     }
   },
@@ -122,5 +120,10 @@ userSchema.virtual('fullName').get(function() {
 userSchema.pre(['updateOne', 'findOneAndUpdate'], function() {
   this.set({ updatedAt: new Date() });
 });
+
+// Safe populate method (avoids CVE-2025-23061 nested issues)
+userSchema.methods.safePopulate = function(fields = []) {
+  return this.populate(fields.map(field => ({ path: field, match: { expiry: { $gt: new Date() } } })));
+};
 
 module.exports = mongoose.model('User', userSchema);

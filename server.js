@@ -3,7 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+const helmet = require('helmet'); // Added for security headers
 const webpush = require('web-push');
 const rateLimit = require('express-rate-limit');
 const http = require('http');
@@ -27,6 +27,7 @@ const io = new Server(server, {
 app.set('trust proxy', 1);
 
 // Middleware
+app.use(helmet()); // Added security headers
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
@@ -56,12 +57,12 @@ app.get('/', (req, res) => {
 // MongoDB Connection with Retry
 async function connectDB() {
   let retries = 5;
-  const uri = process.env.MONGODB_URI || 'mongodb+srv://imhoggbox:snake1988@cluster0.xoo6m.mongodb.net/pinmap?retryWrites=true&w=majority&appName=Cluster0';
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error('MONGODB_URI environment variable is required');
+  }
   while (retries > 0) {
     try {
-      if (!uri) {
-        throw new Error('MONGODB_URI environment variable is not set');
-      }
       console.log('Attempting MongoDB connection with URI:', uri.replace(/:\/\/[^@]+@/, '://<redacted>@'));
       await mongoose.connect(uri, {
         dbName: 'pinmap', // Explicitly specify the database name
@@ -84,7 +85,7 @@ async function connectDB() {
         console.log('Created 2dsphere index on lastLocation');
       }
       if (!indexNames.includes('alerts.expiry_1')) {
-        await User.collection.createIndex({ 'alerts.expiry': 1 }, { expireAfterSeconds: 0 });
+        await User.collection.createIndex({ 'alerts.expiry': 1 }, { expireAfterSeconds: 3600 });
         console.log('Created TTL index on alerts.expiry');
       }
       if (!indexNames.includes('email_1')) {
@@ -109,6 +110,15 @@ async function connectDB() {
 }
 connectDB();
 
+// DB Connection Events
+mongoose.connection.on('disconnected', () => console.log('MongoDB disconnected'));
+mongoose.connection.on('error', (err) => console.error('MongoDB error:', err));
+process.on('SIGINT', async () => {
+  await mongoose.connection.close();
+  console.log('MongoDB connection closed due to app termination');
+  process.exit(0);
+});
+
 // Test MongoDB Connection
 app.get('/api/test-db', async (req, res) => {
   try {
@@ -117,25 +127,26 @@ app.get('/api/test-db', async (req, res) => {
     res.json({ message: 'MongoDB connection successful' });
   } catch (error) {
     console.error('MongoDB test error:', error.message, error.stack);
-    res.status(500).json({ error: 'MongoDB connection failed', details: error.message });
+    res.status(500).json({ error: 'MongoDB connection failed' }); // Sanitized
   }
 });
 
 // VAPID Keys
-const vapidKeys = {
-  publicKey: process.env.VAPID_PUBLIC_KEY || 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs',
-  privateKey: process.env.VAPID_PRIVATE_KEY || 'your_private_vapid_key' // Replace with actual VAPID private key
-};
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+if (!vapidPublicKey || !vapidPrivateKey) {
+  console.warn('VAPID keys missing; push notifications disabled');
+}
 webpush.setVapidDetails(
   'mailto:admin@example.com',
-  vapidKeys.publicKey,
-  vapidKeys.privateKey
+  vapidPublicKey,
+  vapidPrivateKey
 );
 
 // Routes
 app.get('/api/vapid-public-key', (req, res) => {
   console.log('Serving VAPID public key');
-  res.json({ publicKey: vapidKeys.publicKey });
+  res.json({ publicKey: vapidPublicKey });
 });
 
 app.use('/api/auth', authRoutes);
@@ -249,19 +260,27 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
     res.status(201).json({ alert: populatedAlert });
   } catch (error) {
     console.error('Error posting alert:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to post alert', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to post alert', details });
   }
 });
 
-// Fetch Nearby Alerts
+// Fetch Nearby Alerts (with pagination)
 app.get('/api/markers', authMiddleware, async (req, res) => {
   try {
-    const { lat, lng, maxDistance = 16093.4 } = req.query;
+    const { lat, lng, maxDistance = 16093.4, page = 1, limit = 50 } = req.query;
     if (!lat || !lng || isNaN(parseFloat(lat)) || isNaN(parseFloat(lng))) {
       console.error('Invalid query parameters:', { lat, lng });
       return res.status(400).json({ error: 'Invalid latitude or longitude' });
     }
-    console.log('Fetching markers for:', { lat: parseFloat(lat), lng: parseFloat(lng), maxDistance });
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    if (isNaN(pageNum) || isNaN(limitNum) || pageNum < 1 || limitNum < 1 || limitNum > 100) {
+      return res.status(400).json({ error: 'Invalid pagination parameters' });
+    }
+    const skip = (pageNum - 1) * limitNum;
+    console.log('Fetching markers for:', { lat: parseFloat(lat), lng: parseFloat(lng), maxDistance, page: pageNum, limit: limitNum });
     const users = await User.find({
       'alerts.location': {
         $geoWithin: {
@@ -270,7 +289,7 @@ app.get('/api/markers', authMiddleware, async (req, res) => {
       },
       'alerts.expiry': { $gt: new Date() }
     });
-    const alerts = users.flatMap(user =>
+    let alerts = users.flatMap(user =>
       user.alerts
         .filter(alert => alert.expiry > new Date())
         .map(alert => ({
@@ -284,15 +303,20 @@ app.get('/api/markers', authMiddleware, async (req, res) => {
           userId: { _id: user._id, username: user.username }
         }))
     );
-    console.log('Returning markers:', alerts.length);
-    res.json(alerts);
+    // Paginate
+    const total = alerts.length;
+    alerts = alerts.slice(skip, skip + limitNum);
+    console.log('Returning paginated markers:', alerts.length, `Total: ${total}`);
+    res.json({ alerts, pagination: { page: pageNum, limit: limitNum, total, pages: Math.ceil(total / limitNum) } });
   } catch (error) {
     console.error('Error fetching markers:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch markers', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to fetch markers', details });
   }
 });
 
-// Fetch Hazards Near Route
+// Fetch Hazards Near Route (fixed distance to radians)
 app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
   try {
     const { polyline, maxDistance = 50 } = req.body;
@@ -300,16 +324,17 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
       console.error('Invalid polyline data:', polyline);
       return res.status(400).json({ error: 'Invalid polyline data' });
     }
-    console.log('Fetching hazards for polyline:', { points: polyline.length, maxDistance });
+    const maxDistRadians = parseFloat(maxDistance) / 6378137; // Fixed: Convert meters to radians
+    console.log('Fetching hazards for polyline:', { points: polyline.length, maxDistance, maxDistRadians });
     const lineString = {
       type: 'LineString',
-      coordinates: polyline.map(pt => [pt.lng, pt.lat])
+      coordinates: polyline.map(pt => [pt.lng || pt[0], pt.lat || pt[1]]) // Handle both {lng,lat} and [lng,lat]
     };
     const users = await User.find({
       'alerts.location': {
         $geoWithin: {
           $geometry: lineString,
-          $maxDistance: parseFloat(maxDistance)
+          $maxDistance: maxDistRadians // Fixed radians
         }
       },
       'alerts.expiry': { $gt: new Date() },
@@ -333,11 +358,13 @@ app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
     res.json(hazards);
   } catch (error) {
     console.error('Error fetching hazards near route:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch hazards', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to fetch hazards', details });
   }
 });
 
-// Vote on Alert
+// Vote on Alert (added expiry check)
 app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
   try {
     const { voteType } = req.body;
@@ -359,6 +386,10 @@ app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
     if (!alert) {
       console.error('Alert not found in user document:', req.params.id);
       return res.status(404).json({ error: 'Alert not found' });
+    }
+    if (alert.expiry <= new Date()) { // Added expiry check
+      console.error('Voting on expired alert:', req.params.id);
+      return res.status(410).json({ error: 'Alert expired' });
     }
     if (alert.votes[voteType + 'Voters'].includes(req.user._id)) {
       console.error(`User ${req.user._id} already ${voteType}voted on alert:`, req.params.id);
@@ -396,11 +427,13 @@ app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
     }
   } catch (error) {
     console.error('Error voting on alert:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to vote', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to vote', details });
   }
 });
 
-// Delete Alert
+// Delete Alert (added expiry check and logging)
 app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -419,6 +452,10 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
       console.error('Alert not found in owner document:', req.params.id);
       return res.status(404).json({ error: 'Alert not found' });
     }
+    if (alert.expiry <= new Date()) { // Added expiry check
+      console.error('Deleting expired alert:', req.params.id);
+      return res.status(410).json({ error: 'Alert expired' });
+    }
     const isOwner = owner._id.toString() === req.user._id.toString();
     const isAuthorized = isOwner || req.user.isAdmin;
     console.log('Delete authorization:', { isOwner, isAdmin: req.user.isAdmin, authorized: isAuthorized });
@@ -429,12 +466,14 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     owner.alerts.pull({ _id: req.params.id });
     owner.activeAlerts = Math.max(0, (owner.activeAlerts || 0) - 1);
     await owner.save();
-    console.log('Alert deleted successfully:', { alertId: req.params.id, ownerId: owner._id, deleterId: req.user._id });
+    console.log(`Alert deleted by ${req.user.username} (${req.user._id}) for owner ${owner.username} (${owner._id}):`, { alertId: req.params.id }); // Added logging
     req.io.emit('alertDeleted', req.params.id);
     res.json({ message: 'Alert deleted successfully' });
   } catch (error) {
     console.error('Error deleting alert:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to delete alert', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to delete alert', details });
   }
 });
 
@@ -466,7 +505,9 @@ app.post('/api/location', authMiddleware, async (req, res) => {
     res.json({ message: 'Location updated' });
   } catch (error) {
     console.error('Error updating location:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to update location', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to update location', details });
   }
 });
 
@@ -481,7 +522,9 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
     res.json(users);
   } catch (error) {
     console.error('Error fetching leaderboard:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch leaderboard', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to fetch leaderboard', details });
   }
 });
 
@@ -497,7 +540,9 @@ app.get('/api/users', authMiddleware, async (req, res) => {
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch users', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to fetch users', details });
   }
 });
 
@@ -522,7 +567,9 @@ app.get('/api/users/search', authMiddleware, async (req, res) => {
     res.json(users);
   } catch (error) {
     console.error('Error searching users:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to search users', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to search users', details });
   }
 });
 
@@ -551,7 +598,9 @@ app.get('/api/users/:id/activity', authMiddleware, async (req, res) => {
     res.json(activity);
   } catch (error) {
     console.error('Error fetching user activity:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch user activity', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to fetch user activity', details });
   }
 });
 
@@ -568,11 +617,13 @@ app.post('/api/users/:id/promote', authMiddleware, async (req, res) => {
     }
     user.isAdmin = true;
     await user.save();
-    console.log('User promoted:', req.params.id);
+    console.log(`${req.user.username} promoted user ${user.username}:`, req.params.id); // Added logging
     res.json({ message: 'User promoted to admin' });
   } catch (error) {
     console.error('Error promoting user:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to promote user', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to promote user', details });
   }
 });
 
@@ -589,11 +640,13 @@ app.post('/api/users/:id/demote', authMiddleware, async (req, res) => {
     }
     user.isAdmin = false;
     await user.save();
-    console.log('User demoted:', req.params.id);
+    console.log(`${req.user.username} demoted user ${user.username}:`, req.params.id); // Added logging
     res.json({ message: 'User demoted from admin' });
   } catch (error) {
     console.error('Error demoting user:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to demote user', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to demote user', details });
   }
 });
 
@@ -610,12 +663,14 @@ app.post('/api/users/:id/ban', authMiddleware, async (req, res) => {
     }
     user.isBanned = true;
     await user.save();
-    console.log('User banned:', req.params.id);
+    console.log(`${req.user.username} banned user ${user.username}:`, req.params.id); // Added logging
     req.io.emit('userBanned', { userId: req.params.id });
     res.json({ message: 'User banned' });
   } catch (error) {
     console.error('Error banning user:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to ban user', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to ban user', details });
   }
 });
 
@@ -633,12 +688,14 @@ app.post('/api/users/:id/ipban', authMiddleware, async (req, res) => {
     user.isBanned = true;
     user.ipBanned = req.ip || 'unknown';
     await user.save();
-    console.log('User IP banned:', req.params.id);
+    console.log(`${req.user.username} IP banned user ${user.username} (${req.ip}):`, req.params.id); // Added logging
     req.io.emit('userBanned', { userId: req.params.id });
     res.json({ message: 'User IP banned' });
   } catch (error) {
     console.error('Error IP banning user:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to IP ban user', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to IP ban user', details });
   }
 });
 
@@ -653,12 +710,14 @@ app.delete('/api/users/:id', authMiddleware, async (req, res) => {
       console.error('User not found for delete:', req.params.id);
       return res.status(404).json({ error: 'User not found' });
     }
-    console.log('User deleted:', req.params.id);
+    console.log(`${req.user.username} deleted user ${user.username}:`, req.params.id); // Added logging
     req.io.emit('userBanned', { userId: req.params.id });
     res.json({ message: 'User deleted' });
   } catch (error) {
     console.error('Error deleting user:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to delete user', details: error.message });
+    const status = error.name === 'TokenExpiredError' ? 401 : 500;
+    const details = process.env.NODE_ENV === 'production' ? undefined : error.message;
+    res.status(status).json({ error: 'Failed to delete user', details });
   }
 });
 
@@ -675,30 +734,38 @@ function getDistance(point1, point2) {
   return R * c;
 }
 
-// Error Handling Middleware
+// Error Handling Middleware (sanitized)
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message, err.stack);
-  res.status(500).json({ error: 'Internal server error', details: err.message });
+  const status = err.name === 'TokenExpiredError' ? 401 : 500;
+  const details = process.env.NODE_ENV === 'production' ? undefined : err.message;
+  res.status(status).json({ error: 'Internal server error', details });
+});
+
+// Socket.IO Auth Middleware (added)
+io.use((socket, next) => {
+  const token = socket.handshake.auth.token;
+  if (!token) return next(new Error('Auth token required'));
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) return next(new Error('Invalid token'));
+    socket.user = decoded; // Attach user to socket
+    next();
+  });
 });
 
 // Socket.IO Events
 io.on('connection', (socket) => {
-  console.log('Socket connected:', socket.id);
+  console.log('Socket connected:', socket.id, 'User:', socket.user.id);
   socket.on('join', (userId) => {
+    if (userId !== socket.user.id) return socket.disconnect(true); // Security
     socket.join(userId);
     console.log(`User ${userId} joined room`);
   });
   socket.on('locationUpdate', async ({ location }) => {
-    const token = socket.handshake.auth.token;
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
-      const user = await User.findById(decoded.id);
-      if (user && !user.isBanned) {
-        io.to(decoded.id).emit('locationUpdate', { userId: decoded.id, location });
-        console.log('Location update emitted:', { userId: decoded.id, location });
-      }
-    } catch (error) {
-      console.error('Error in locationUpdate:', error.message);
+    const user = await User.findById(socket.user.id);
+    if (user && !user.isBanned) {
+      io.to(socket.user.id).emit('locationUpdate', { userId: socket.user.id, location });
+      console.log('Location update emitted:', { userId: socket.user.id, location });
     }
   });
   socket.on('disconnect', () => {
