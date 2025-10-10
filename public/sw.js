@@ -190,19 +190,26 @@ async function syncLocationUpdates() {
         }
       }
     });
-    const tx = db.transaction('location-queue', 'readwrite');
+
+    const tx = db.transaction('location-queue', 'readonly');
     const store = tx.objectStore('location-queue');
-    const queuedLocations = await store.getAll();
-    if (queuedLocations.length === 0) {
+
+    // Get all keys and values to pair them
+    const keys = await store.getAllKeys();
+    if (keys.length === 0) {
       console.log('[Service Worker] No queued locations to sync');
       return;
     }
 
-    // FIXED: Request token from main client via message (SW can't access localStorage)
+    const keyPromises = keys.map(key => store.get(key).then(value => ({ key, value })));
+    const items = await Promise.all(keyPromises);
+    await tx.done;
+
+    // Request token from main client
     const token = await getStoredToken();
     if (!token) {
       console.error('[Service Worker] No valid token for location sync - cannot proceed');
-      // Queue a retry by re-registering sync (main script should handle re-registration)
+      // Re-register sync for retry (main app will handle re-registration on load)
       return;
     }
 
@@ -210,9 +217,12 @@ async function syncLocationUpdates() {
     const maxRetries = 3;
     const baseBackoff = 5000;
 
-    for (const loc of queuedLocations) {
+    // Sync each item
+    for (const { key, value } of items) {
       let success = false;
-      while (retryCount < maxRetries && !success) {
+      let localRetryCount = 0;
+
+      while (localRetryCount < maxRetries && !success) {
         try {
           const response = await fetch('/api/location', {
             method: 'POST',
@@ -220,37 +230,43 @@ async function syncLocationUpdates() {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`
             },
-            body: JSON.stringify(loc.data)  // Assume queued items have {id, data: {location, timestamp}}
+            body: JSON.stringify(value.data)
           });
+
           if (response.ok) {
-            console.log('[Service Worker] Synced location:', loc.data);
-            await store.delete(loc.id || loc);  // Handle both autoIncrement ID or manual
+            console.log('[Service Worker] Synced location:', value.data);
+            // Delete from DB
+            const deleteTx = db.transaction('location-queue', 'readwrite');
+            const deleteStore = deleteTx.objectStore('location-queue');
+            await deleteStore.delete(key);
+            await deleteTx.done;
             success = true;
           } else {
             console.warn('[Service Worker] Failed to sync location:', response.status);
-            retryCount++;
-            if (retryCount < maxRetries) {
-              const backoff = baseBackoff * Math.pow(2, retryCount);
+            localRetryCount++;
+            if (localRetryCount < maxRetries) {
+              const backoff = baseBackoff * Math.pow(2, localRetryCount);
               console.log(`[Service Worker] Retrying location sync in ${backoff}ms`);
               await new Promise(resolve => setTimeout(resolve, backoff));
             }
           }
         } catch (error) {
           console.error('[Service Worker] Location sync failed:', error.message, error.stack);
-          retryCount++;
-          if (retryCount < maxRetries) {
-            const backoff = baseBackoff * Math.pow(2, retryCount);
+          localRetryCount++;
+          if (localRetryCount < maxRetries) {
+            const backoff = baseBackoff * Math.pow(2, localRetryCount);
             console.log(`[Service Worker] Retrying location sync in ${backoff}ms`);
             await new Promise(resolve => setTimeout(resolve, backoff));
           }
         }
       }
+
       if (!success) {
-        console.error('[Service Worker] Max retries reached for location sync:', loc);
+        console.error('[Service Worker] Max retries reached for location sync:', value);
       }
     }
-    await tx.done;
-    console.log(`[Service Worker] Sync completed: ${queuedLocations.length - (await store.count())} items synced`);
+
+    console.log(`[Service Worker] Sync completed: ${items.length} items processed`);
   } catch (error) {
     console.error('[Service Worker] Sync failed:', error.message, error.stack);
   }
@@ -266,7 +282,7 @@ function openDB(name, version, upgradeCallback) {
   });
 }
 
-// FIXED: Get token from main client via postMessage (no localStorage in SW)
+// Get token from main client via postMessage
 async function getStoredToken() {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -318,14 +334,7 @@ self.addEventListener('message', event => {
     }).catch(error => {
       console.error('[Service Worker] Client-initiated notification error:', error.message, error.stack);
     });
-  } else if (event.data.type === 'GET_TOKEN_FOR_SYNC') {  // FIXED: Respond to sync-specific request
-    // Note: This handler is in SW, but token comes from client message. Client must forward from localStorage.
-    // In main index.html, add listener: self.addEventListener('message', e => { if (e.data.type === 'GET_TOKEN_FOR_SYNC') e.source.postMessage({type: 'TOKEN_RESPONSE', token: localStorage.getItem('token') || sessionStorage.getItem('token')}); });
-    event.source.postMessage({
-      type: 'TOKEN_RESPONSE',
-      token: null  // Placeholder - actual token sent from client in main script
-    });
-  } else if (event.data.type === 'RELEASE_WAKELOCK') {  // NEW: Coordinate wake lock release on app close
+  } else if (event.data.type === 'RELEASE_WAKELOCK') {  // Coordinate wake lock release on app close
     console.log('[Service Worker] Releasing wake lock via message');
     // Forward to clients if needed
   }
