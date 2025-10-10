@@ -8,16 +8,32 @@ const multer = require('multer');
 const path = require('path');
 const webpush = require('web-push');
 
-// Multer for avatar upload
+// Multer for avatar upload with file validation
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, 'public/uploads/'),
+  destination: (req, file, cb) => {
+    const uploadDir = 'public/uploads/';
+    // Ensure directory exists (Node.js fs would handle this, but log for debugging)
+    require('fs').mkdirSync(uploadDir, { recursive: true });
+    cb(null, uploadDir);
+  },
   filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
-const upload = multer({ storage });
 
-// VAPID keys
+// File filter for images only
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'), false);
+  }
+};
+
+const upload = multer({ storage, fileFilter, limits: { fileSize: 5 * 1024 * 1024 } }); // 5MB limit
+
+// VAPID keys (use env vars for production)
+const vapidEmail = process.env.VAPID_EMAIL || 'your-email@example.com';
 webpush.setVapidDetails(
-  'mailto:your-email@example.com',
+  `mailto:${vapidEmail}`,
   process.env.VAPID_PUBLIC_KEY,
   process.env.VAPID_PRIVATE_KEY
 );
@@ -29,16 +45,30 @@ router.post('/register', async (req, res) => {
     if (!username || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
-    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+    // Check for existing user (case-insensitive for email)
+    const existingUser = await User.findOne({ 
+      $or: [
+        { username: { $regex: new RegExp(`^${username}$`, 'i') } },
+        { email: { $regex: new RegExp(`^${email}$`, 'i') } }
+      ] 
+    });
     if (existingUser) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
     const user = new User({ username, email, password });
     await user.save();
     const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
-    res.status(201).json({ token, user: { id: user._id, username: user.username, avatar: gravatar.url(email) } });
+    res.status(201).json({ 
+      token, 
+      user: { 
+        id: user._id, 
+        username: user.username, 
+        email: user.email,
+        avatar: gravatar.url(email, { s: '200', r: 'pg', d: 'mm' }) // Gravatar with defaults
+      } 
+    });
   } catch (error) {
-    console.error('Register error:', error);
+    console.error('Register error:', error.message, { stack: error.stack });
     res.status(500).json({ error: 'Failed to register user: ' + error.message });
   }
 });
@@ -50,14 +80,22 @@ router.post('/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required' });
     }
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: { $regex: new RegExp(`^${email}$`, 'i') } });
     if (!user || !(await user.comparePassword(password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
-    res.json({ token, user: { id: user._id, username: user.username, avatar: user.avatar || gravatar.url(email) } });
+    res.json({ 
+      token, 
+      user: { 
+        id: user._id, 
+        username: user.username, 
+        email: user.email,
+        avatar: user.avatar || gravatar.url(email, { s: '200', r: 'pg', d: 'mm' })
+      } 
+    });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('Login error:', error.message, { stack: error.stack });
     res.status(500).json({ error: 'Failed to login: ' + error.message });
   }
 });
@@ -67,9 +105,12 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select('-password');
     if (!user) return res.status(404).json({ error: 'User not found' });
+    // Populate alerts if needed (optional enhancement)
+    user.activeAlerts = user.alerts?.filter(alert => alert.expiry > new Date())?.length || 0;
+    user.totalAlerts = user.alerts?.length || 0;
     res.json(user);
   } catch (error) {
-    console.error('Profile fetch error:', error);
+    console.error('Profile fetch error:', error.message, { stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch profile: ' + error.message });
   }
 });
@@ -77,13 +118,16 @@ router.get('/profile/:id', authMiddleware, async (req, res) => {
 // Update avatar
 router.post('/upload-avatar', authMiddleware, upload.single('avatar'), async (req, res) => {
   try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded or invalid file type' });
+    }
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found' });
     user.avatar = `/uploads/${req.file.filename}`;
     await user.save();
     res.json({ avatar: user.avatar });
   } catch (error) {
-    console.error('Avatar upload error:', error);
+    console.error('Avatar upload error:', error.message, { stack: error.stack });
     res.status(500).json({ error: 'Failed to upload avatar: ' + error.message });
   }
 });
@@ -97,8 +141,21 @@ router.post('/subscribe', authMiddleware, async (req, res) => {
     await user.save();
     res.status(201).json({ message: 'Subscribed successfully' });
   } catch (error) {
-    console.error('Push subscription error:', error);
+    console.error('Push subscription error:', error.message, { stack: error.stack });
     res.status(500).json({ error: 'Failed to subscribe: ' + error.message });
+  }
+});
+
+// Refresh token (optional enhancement for longer sessions)
+router.post('/refresh', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    const token = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
+    res.json({ token });
+  } catch (error) {
+    console.error('Token refresh error:', error.message, { stack: error.stack });
+    res.status(500).json({ error: 'Failed to refresh token: ' + error.message });
   }
 });
 

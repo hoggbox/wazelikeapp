@@ -1,14 +1,14 @@
 // sw.js
-const CACHE_NAME = 'waze-like-app-v1.1'; // Bumped version to clear old caches after app updates
+const CACHE_NAME = 'waze-like-app-v1.2'; // Bumped version to clear old caches after app updates
 const urlsToCache = [
   '/',
   '/index.html',
   '/icon.png',
   '/manifest.json?v=1.0.3',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css', // Updated to stable v6.6.0 (2025 latest)
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js',
   'https://cdn.socket.io/4.7.5/socket.io.min.js',
-  'https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=2666b5bd496d9c6026f43f82&v=beta&libraries=places,geometry,marker,routes&loading=async',
+  'https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=2666b5bd496d9c6026f43f82&v=beta&libraries=places,geometry,marker,routes&loading=async&callback=initMap', // Explicit callback for Maps
   'https://i.postimg.cc/YS0h0m7R/compass.png', // Added compass image
   'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png' // Added traffic camera marker image
 ];
@@ -84,6 +84,18 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request).then(cachedResponse => {
       if (cachedResponse) {
+        // Check Cache-Control for freshness (added for 2025 compatibility)
+        const cacheControl = cachedResponse.headers.get('Cache-Control');
+        if (cacheControl && cacheControl.includes('no-cache')) {
+          console.log('[Service Worker] Cache stale (no-cache header), refetching:', url.pathname);
+          return fetch(event.request).then(networkResponse => {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(event.request, responseToCache);
+            });
+            return networkResponse;
+          }).catch(() => cachedResponse); // Fallback to cache if network fails
+        }
         console.log('[Service Worker] Serving from cache:', url.pathname);
         return cachedResponse;
       }
@@ -136,7 +148,14 @@ self.addEventListener('push', event => {
         alertId: data.alertId,
         lat: data.lat,
         lng: data.lng
-      }
+      },
+      actions: [ // Added actions for better UX (2025 standard)
+        {
+          action: 'view_alert',
+          title: 'View Alert',
+          icon: '/icon.png'
+        }
+      ]
     }).then(() => {
       console.log('[Service Worker] Notification shown:', data.title);
     }).catch(error => {
@@ -151,6 +170,12 @@ self.addEventListener('notificationclick', event => {
   event.notification.close();
   const { alertId, lat, lng } = event.notification.data || {};
   const url = alertId && !isNaN(lat) && !isNaN(lng) ? `/?alertId=${alertId}&lat=${lat}&lng=${lng}` : '/';
+  
+  // Handle action buttons (added for 2025 UX)
+  if (event.action === 'view_alert') {
+    console.log('[Service Worker] Action button clicked: view_alert');
+  }
+  
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
       console.log('[Service Worker] Clients found:', clientList.length);
@@ -328,7 +353,14 @@ self.addEventListener('message', event => {
         alertId: event.data.alertId,
         lat: event.data.lat,
         lng: event.data.lng
-      }
+      },
+      actions: [ // Added actions for better UX (2025 standard)
+        {
+          action: 'view_alert',
+          title: 'View Alert',
+          icon: '/icon.png'
+        }
+      ]
     }).then(() => {
       console.log('[Service Worker] Client-initiated notification shown:', event.data.title);
     }).catch(error => {
