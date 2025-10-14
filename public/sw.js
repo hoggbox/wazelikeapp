@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v7';  // Bumped for any future refresh—change this to invalidate
+const CACHE_NAME = 'gps-app-cache-v8';  // Bumped to v8 to invalidate old cache and pick up app changes
 const urlsToCache = [
   '/',
   '/index.html',
