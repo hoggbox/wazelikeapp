@@ -1,12 +1,13 @@
-const CACHE_NAME = 'gps-app-cache-v5';
+const CACHE_NAME = 'gps-app-cache-v6';  // Bumped version for asset refresh
 const urlsToCache = [
   '/',
   '/index.html',
+  '/manifest.json',  // Added: For PWA offline support
   '/sw.js',
   '/favicon.ico',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css',
-  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js',
-  'https://cdn.socket.io/4.7.5/socket.io.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',  // Added ?v=1.0.3 to match index.html
+  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',  // Added ?v=1.0.3 to match index.html
+  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3'  // Added ?v=1.0.3 to match index.html
 ];
 
 self.addEventListener('install', event => {
@@ -67,7 +68,7 @@ self.addEventListener('fetch', event => {
               cache.put(event.request, responseToCache);
             });
           } else {
-            console.warn('Network response invalid:', networkResponse ? networkResponse.status : 'No response');
+            console.warn('Network response invalid for document:', networkResponse ? networkResponse.status : 'No response');  // Minor: More precise logging
           }
           return networkResponse;
         })

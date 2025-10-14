@@ -1456,7 +1456,7 @@
           if (pos && navState.isFollowing && navState.isNavigating) {
             const { zoom, tilt, turnHeading } = getDynamicZoom(pos, 0);
             const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-            const lookaheadPoint = getLookaheadPoint(pos, heading, 50);
+            const lookaheadPoint = getLookaheadPoint(pos, heading, 0);
             requestAnimationFrame(() => {
               map.panTo(lookaheadPoint);
               map.setZoom(zoom);
@@ -3679,7 +3679,7 @@
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
           navState.navigationZoom = zoom;
           const targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 50);
+          const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 0);
           requestAnimationFrame(() => {
             isProgrammaticUpdate = true;
             if (isMobile && typeof TWEEN !== 'undefined') {
@@ -3818,7 +3818,7 @@
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         navState.navigationZoom = zoom;
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-        const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
+        const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
         requestAnimationFrame(() => {
           isProgrammaticUpdate = true;
           if (isMobile && typeof TWEEN !== 'undefined') {
@@ -4052,7 +4052,7 @@
             const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
             navState.navigationZoom = zoom;
             const targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-            const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 50);
+            const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 0);
             requestAnimationFrame(() => {
               isProgrammaticUpdate = true;
               if (isMobile && typeof TWEEN !== 'undefined') {
@@ -4479,7 +4479,7 @@
       const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
       navState.navigationZoom = zoom;
       const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-      const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 50);
+      const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
       requestAnimationFrame(() => {
         isProgrammaticUpdate = true;
         if (isMobile && typeof TWEEN !== 'undefined') {
