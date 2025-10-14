@@ -3585,11 +3585,12 @@
         console.log('Location update received:', { lat: latitude, lng: longitude, speed, gpsHeading: heading, isSimulation });
         console.log('Navigation state:', { isNavigating: navState.isNavigating, isFollowing: navState.isFollowing });
         const now = Date.now();
-        if (now - lastLocationUpdate < LOCATION_UPDATE_THRESHOLD) {
-          console.log('Skipping location update due to throttle');
-          return;
+        // Allow marker updates always, but throttle camera/route updates
+        const shouldUpdateCamera = (now - lastLocationUpdate >= LOCATION_UPDATE_THRESHOLD);
+
+        if (shouldUpdateCamera) {
+          lastLocationUpdate = now;
         }
-        lastLocationUpdate = now;
         if (now - lastAlertFetchTime > ALERT_FETCH_INTERVAL && navState.isNavigating) {
           fetchCurrentAlerts();
           lastAlertFetchTime = now;
@@ -3664,54 +3665,51 @@
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
         }
         navState.userLocation = pos;
+        // Update marker FIRST
         if (userMarker) {
-          requestAnimationFrame(() => {
-            userMarker.position = pos;
-            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-            userMarker.setMap(map);
-            console.log('Marker position updated:', { pos, heading: navState.currentHeading, orientation: navState.mapOrientation });
-          });
+          userMarker.position = pos;
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          userMarker.setMap(map);
+          console.log('Marker position updated:', { pos, heading: navState.currentHeading, orientation: navState.mapOrientation });
         }
+
+        // THEN update camera
         lastHeading = navState.currentHeading;
         lastPosition = pos;
         if (navState.isFollowing && navState.isNavigating) {
+          console.log('🎥 CAMERA UPDATE:', {
+            isFollowing: navState.isFollowing,
+            isNavigating: navState.isNavigating,
+            isProgrammaticUpdate: isProgrammaticUpdate,
+            userLocation: navState.userLocation,
+            currentHeading: navState.currentHeading
+          });
+          
           updateRouteAhead(navState.userLocation);
           const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
           navState.navigationZoom = zoom;
           const targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
           const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 0);
-          requestAnimationFrame(() => {
-            isProgrammaticUpdate = true;
-            if (isMobile && typeof TWEEN !== 'undefined') {
-              new TWEEN.Tween(map.getCenter())
-                .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
-                .easing(TWEEN.Easing.Quadratic.Out)
-                .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
-                .start();
-              if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
-                const currentHeading = map.getHeading() || 0;
-                const delta = normalizeHeadingDelta(currentHeading, targetHeading);
-                isHeadingTweening = true;
-                new TWEEN.Tween({ heading: currentHeading })
-                  .to({ heading: currentHeading + delta }, 300)
-                  .easing(TWEEN.Easing.Quadratic.Out)
-                  .onUpdate(obj => map.setHeading(obj.heading))
-                  .onComplete(() => { isHeadingTweening = false; })
-                  .start();
-              }
-            } else {
-              map.panTo(lookaheadPoint);
-              if (!isHeadingTweening) map.setHeading(targetHeading);
-            }
-            map.setZoom(zoom);
-            map.setTilt(tilt);
-            console.log('Camera view updated:', { center: lookaheadPoint.toJSON(), zoom, heading: targetHeading, tilt, orientation: navState.mapOrientation });
-            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-            ensureMarkerInView(navState.userLocation);
-            setTimeout(() => { isProgrammaticUpdate = false; }, 100);
+          
+          console.log('🎯 Target:', {
+            lookahead: lookaheadPoint.toJSON(),
+            zoom,
+            heading: targetHeading,
+            tilt
           });
-        } else {
-          console.log('Camera update skipped:', { isFollowing: navState.isFollowing, isNavigating: navState.isNavigating });
+          
+          // Force immediate update without animation for testing
+          map.setCenter(lookaheadPoint);
+          map.setZoom(zoom);
+          map.setHeading(targetHeading);
+          map.setTilt(tilt);
+        } else if (navState.isNavigating) {
+          // At least keep marker visible
+          ensureMarkerInView(navState.userLocation);
+          console.warn('❌ Camera update SKIPPED:', {
+            isFollowing: navState.isFollowing,
+            isNavigating: navState.isNavigating
+          });
         }
         navState.lastKnownPosition = pos;
         if (!isSimulation && socket && socket.connected) {
@@ -3831,11 +3829,19 @@
               const currentHeading = map.getHeading() || 0;
               const delta = normalizeHeadingDelta(currentHeading, heading);
               isHeadingTweening = true;
+              const tweenTimeout = setTimeout(() => {
+                isHeadingTweening = false;
+                console.warn('Heading tween timeout - forcing reset');
+              }, 500);
+
               new TWEEN.Tween({ heading: currentHeading })
                 .to({ heading: currentHeading + delta }, 300)
                 .easing(TWEEN.Easing.Quadratic.Out)
                 .onUpdate(obj => map.setHeading(obj.heading))
-                .onComplete(() => { isHeadingTweening = false; })
+                .onComplete(() => {
+                  clearTimeout(tweenTimeout);
+                  isHeadingTweening = false;
+                })
                 .start();
             }
           } else {
@@ -4065,11 +4071,19 @@
                   const currentHeading = map.getHeading() || 0;
                   const delta = normalizeHeadingDelta(currentHeading, targetHeading);
                   isHeadingTweening = true;
+                  const tweenTimeout = setTimeout(() => {
+                    isHeadingTweening = false;
+                    console.warn('Heading tween timeout - forcing reset');
+                  }, 500);
+
                   new TWEEN.Tween({ heading: currentHeading })
                     .to({ heading: currentHeading + delta }, 300)
                     .easing(TWEEN.Easing.Quadratic.Out)
                     .onUpdate(obj => map.setHeading(obj.heading))
-                    .onComplete(() => { isHeadingTweening = false; })
+                    .onComplete(() => {
+                      clearTimeout(tweenTimeout);
+                      isHeadingTweening = false;
+                    })
                     .start();
                 }
               } else {
@@ -4492,11 +4506,19 @@
             const currentHeading = map.getHeading() || 0;
             const delta = normalizeHeadingDelta(currentHeading, heading);
             isHeadingTweening = true;
+            const tweenTimeout = setTimeout(() => {
+              isHeadingTweening = false;
+              console.warn('Heading tween timeout - forcing reset');
+            }, 500);
+
             new TWEEN.Tween({ heading: currentHeading })
               .to({ heading: currentHeading + delta }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(obj => map.setHeading(obj.heading))
-              .onComplete(() => { isHeadingTweening = false; })
+              .onComplete(() => {
+                clearTimeout(tweenTimeout);
+                isHeadingTweening = false;
+              })
               .start();
           }
         } else {

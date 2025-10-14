@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v6';  // Bumped version for asset refresh
+const CACHE_NAME = 'gps-app-cache-v7';  // Bumped for any future refresh—change this to invalidate
 const urlsToCache = [
   '/',
   '/index.html',
@@ -48,7 +48,7 @@ self.addEventListener('fetch', event => {
   if (url.pathname.startsWith('/api/') || url.pathname.includes('socket.io')) {
     event.respondWith(
       fetch(event.request).catch(error => {
-        console.error('API fetch failed:', error);
+        console.error('API fetch failed:', error, 'URL:', event.request.url);
         return new Response(JSON.stringify({ error: 'Network unavailable' }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
@@ -62,13 +62,14 @@ self.addEventListener('fetch', event => {
     event.respondWith(
       fetch(event.request)
         .then(networkResponse => {
-          if (networkResponse && networkResponse.status === 200) {
+          // Minor tweak: Add MIME type check for security (optional, but good practice)
+          if (networkResponse && networkResponse.status === 200 && networkResponse.headers.get('content-type')?.includes('text/html')) {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then(cache => {
               cache.put(event.request, responseToCache);
             });
           } else {
-            console.warn('Network response invalid for document:', networkResponse ? networkResponse.status : 'No response');  // Minor: More precise logging
+            console.warn('Network response invalid for document:', networkResponse ? networkResponse.status : 'No response', 'MIME:', networkResponse?.headers.get('content-type'));  // Enhanced logging
           }
           return networkResponse;
         })
@@ -84,6 +85,7 @@ self.addEventListener('fetch', event => {
     caches.open(CACHE_NAME).then(cache => {
       return cache.match(event.request).then(cachedResponse => {
         const fetchPromise = fetch(event.request).then(networkResponse => {
+          // Minor tweak: Only cache if basic response and valid status (prevents caching errors)
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             cache.put(event.request, networkResponse.clone());
           }
@@ -95,7 +97,7 @@ self.addEventListener('fetch', event => {
         return cachedResponse || fetchPromise;
       });
     }).catch(error => {
-      console.error('Fetch failed:', error);
+      console.error('Fetch failed:', error, 'URL:', event.request.url);
       return new Response('Resource unavailable', { status: 503 });
     })
   );
