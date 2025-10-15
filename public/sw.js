@@ -1,4 +1,5 @@
-const CACHE_NAME = 'gps-app-cache-v8';  // Bumped to v8 to invalidate old cache and pick up app changes
+const CACHE_NAME = 'gps-app-cache-v9';  // Bumped to v9 for index.html updates (camera logic, heading smoothing, etc.)
+
 const urlsToCache = [
   '/',
   '/index.html',
@@ -15,7 +16,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Caching assets:', urlsToCache);
+        console.log('Caching assets for v9 (includes updated index.html & manifest):', urlsToCache);
         return cache.addAll(urlsToCache);
       })
       .catch(error => {

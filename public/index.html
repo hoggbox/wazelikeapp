@@ -901,6 +901,11 @@
       ]
     };
     let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline, offRoadPolyline;
+    let currentHeadingTween = null;
+    let lastProgrammaticZoom = null;
+    let dragTimer;
+    let actualDrag = false;
+    let dragStartPos = null;
     let currentAlerts = [];
     let cameraCheckInterval = null;
     let alertPollInterval = null;
@@ -920,6 +925,7 @@
     let isInitialized = false;
     let toastTimeout = null;
     let lastHeading = 0;
+    let lastCameraPosition = null;
     let lastStableHeading = 0;
     let lastSpokenTurn = '';
     let lastAnnouncementTime = 0;
@@ -932,7 +938,6 @@
     let rawUserLocation = null;
     let needsCalibration = false;
     let lastCameraUpdate = 0;
-    let isHeadingTweening = false;
     let isAdmin = localStorage.getItem('isAdmin') === 'true';
     let trackingUsers = [];
     let trackedMarkers = new Map();
@@ -944,7 +949,7 @@
     const MIN_ALERT_DISTANCE = 152.4;
     const CAMERA_CHECK_INTERVAL = 10000;
     const ALERT_POLL_INTERVAL = 5000;
-    const HEADING_SMOOTHING_WINDOW = 15;
+    const HEADING_SMOOTHING_WINDOW = 5;
     const POSITION_HISTORY_WINDOW = 5;
     const MIN_ZOOM = 16;
     const MAX_ZOOM = 19;
@@ -964,6 +969,26 @@
     const HEADING_VARIANCE_THRESHOLD = 45;
     const SIGNIFICANT_TURN_THRESHOLD = 30;
     const VERIFICATION_DISTANCE = 50;
+    const ProgrammaticUpdateManager = {
+      _isUpdating: false,
+      _timeout: null,
+      
+      start() {
+        this._isUpdating = true;
+        if (this._timeout) clearTimeout(this._timeout);
+      },
+      
+      end(delay = 100) {
+        if (this._timeout) clearTimeout(this._timeout);
+        this._timeout = setTimeout(() => {
+          this._isUpdating = false;
+        }, delay);
+      },
+      
+      get isActive() {
+        return this._isUpdating;
+      }
+    };
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -995,6 +1020,9 @@
       lastValidHeading: 0,
       isInitialSnap: true,
       lastCameraUpdate: 0,
+      lastCameraUpdateTime: 0,
+      CAMERA_UPDATE_INTERVAL: 100,
+      zoomHistory: [],
       hasArrived: false,
       alertProximities: new Map(),
       waypoints: [],
@@ -1013,7 +1041,6 @@
     let isRegister = false;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const LOCATION_UPDATE_THRESHOLD = isMobile ? 500 : 100;
-    let isProgrammaticUpdate = false;
     let wakeLock = null;
     let isLowBattery = false;
     let visibilityHandler = null;
@@ -1314,20 +1341,55 @@
         console.log('Ignoring small heading change:', { newHeading, lastStableHeading, headingDiff });
         return lastStableHeading;
       }
-      headingHistory.push(newHeading);
+      // Add heading momentum for highway driving
+      const isHighSpeed = speed > 15; // ~35 mph
+      if (isHighSpeed && headingHistory.length > 2) {
+        const recentHeadings = headingHistory.slice(-3).map(h => h.heading);
+        const variance = Math.max(...recentHeadings) - Math.min(...recentHeadings);
+        
+        // Reduce sensitivity during stable highway driving
+        if (variance < 10) {
+          const headingDiff = Math.abs(((newHeading - lastStableHeading + 180) % 360) - 180);
+          if (headingDiff < 15) {
+            console.log('Ignoring small heading change during stable highway driving');
+            return lastStableHeading;
+          }
+        }
+      }
+      
+      // Use weighted average instead of simple average
+      headingHistory.push({ heading: newHeading, weight: speed > 5 ? 1.0 : 0.5 });
       if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
         headingHistory.shift();
       }
-      let smoothedHeading = headingHistory.reduce((sum, h) => sum + h, 0) / headingHistory.length;
+      
+      let totalWeight = 0;
+      let weightedSum = 0;
+      
+      headingHistory.forEach(entry => {
+        weightedSum += entry.heading * entry.weight;
+        totalWeight += entry.weight;
+      });
+      
+      // Add minimum weight floor to prevent near-zero divisions
+      const minTotalWeight = headingHistory.length * 0.3; // At least 0.3 per entry
+      if (totalWeight < minTotalWeight) {
+        totalWeight = minTotalWeight;
+      }
+      
+      let smoothedHeading = (weightedSum / totalWeight) % 360;
+      
       const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.7 : 0.2;
       const compassWeight = needsCalibration ? 0.1 : 0.6;
       const polylineWeight = isSnapped ? 0.8 : needsCalibration ? 0.2 : 0.2;
+      
       for (let i = 0; i < headingHistory.length; i++) {
-        let delta = headingHistory[i] - smoothedHeading;
+        let delta = headingHistory[i].heading - smoothedHeading;
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
         smoothedHeading += (source === 'gps' ? gpsWeight : source === 'compass' ? compassWeight : polylineWeight) * delta / headingHistory.length;
       }
+      
       smoothedHeading = smoothedHeading % 360;
       if (smoothedHeading < 0) smoothedHeading += 360;
       navState.lastValidHeading = smoothedHeading;
@@ -1402,7 +1464,7 @@
           zoom: navState.navigationZoom,
           mapId: mapId,
           tilt: 45,
-          heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
+          heading: navState.mapOrientation === 'heading-up' ? navState.currentHeading : 0,
           disableDefaultUI: true,
           gestureHandling: 'cooperative',
           mapTypeControl: false,
@@ -1460,9 +1522,7 @@
             requestAnimationFrame(() => {
               map.panTo(lookaheadPoint);
               map.setZoom(zoom);
-              if (!isHeadingTweening) {
-                map.setHeading(heading);
-              }
+              updateMapHeading(heading);
               map.setTilt(tilt);
               userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
               console.log('User marker position changed, map panned:', { lat: pos.lat, lng: pos.lng, heading, zoom, tilt, orientation: navState.mapOrientation });
@@ -1602,6 +1662,102 @@
         showToast('Failed to initialize map. Retrying...');
         setTimeout(initializeMap, 2000);
       }
+    }
+    function updateMapHeading(targetHeading) {
+      if (navState.mapOrientation !== 'heading-up') return;
+      
+      // Cancel existing tween
+      if (currentHeadingTween) {
+        currentHeadingTween.stop();
+        currentHeadingTween = null;
+      }
+      
+      const currentHeading = map.getHeading() || 0;
+      const delta = normalizeHeadingDelta(currentHeading, targetHeading);
+      
+      // Skip if change is tiny
+      if (Math.abs(delta) < 3) return;
+      
+      currentHeadingTween = new TWEEN.Tween({ heading: currentHeading })
+        .to({ heading: currentHeading + delta }, 300)
+        .easing(TWEEN.Easing.Quadratic.Out)
+        .onUpdate(obj => map.setHeading(obj.heading))
+        .onComplete(() => { 
+          currentHeadingTween = null;
+        })
+        .start();
+    }
+    function updateCameraView(position, heading, speed) {
+      // Check if update is necessary
+      const bounds = map.getBounds();
+      if (!bounds) return;
+      
+      const posLatLng = new google.maps.LatLng(position);
+      if (!bounds.contains(posLatLng)) {
+        // Immediate snap if marker is off-screen
+        ProgrammaticUpdateManager.start();
+        map.setCenter(posLatLng);
+        ProgrammaticUpdateManager.end(50);
+        return;
+      }
+      
+      const { zoom, tilt, turnHeading } = getDynamicZoom(position, speed);
+      let targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || heading;
+      const anticipatedHeading = anticipateTurn(position, targetHeading);
+      targetHeading = anticipatedHeading || targetHeading;
+      const lookaheadPoint = getLookaheadPoint(position, targetHeading, 0);
+      
+      ProgrammaticUpdateManager.start();
+      
+      requestAnimationFrame(() => {
+        if (isMobile) {
+          new TWEEN.Tween(map.getCenter())
+            .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 200)
+            .easing(TWEEN.Easing.Linear.None)
+            .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+            .start();
+          
+          updateMapHeading(targetHeading); // Use new function
+        } else {
+          map.panTo(lookaheadPoint);
+          map.setHeading(targetHeading);
+        }
+        
+        lastProgrammaticZoom = zoom;
+        map.setZoom(zoom);
+        map.setTilt(tilt);
+        
+        ProgrammaticUpdateManager.end(150);
+      });
+    }
+    function anticipateTurn(currentPos, currentHeading) {
+      if (!navState.currentRoute) return null;
+      
+      const legs = navState.currentRoute.routes[0].legs[0];
+      const userLatLng = new google.maps.LatLng(currentPos);
+      
+      for (let i = 0; i < legs.steps.length; i++) {
+        const step = legs.steps[i];
+        if (!step.maneuver) continue;
+        
+        const turnLocation = new google.maps.LatLng(step.start_location);
+        const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(
+          userLatLng, turnLocation
+        );
+        
+        // Start camera adjustment 100-200m before turn
+        if (distanceToTurn < 200 && distanceToTurn > 50) {
+          const turnHeading = google.maps.geometry.spherical.computeHeading(
+            userLatLng, turnLocation
+          );
+          
+          // Blend current heading toward turn heading
+          const blendFactor = 1 - (distanceToTurn - 50) / 150; // 0 to 1
+          return currentHeading + normalizeHeadingDelta(currentHeading, turnHeading) * blendFactor * 0.3;
+        }
+      }
+      
+      return null;
     }
     function loadOfflineRegions() {
       const list = document.getElementById('offline-regions-list');
@@ -1999,50 +2155,51 @@
       stopGPS();
       console.log('User logged out, auth container shown');
     });
-      let dragStartTime;
-      let dragTimer;
-      let actuallyDragging = false;
-
-      map.addListener('dragstart', () => {
-        if (navState.isNavigating && navState.isFollowing && !isProgrammaticUpdate) {
-          dragStartTime = Date.now();
-          actuallyDragging = false; // Reset flag
-          
-          dragTimer = setTimeout(() => {
-            actuallyDragging = true; // User is genuinely dragging
-            unlockNavigation();
-            console.log('Map unlocked for free roam on debounced dragstart during navigation');
-          }, 150);
-        }
+      // Fixed drag listeners with distance-based confirmation
+      let dragDistance = 0;
+      map.addListener('dragstart', (e) => {
+        if (ProgrammaticUpdateManager.isActive) return;
+        if (!navState.isNavigating || !navState.isFollowing) return;
+        
+        dragStartPos = map.getCenter();
+        actualDrag = false;
       });
 
       map.addListener('drag', () => {
-        // Only process if we've confirmed this is a real drag
-        if (navState.isNavigating && navState.isFollowing && !isProgrammaticUpdate && dragStartTime) {
-          const dragDuration = Date.now() - dragStartTime;
-          if (dragDuration < 150) {
-            clearTimeout(dragTimer);
-          }
+        if (!dragStartPos || ProgrammaticUpdateManager.isActive) return;
+        
+        const currentPos = map.getCenter();
+        dragDistance = google.maps.geometry.spherical.computeDistanceBetween(
+          dragStartPos, currentPos
+        );
+        
+        // Immediate unlock on confirmed movement
+        if (dragDistance > 10 && !actualDrag) {
+          actualDrag = true;
+          unlockNavigation();
         }
       });
 
       map.addListener('dragend', () => {
-        if (dragTimer) {
-          clearTimeout(dragTimer);
-        }
-        
-        // Only unlock if this was a confirmed user drag
-        if (!actuallyDragging && navState.isNavigating) {
-          console.log('False drag detected - keeping navigation locked');
-        }
-        
-        dragStartTime = null;
-        actuallyDragging = false;
+        dragStartPos = null;
+        actualDrag = false;
+        dragDistance = 0;
       });
+      // Fixed zoom change detection
       map.addListener('zoom_changed', () => {
-        if (navState.isNavigating && navState.isFollowing && !isProgrammaticUpdate) {
-          unlockNavigation();
-          console.log('Map unlocked for free roam on zoom change during navigation');
+        const currentZoom = map.getZoom();
+        
+        // Track zoom history to detect trends
+        if (!navState.zoomHistory) navState.zoomHistory = [];
+        navState.zoomHistory.push(currentZoom);
+        if (navState.zoomHistory.length > 3) navState.zoomHistory.shift();
+        
+        // Only unlock if zoom is changing consistently away from target
+        if (navState.isNavigating && navState.isFollowing && !ProgrammaticUpdateManager.isActive) {
+          const avgZoom = navState.zoomHistory.reduce((a,b) => a+b) / navState.zoomHistory.length;
+          if (Math.abs(avgZoom - lastProgrammaticZoom) > 1.0) {
+            unlockNavigation();
+          }
         }
       });
       map.addListener('heading_changed', () => {
@@ -3680,76 +3837,38 @@
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
         }
         navState.userLocation = pos;
-        // Update marker FIRST
+        // Always update marker
         if (userMarker) {
+          ProgrammaticUpdateManager.start();
           userMarker.position = pos;
           userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-          userMarker.setMap(map);
+          setTimeout(() => ProgrammaticUpdateManager.end(), 150);
           console.log('Marker position updated:', { pos, heading: navState.currentHeading, orientation: navState.mapOrientation });
         }
-
-        // THEN update camera
+        
+        // Update camera ONLY if BOTH conditions require it
+        if (navState.isFollowing && navState.isNavigating) {
+          const movedEnough = !lastCameraPosition || 
+            google.maps.geometry.spherical.computeDistanceBetween(
+              new google.maps.LatLng(lastCameraPosition),
+              new google.maps.LatLng(pos)
+            ) > 5;
+          
+          const headingChanged = Math.abs(navState.currentHeading - lastHeading) > 5;
+          
+          // Add time-based throttle to prevent too-frequent updates
+          const timeSinceLastUpdate = now - navState.lastCameraUpdateTime;
+          const shouldUpdateByTime = timeSinceLastUpdate >= navState.CAMERA_UPDATE_INTERVAL;
+          
+          if ((movedEnough || headingChanged) && shouldUpdateByTime) {
+            updateCameraView(pos, navState.currentHeading, speed);
+            lastCameraPosition = pos;
+            lastHeading = navState.currentHeading;
+            navState.lastCameraUpdateTime = now;
+          }
+        }
         lastHeading = navState.currentHeading;
         lastPosition = pos;
-        if (navState.isFollowing && navState.isNavigating) {
-          updateRouteAhead(navState.userLocation);
-          const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, speed);
-          navState.navigationZoom = zoom;
-          const targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 0);
-          
-          // ✅ SET FLAG FIRST - before ANY map operations
-          isProgrammaticUpdate = true;
-          
-          requestAnimationFrame(() => {
-            // Now do the map updates
-            if (isMobile && typeof TWEEN !== 'undefined') {
-              new TWEEN.Tween(map.getCenter())
-                .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
-                .easing(TWEEN.Easing.Quadratic.Out)
-                .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
-                .onComplete(() => {
-                  // Reset flag after animation completes
-                  setTimeout(() => { isProgrammaticUpdate = false; }, 50);
-                })
-                .start();
-              
-              if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
-                const currentHeading = map.getHeading() || 0;
-                const delta = normalizeHeadingDelta(currentHeading, targetHeading);
-                isHeadingTweening = true;
-                new TWEEN.Tween({ heading: currentHeading })
-                  .to({ heading: currentHeading + delta }, 300)
-                  .easing(TWEEN.Easing.Quadratic.Out)
-                  .onUpdate(obj => map.setHeading(obj.heading))
-                  .onComplete(() => { 
-                    isHeadingTweening = false;
-                  })
-                  .start();
-              }
-            } else {
-              map.panTo(lookaheadPoint);
-              if (!isHeadingTweening) map.setHeading(targetHeading);
-              // Reset flag after sync operations
-              setTimeout(() => { isProgrammaticUpdate = false; }, 50);
-            }
-            
-            map.setZoom(zoom);
-            map.setTilt(tilt);
-            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-            
-            console.log('Camera view updated:', { center: lookaheadPoint.toJSON(), zoom, heading: targetHeading, tilt, orientation: navState.mapOrientation });
-            
-            ensureMarkerInView(navState.userLocation);
-          });
-        } else if (navState.isNavigating) {
-          // At least keep marker visible
-          ensureMarkerInView(navState.userLocation);
-          console.warn('❌ Camera update SKIPPED:', {
-            isFollowing: navState.isFollowing,
-            isNavigating: navState.isNavigating
-          });
-        }
         navState.lastKnownPosition = pos;
         if (!isSimulation && socket && socket.connected) {
           socket.emit('locationUpdate', { location: navState.userLocation });
@@ -3776,6 +3895,13 @@
       }
     }
     function lockNavigation() {
+      if (dragTimer) {
+        clearTimeout(dragTimer);
+        dragTimer = null;
+      }
+      actualDrag = false;
+      dragStartPos = null;
+      
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
       sessionStorage.setItem('isFollowing', navState.isFollowing);
@@ -3819,11 +3945,13 @@
         const { point } = findClosestRoutePoint(navState.userLocation, navState.routePolyline, navState.currentHeading, 0);
         navState.userLocation = point;
         console.log('Forced snap to route start:', navState.userLocation);
+        ProgrammaticUpdateManager.start();
         requestAnimationFrame(() => {
           userMarker.position = navState.userLocation;
           userMarker.setMap(map);
           userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
           console.log('Initial marker position set:', navState.userLocation);
+          ProgrammaticUpdateManager.end(50);
         });
         directionsRenderer.setMap(map);
         directionsRenderer.setDirections(navState.currentRoute);
@@ -3856,42 +3984,25 @@
         navState.navigationZoom = zoom;
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
         const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+        ProgrammaticUpdateManager.start();
         requestAnimationFrame(() => {
-          isProgrammaticUpdate = true;
           if (isMobile && typeof TWEEN !== 'undefined') {
             new TWEEN.Tween(map.getCenter())
               .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
               .easing(TWEEN.Easing.Quadratic.Out)
               .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
               .start();
-            if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
-              const currentHeading = map.getHeading() || 0;
-              const delta = normalizeHeadingDelta(currentHeading, heading);
-              isHeadingTweening = true;
-              const tweenTimeout = setTimeout(() => {
-                isHeadingTweening = false;
-                console.warn('Heading tween timeout - forcing reset');
-              }, 500);
-
-              new TWEEN.Tween({ heading: currentHeading })
-                .to({ heading: currentHeading + delta }, 300)
-                .easing(TWEEN.Easing.Quadratic.Out)
-                .onUpdate(obj => map.setHeading(obj.heading))
-                .onComplete(() => {
-                  clearTimeout(tweenTimeout);
-                  isHeadingTweening = false;
-                })
-                .start();
-            }
+            updateMapHeading(heading);
           } else {
             map.panTo(lookaheadPoint);
-            if (!isHeadingTweening) map.setHeading(heading);
+            map.setHeading(heading);
           }
+          lastProgrammaticZoom = zoom;
           map.setZoom(zoom);
           map.setTilt(tilt);
           userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
           console.log('Initial navigation view set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
-          setTimeout(() => { isProgrammaticUpdate = false; }, 100);
+          ProgrammaticUpdateManager.end(100);
         });
         onPositionUpdate({
           coords: {
@@ -4009,6 +4120,16 @@
         offRoadPolyline.setMap(null);
         offRoadPolyline = null;
       }
+      // Stop all tweens
+      if (currentHeadingTween) {
+        currentHeadingTween.stop();
+        currentHeadingTween = null;
+      }
+      TWEEN.removeAll();
+      
+      // Clear all timers
+      if (dragTimer) clearTimeout(dragTimer);
+      ProgrammaticUpdateManager.end(0);
       navState.isNavigating = false;
       navState.isFollowing = false;
       navState.isInitialSnap = false;
@@ -4098,42 +4219,25 @@
             navState.navigationZoom = zoom;
             const targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
             const lookaheadPoint = getLookaheadPoint(navState.userLocation, targetHeading, 0);
+            ProgrammaticUpdateManager.start();
             requestAnimationFrame(() => {
-              isProgrammaticUpdate = true;
               if (isMobile && typeof TWEEN !== 'undefined') {
                 new TWEEN.Tween(map.getCenter())
                   .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
                   .easing(TWEEN.Easing.Quadratic.Out)
                   .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
                   .start();
-                if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
-                  const currentHeading = map.getHeading() || 0;
-                  const delta = normalizeHeadingDelta(currentHeading, targetHeading);
-                  isHeadingTweening = true;
-                  const tweenTimeout = setTimeout(() => {
-                    isHeadingTweening = false;
-                    console.warn('Heading tween timeout - forcing reset');
-                  }, 500);
-
-                  new TWEEN.Tween({ heading: currentHeading })
-                    .to({ heading: currentHeading + delta }, 300)
-                    .easing(TWEEN.Easing.Quadratic.Out)
-                    .onUpdate(obj => map.setHeading(obj.heading))
-                    .onComplete(() => {
-                      clearTimeout(tweenTimeout);
-                      isHeadingTweening = false;
-                    })
-                    .start();
-                }
+                updateMapHeading(targetHeading);
               } else {
                 map.panTo(lookaheadPoint);
-                if (!isHeadingTweening) map.setHeading(targetHeading);
+                map.setHeading(targetHeading);
               }
+              lastProgrammaticZoom = zoom;
               map.setZoom(zoom);
               map.setTilt(tilt);
               userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
               console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading: targetHeading, tilt, orientation: navState.mapOrientation });
-              setTimeout(() => { isProgrammaticUpdate = false; }, 100);
+              ProgrammaticUpdateManager.end(100);
             });
           }
           console.log('Route calculated:', {
@@ -4533,42 +4637,25 @@
       navState.navigationZoom = zoom;
       const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
       const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+      ProgrammaticUpdateManager.start();
       requestAnimationFrame(() => {
-        isProgrammaticUpdate = true;
         if (isMobile && typeof TWEEN !== 'undefined') {
           new TWEEN.Tween(map.getCenter())
             .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
             .easing(TWEEN.Easing.Quadratic.Out)
             .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
             .start();
-          if (navState.mapOrientation === 'heading-up' && !isHeadingTweening) {
-            const currentHeading = map.getHeading() || 0;
-            const delta = normalizeHeadingDelta(currentHeading, heading);
-            isHeadingTweening = true;
-            const tweenTimeout = setTimeout(() => {
-              isHeadingTweening = false;
-              console.warn('Heading tween timeout - forcing reset');
-            }, 500);
-
-            new TWEEN.Tween({ heading: currentHeading })
-              .to({ heading: currentHeading + delta }, 300)
-              .easing(TWEEN.Easing.Quadratic.Out)
-              .onUpdate(obj => map.setHeading(obj.heading))
-              .onComplete(() => {
-                clearTimeout(tweenTimeout);
-                isHeadingTweening = false;
-              })
-              .start();
-          }
+          updateMapHeading(heading);
         } else {
           map.panTo(lookaheadPoint);
-          if (!isHeadingTweening) map.setHeading(heading);
+          map.setHeading(heading);
         }
+        lastProgrammaticZoom = zoom;
         map.setZoom(zoom);
         map.setTilt(tilt);
         userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
         console.log('Navigation view restored:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
-        setTimeout(() => { isProgrammaticUpdate = false; }, 100);
+        ProgrammaticUpdateManager.end(100);
       });
     }
     async function fetchUsers(query = '') {
