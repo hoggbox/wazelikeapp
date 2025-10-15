@@ -964,7 +964,7 @@
     const ANNOUNCEMENT_COOLDOWN = 10000;
     const ALERT_FETCH_INTERVAL = 30000;
     const ALTERNATE_TRIGGER_DISTANCE = 50;
-    const SNAP_BUFFER = 30;
+    const SNAP_BUFFER = 50;
     const MAX_GPS_DISTANCE = 300;
     const HEADING_VARIANCE_THRESHOLD = 45;
     const SIGNIFICANT_TURN_THRESHOLD = 30;
@@ -999,6 +999,8 @@
       previousUserLocation: null,
       lastKnownPosition: null,
       routePolyline: null,
+      detailedPath: [],
+      lastSnapIndex: 0,
       rerouteCheckTimeout: null,
       hazardCheckInterval: null,
       currentHeading: 0,
@@ -3625,7 +3627,10 @@
       let closestIndex = 0;
       const speedMph = speed ? speed * 2.23694 : 0;
       const isHighway = navState.currentRoute && navState.currentRoute.routes[0].legs[0].steps.some(step => step.travel_mode === 'DRIVING' && step.distance.value > 1000);
-      for (let i = 0; i < path.length; i++) {
+      // Local search window around last snap index for performance
+      const startIdx = Math.max(0, navState.lastSnapIndex - 10);
+      const endIdx = Math.min(path.length, navState.lastSnapIndex + 20);
+      for (let i = startIdx; i < endIdx; i++) {
         const point = path[i];
         const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
         if (distance <= SNAP_BUFFER) {
@@ -3645,6 +3650,7 @@
           if (distance < 20) break;
         }
       }
+      navState.lastSnapIndex = closestIndex;
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
@@ -3793,7 +3799,7 @@
             return;
           }
           checkAlertProximity();
-          const path = navState.currentRoute.routes[0].overview_path;
+          const path = navState.detailedPath.length > 0 ? navState.detailedPath : navState.currentRoute.routes[0].overview_path;
           const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
           const distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point));
           if (distanceToRoute < SNAP_BUFFER) {
@@ -3965,8 +3971,18 @@
       if (navState.currentRoute) {
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
+        // FIXED: Compute detailed path for better snapping during turns
+        navState.detailedPath = [];
+        const legs = navState.currentRoute.routes[0].legs;
+        for (const leg of legs) {
+          for (const step of leg.steps) {
+            step.path.forEach(point => navState.detailedPath.push(point));
+          }
+        }
+        console.log('Detailed path computed:', navState.detailedPath.length, 'points');
         updateOffRoadPolyline(rawUserLocation || navState.userLocation, startLocation);
-        const { point } = findClosestRoutePoint(navState.userLocation, navState.routePolyline, navState.currentHeading, 0);
+        const path = navState.detailedPath.length > 0 ? navState.detailedPath : navState.routePolyline;
+        const { point } = findClosestRoutePoint(navState.userLocation, path, navState.currentHeading, 0);
         navState.userLocation = point;
         console.log('Forced snap to route start:', navState.userLocation);
         ProgrammaticUpdateManager.start();
@@ -4160,6 +4176,8 @@
       navState.currentRoute = null;
       navState.originalRoute = null;
       navState.routePolyline = null;
+      navState.detailedPath = [];
+      navState.lastSnapIndex = 0;
       navState.ignoredHazards = [];
       navState.currentHazard = null;
       navState.alternativeRoute = null;
@@ -4231,6 +4249,15 @@
           }
           navState.currentRoute = response;
           navState.routePolyline = response.routes[0].overview_path;
+          // FIXED: Compute detailed path for better snapping during turns
+          navState.detailedPath = [];
+          const legs = response.routes[0].legs;
+          for (const leg of legs) {
+            for (const step of leg.steps) {
+              step.path.forEach(point => navState.detailedPath.push(point));
+            }
+          }
+          console.log('Detailed path computed for route preview:', navState.detailedPath.length, 'points');
           directionsRenderer.setMap(map);
           directionsRenderer.setDirections(response);
           updateRouteAhead(navState.userLocation);
@@ -4524,6 +4551,15 @@
       }
       navState.currentRoute = navState.alternativeRoute;
       navState.routePolyline = navState.alternativeRoute.routes[0].overview_path;
+      // FIXED: Recompute detailed path for alternative route
+      navState.detailedPath = [];
+      const legs = navState.currentRoute.routes[0].legs;
+      for (const leg of legs) {
+        for (const step of leg.steps) {
+          step.path.forEach(point => navState.detailedPath.push(point));
+        }
+      }
+      console.log('Detailed path recomputed for alternative route:', navState.detailedPath.length, 'points');
       directionsRenderer.setDirections(navState.currentRoute);
       directionsRenderer.setMap(map);
       alternativeRenderer.setMap(null);
