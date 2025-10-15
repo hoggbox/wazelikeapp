@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v12';  // Bumped to v10 for index.html updates (camera logic, heading smoothing, etc.)
+const CACHE_NAME = 'gps-app-cache-v13';  // Bumped to v10 for index.html updates (camera logic, heading smoothing, etc.)
 
 const urlsToCache = [
   '/',
