@@ -1332,6 +1332,7 @@
       }, 5000);
     }
     function smoothHeading(newHeading, source = 'unknown', speed = 0, isSnapped = false) {
+      console.log('smoothHeading called:', { newHeading, source, speed, isSnapped });
       if (isNaN(newHeading) || newHeading === null || speed <= STATIONARY_SPEED_THRESHOLD) {
         console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
@@ -1664,6 +1665,7 @@
       }
     }
     function updateMapHeading(targetHeading) {
+      console.log('updateMapHeading called:', { targetHeading });
       if (navState.mapOrientation !== 'heading-up') return;
       
       // Cancel existing tween
@@ -1686,8 +1688,10 @@
           currentHeadingTween = null;
         })
         .start();
+      console.log('Heading tween started:', { current: currentHeading, target: targetHeading, delta });
     }
     function updateCameraView(position, heading, speed) {
+      console.log('updateCameraView called:', { position, heading, speed });
       // Check if update is necessary
       const bounds = map.getBounds();
       if (!bounds) return;
@@ -1695,6 +1699,7 @@
       const posLatLng = new google.maps.LatLng(position);
       if (!bounds.contains(posLatLng)) {
         // Immediate snap if marker is off-screen
+        console.log('Position off bounds, immediate snap');
         ProgrammaticUpdateManager.start();
         map.setCenter(posLatLng);
         ProgrammaticUpdateManager.end(50);
@@ -1728,6 +1733,7 @@
         map.setTilt(tilt);
         
         ProgrammaticUpdateManager.end(150);
+        console.log('Camera updated:', { center: lookaheadPoint.toJSON(), zoom, tilt, heading: targetHeading });
       });
     }
     function anticipateTurn(currentPos, currentHeading) {
@@ -1853,8 +1859,8 @@
             offRoadPolyline = null;
           }
           directionsRenderer.setMap(map);
-          navState.isFollowing = false;
           navState.isNavigating = false;
+          navState.isFollowing = false;
           localStorage.setItem('isFollowing', navState.isFollowing);
           sessionStorage.setItem('isFollowing', navState.isFollowing);
           map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
@@ -1866,9 +1872,17 @@
           });
           return;
         }
+        // FIXED: Set navigation flags for simulation
+        navState.isNavigating = true;
+        navState.isFollowing = true;
+        lockNavigation();
+        document.getElementById('hud-container').style.display = 'flex';
+        document.getElementById('bottom-hud-container').style.display = 'flex';
+        updateHUD(navState.currentRoute, navState.userLocation);
+        updateBottomHUD(navState.currentRoute);
         startPositionSimulation();
         document.getElementById('simulate-position-button').textContent = 'Stop Simulation';
-        console.log('Position simulation started');
+        console.log('Position simulation started with navigation flags');
       });
       document.getElementById('hazard-button').addEventListener('click', () => {
         if (navState.alertState === 'OFFERING_REROUTE') return;
@@ -3653,9 +3667,9 @@
         position.lng > ne.lng() - edgeThresholdLng ||
         position.lng < sw.lng() + edgeThresholdLng;
       if (isNearEdge) {
+        console.log('Marker near viewport edge, ensuring in view');
         requestAnimationFrame(() => {
           map.setCenter(position);
-          console.log('Marker near viewport edge, re-centering:', { position, isNearEdge });
         });
       }
     }
@@ -3752,6 +3766,7 @@
       }
     }
     function onPositionUpdate(position, isSimulation = false) {
+      console.log('onPositionUpdate called:', { isSimulation });
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
         console.log('Location update received:', { lat: latitude, lng: longitude, speed, gpsHeading: heading, isSimulation });
@@ -3845,26 +3860,35 @@
           setTimeout(() => ProgrammaticUpdateManager.end(), 150);
           console.log('Marker position updated:', { pos, heading: navState.currentHeading, orientation: navState.mapOrientation });
         }
+        // FIXED: Ensure marker in view after update
+        ensureMarkerInView(pos);
         
-        // Update camera ONLY if BOTH conditions require it
+        // FIXED: Update camera more reliably - lower distance threshold to 2m, always update if simulating or significant change
         if (navState.isFollowing && navState.isNavigating) {
           const movedEnough = !lastCameraPosition || 
             google.maps.geometry.spherical.computeDistanceBetween(
               new google.maps.LatLng(lastCameraPosition),
               new google.maps.LatLng(pos)
-            ) > 5;
-          
-          const headingChanged = Math.abs(navState.currentHeading - lastHeading) > 5;
+            ) > 2; // Lowered from 5m
+          const headingChanged = Math.abs(navState.currentHeading - lastHeading) > 3; // Lowered from 5°
           
           // Add time-based throttle to prevent too-frequent updates
           const timeSinceLastUpdate = now - navState.lastCameraUpdateTime;
           const shouldUpdateByTime = timeSinceLastUpdate >= navState.CAMERA_UPDATE_INTERVAL;
           
-          if ((movedEnough || headingChanged) && shouldUpdateByTime) {
+          // FIXED: Force update during simulation or if conditions met
+          const shouldForceUpdate = isSimulation || (movedEnough || headingChanged) && shouldUpdateByTime;
+          
+          console.log('Camera update conditions check:', { movedEnough, headingChanged, shouldUpdateByTime, shouldForceUpdate, isSimulation });
+          
+          if (shouldForceUpdate) {
+            console.log('Triggering camera update');
             updateCameraView(pos, navState.currentHeading, speed);
             lastCameraPosition = pos;
             lastHeading = navState.currentHeading;
             navState.lastCameraUpdateTime = now;
+          } else {
+            console.log('Camera update skipped due to conditions');
           }
         }
         lastHeading = navState.currentHeading;
