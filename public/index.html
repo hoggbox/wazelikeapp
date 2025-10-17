@@ -969,22 +969,28 @@
     const HEADING_VARIANCE_THRESHOLD = 30;
     const SIGNIFICANT_TURN_THRESHOLD = 30;
     const VERIFICATION_DISTANCE = 50;
+    const alertCache = new Map();
     const ProgrammaticUpdateManager = {
       _isUpdating: false,
-      _timeout: null,
-      
+      _callbacks: [],
+   
       start() {
         this._isUpdating = true;
-        if (this._timeout) clearTimeout(this._timeout);
+        this._callbacks = [];
       },
-      
-      end(delay = 100) {
-        if (this._timeout) clearTimeout(this._timeout);
-        this._timeout = setTimeout(() => {
+   
+      end(callback = null) {
+        if (callback) {
+          this._callbacks.push(callback);
+        }
+        // Use requestAnimationFrame for next frame callback instead of setTimeout
+        requestAnimationFrame(() => {
           this._isUpdating = false;
-        }, delay);
+          this._callbacks.forEach(cb => cb());
+          this._callbacks = [];
+        });
       },
-      
+   
       get isActive() {
         return this._isUpdating;
       }
@@ -1062,6 +1068,11 @@
     let tooltipTimer = null;
     let tooltipHideTimer = null;
     let selectedUserId = null; // For admin activity view
+    const updateMetrics = {
+      lastUpdateDuration: 0,
+      averageDuration: 0,
+      totalUpdates: 0
+    };
     function showTooltip(buttonId, text) {
       if (!showTooltips) return;
       const tooltip = document.getElementById('tooltip');
@@ -1170,7 +1181,7 @@
           if (navState.hazardCheckInterval) {
             clearInterval(navState.hazardCheckInterval);
           }
-          navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 10000);
+          navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 5000);
           startRerouteCheck();
           // Reset smoothing histories for fresh start after timeout
           positionHistory = [];
@@ -1365,7 +1376,7 @@
       if (isHighSpeed && headingHistory.length > 2) {
         const recentHeadings = headingHistory.slice(-3).map(h => h.heading);
         const variance = Math.max(...recentHeadings) - Math.min(...recentHeadings);
-        
+     
         // Reduce sensitivity during stable highway driving
         if (variance < 10) {
           const headingDiff = Math.abs(((newHeading - lastStableHeading + 180) % 360) - 180);
@@ -1375,40 +1386,40 @@
           }
         }
       }
-      
+   
       // Use weighted average instead of simple average
       headingHistory.push({ heading: newHeading, weight: speed > 5 ? 1.0 : 0.5 });
       if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
         headingHistory.shift();
       }
-      
+   
       let totalWeight = 0;
       let weightedSum = 0;
-      
+   
       headingHistory.forEach(entry => {
         weightedSum += entry.heading * entry.weight;
         totalWeight += entry.weight;
       });
-      
+   
       // Add minimum weight floor to prevent near-zero divisions
       const minTotalWeight = headingHistory.length * 0.3; // At least 0.3 per entry
       if (totalWeight < minTotalWeight) {
         totalWeight = minTotalWeight;
       }
-      
+   
       let smoothedHeading = (weightedSum / totalWeight) % 360;
-      
+   
       const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.8 : 0.2;
       const compassWeight = needsCalibration ? 0.1 : 0.4;
       const polylineWeight = isSnapped ? 0.8 : needsCalibration ? 0.2 : 0.2;
-      
+   
       for (let i = 0; i < headingHistory.length; i++) {
         let delta = headingHistory[i].heading - smoothedHeading;
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
         smoothedHeading += (source === 'gps' ? gpsWeight : source === 'compass' ? compassWeight : polylineWeight) * delta / headingHistory.length;
       }
-      
+   
       smoothedHeading = smoothedHeading % 360;
       if (smoothedHeading < 0) smoothedHeading += 360;
       navState.lastValidHeading = smoothedHeading;
@@ -1685,102 +1696,202 @@
     function updateMapHeading(targetHeading) {
       console.log('updateMapHeading called:', { targetHeading });
       if (navState.mapOrientation !== 'heading-up') return;
-      
+   
       // Cancel existing tween
       if (currentHeadingTween) {
         currentHeadingTween.stop();
         currentHeadingTween = null;
       }
-      
+   
       const currentHeading = map.getHeading() || 0;
       const delta = normalizeHeadingDelta(currentHeading, targetHeading);
-      
+   
       // Skip if change is tiny
       if (Math.abs(delta) < 3) return;
-      
+   
       currentHeadingTween = new TWEEN.Tween({ heading: currentHeading })
         .to({ heading: currentHeading + delta }, 300)
         .easing(TWEEN.Easing.Quadratic.Out)
         .onUpdate(obj => map.setHeading(obj.heading))
-        .onComplete(() => { 
+        .onComplete(() => {
           currentHeadingTween = null;
         })
         .start();
       console.log('Heading tween started:', { current: currentHeading, target: targetHeading, delta });
     }
+    function smoothCameraUpdate(targetPos, targetHeading, targetZoom, targetTilt, duration = 300, callback = null) {
+      ProgrammaticUpdateManager.start();
+     
+      const currentPos = map.getCenter();
+      const currentZoom = map.getZoom();
+      const currentHeading = map.getHeading() || 0;
+      const currentTilt = map.getTilt() || 0;
+     
+      new TWEEN.Tween({
+        lat: currentPos.lat(),
+        lng: currentPos.lng(),
+        zoom: currentZoom,
+        heading: currentHeading,
+        tilt: currentTilt
+      })
+      .to({
+        lat: targetPos.lat,
+        lng: targetPos.lng(),
+        zoom: targetZoom,
+        heading: targetHeading,
+        tilt: targetTilt
+      }, duration)
+      .easing(TWEEN.Easing.Quadratic.Out)
+      .onUpdate((obj) => {
+        map.setCenter({ lat: obj.lat, lng: obj.lng });
+        map.setZoom(obj.zoom);
+        map.setHeading(obj.heading);
+        map.setTilt(obj.tilt);
+      })
+      .onComplete(() => {
+        ProgrammaticUpdateManager.end(callback);
+      })
+      .start();
+    }
+    function shouldUpdateCamera(pos, heading, speed) {
+      const now = Date.now();
+      const movedEnough = !lastCameraPosition ||
+        google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(lastCameraPosition), new google.maps.LatLng(pos)) > 1;
+      const headingChanged = Math.abs(heading - lastHeading) > 3;
+      const timeElapsed = now - navState.lastCameraUpdateTime >= navState.CAMERA_UPDATE_INTERVAL;
+     
+      return {
+        should: movedEnough || headingChanged && timeElapsed,
+        reason: movedEnough ? 'movement' : headingChanged ? 'heading' : 'none'
+      };
+    }
+    function getAdaptiveUpdateInterval(speed, zoom) {
+      if (zoom > 18) return 100; // Zoomed in = smooth
+      if (speed > 25) return 50;  // High speed = frequent
+      if (speed > 15) return 150; // Medium speed
+      return 500; // Slow/stationary
+    }
     function updateCameraView(position, heading, speed) {
+      const startTime = performance.now();
       console.log('updateCameraView called:', { position, heading, speed });
+      const interval = getAdaptiveUpdateInterval(speed, map.getZoom());
+      const now = Date.now();
+      if (now - navState.lastCameraUpdateTime < interval) {
+        console.log('Camera update throttled:', { interval, speed, zoom: map.getZoom() });
+        const duration = performance.now() - startTime;
+        updateMetrics.lastUpdateDuration = duration;
+        updateMetrics.totalUpdates++;
+        updateMetrics.averageDuration =
+          (updateMetrics.averageDuration * (updateMetrics.totalUpdates - 1) + duration) /
+          updateMetrics.totalUpdates;
+        if (duration > 50) {
+          console.warn('Slow camera update:', { duration, position, heading });
+        }
+        return;
+      }
+      const cameraCheck = shouldUpdateCamera(position, heading, speed);
+      console.log('Camera update check:', cameraCheck);
+      if (!cameraCheck.should) {
+        const duration = performance.now() - startTime;
+        updateMetrics.lastUpdateDuration = duration;
+        updateMetrics.totalUpdates++;
+        updateMetrics.averageDuration =
+          (updateMetrics.averageDuration * (updateMetrics.totalUpdates - 1) + duration) /
+          updateMetrics.totalUpdates;
+        if (duration > 50) {
+          console.warn('Slow camera update:', { duration, position, heading });
+        }
+        return;
+      }
       // Check if update is necessary
       const bounds = map.getBounds();
       if (!bounds) return;
-      
+   
       const posLatLng = new google.maps.LatLng(position);
       if (!bounds.contains(posLatLng)) {
         // Immediate snap if marker is off-screen
         console.log('Position off bounds, immediate snap');
         ProgrammaticUpdateManager.start();
         map.setCenter(posLatLng);
-        ProgrammaticUpdateManager.end(50);
+        ProgrammaticUpdateManager.end();
+        const duration = performance.now() - startTime;
+        updateMetrics.lastUpdateDuration = duration;
+        updateMetrics.totalUpdates++;
+        updateMetrics.averageDuration =
+          (updateMetrics.averageDuration * (updateMetrics.totalUpdates - 1) + duration) /
+          updateMetrics.totalUpdates;
+        if (duration > 50) {
+          console.warn('Slow camera update:', { duration, position, heading });
+        }
         return;
       }
-      
+   
       const { zoom, tilt, turnHeading } = getDynamicZoom(position, speed);
       let targetHeading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || heading;
       const anticipatedHeading = anticipateTurn(position, targetHeading);
       targetHeading = anticipatedHeading || targetHeading;
       const lookaheadPoint = getLookaheadPoint(position, targetHeading, 0);
-      
+   
       ProgrammaticUpdateManager.start();
-      
-      requestAnimationFrame(() => {
-        if (isMobile) {
-          new TWEEN.Tween(map.getCenter())
-            .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 200)
-            .easing(TWEEN.Easing.Linear.None)
-            .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
-            .start();
-          
-          updateMapHeading(targetHeading); // Use new function
-        } else {
-          map.panTo(lookaheadPoint);
-          map.setHeading(targetHeading);
-        }
-        
-        lastProgrammaticZoom = zoom;
-        map.setZoom(zoom);
-        map.setTilt(tilt);
-        
-        ProgrammaticUpdateManager.end(150);
+      smoothCameraUpdate(lookaheadPoint, targetHeading, zoom, tilt, 300, () => {
         console.log('Camera updated:', { center: lookaheadPoint.toJSON(), zoom, tilt, heading: targetHeading });
       });
+      const duration = performance.now() - startTime;
+      updateMetrics.lastUpdateDuration = duration;
+      updateMetrics.totalUpdates++;
+      updateMetrics.averageDuration =
+        (updateMetrics.averageDuration * (updateMetrics.totalUpdates - 1) + duration) /
+        updateMetrics.totalUpdates;
+     
+      if (duration > 50) {
+        console.warn('Slow camera update:', { duration, position, heading });
+      }
+      navState.lastCameraUpdateTime = now;
+    }
+    function predictPosition(currentPos, heading, speed, deltaTime) {
+      const distanceMeters = (speed * deltaTime) / 1000;
+      return google.maps.geometry.spherical.computeOffset(
+        new google.maps.LatLng(currentPos),
+        distanceMeters,
+        heading
+      );
+    }
+    function scheduleNextUpdate(speed, isHighway) {
+      const interval = getAdaptiveUpdateInterval(speed, map.getZoom());
+      setTimeout(() => {
+        if (navState.isNavigating) {
+          onPositionUpdate(lastGPSPosition);
+          scheduleNextUpdate(speed, isHighway);
+        }
+      }, interval);
     }
     function anticipateTurn(currentPos, currentHeading) {
       if (!navState.currentRoute) return null;
-      
+   
       const legs = navState.currentRoute.routes[0].legs[0];
       const userLatLng = new google.maps.LatLng(currentPos);
-      
+   
       for (let i = 0; i < legs.steps.length; i++) {
         const step = legs.steps[i];
         if (!step.maneuver) continue;
-        
+     
         const turnLocation = new google.maps.LatLng(step.start_location);
         const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(
           userLatLng, turnLocation
         );
-        
+     
         // Start camera adjustment 100-200m before turn
         if (distanceToTurn < 200 && distanceToTurn > 50) {
           const turnHeading = google.maps.geometry.spherical.computeHeading(
             userLatLng, turnLocation
           );
-          
+       
           // Blend current heading toward turn heading
           const blendFactor = 1 - (distanceToTurn - 50) / 150; // 0 to 1
           return currentHeading + normalizeHeadingDelta(currentHeading, turnHeading) * blendFactor * 0.3;
         }
       }
-      
+   
       return null;
     }
     function loadOfflineRegions() {
@@ -2192,26 +2303,24 @@
       map.addListener('dragstart', (e) => {
         if (ProgrammaticUpdateManager.isActive) return;
         if (!navState.isNavigating || !navState.isFollowing) return;
-        
+     
         dragStartPos = map.getCenter();
         actualDrag = false;
       });
-
       map.addListener('drag', () => {
         if (!dragStartPos || ProgrammaticUpdateManager.isActive) return;
-        
+     
         const currentPos = map.getCenter();
         dragDistance = google.maps.geometry.spherical.computeDistanceBetween(
           dragStartPos, currentPos
         );
-        
+     
         // Immediate unlock on confirmed movement
         if (dragDistance > 10 && !actualDrag) {
           actualDrag = true;
           unlockNavigation();
         }
       });
-
       map.addListener('dragend', () => {
         dragStartPos = null;
         actualDrag = false;
@@ -2220,17 +2329,22 @@
       // Fixed zoom change detection
       map.addListener('zoom_changed', () => {
         const currentZoom = map.getZoom();
-        
-        // Track zoom history to detect trends
+        const now = Date.now();
+     
+        // Track zoom history with timestamps to distinguish user vs programmatic
         if (!navState.zoomHistory) navState.zoomHistory = [];
-        navState.zoomHistory.push(currentZoom);
+        navState.zoomHistory.push({ zoom: currentZoom, timestamp: now });
         if (navState.zoomHistory.length > 3) navState.zoomHistory.shift();
-        
-        // Only unlock if zoom is changing consistently away from target
+     
+        // Only unlock if zoom is changing consistently away from target and time elapsed > 300ms
         if (navState.isNavigating && navState.isFollowing && !ProgrammaticUpdateManager.isActive) {
-          const avgZoom = navState.zoomHistory.reduce((a,b) => a+b) / navState.zoomHistory.length;
-          if (Math.abs(avgZoom - lastProgrammaticZoom) > 1.0) {
-            unlockNavigation();
+          const recentHistory = navState.zoomHistory.slice(-2);
+          if (recentHistory.length >= 2) {
+            const timeDiff = recentHistory[1].timestamp - recentHistory[0].timestamp;
+            const avgZoom = recentHistory.reduce((sum, h) => sum + h.zoom, 0) / recentHistory.length;
+            if (timeDiff > 300 && Math.abs(avgZoom - lastProgrammaticZoom) > 1.2) {
+              unlockNavigation();
+            }
           }
         }
       });
@@ -2857,6 +2971,17 @@
         }
       }
     }
+    function isDuplicateAlert(alert) {
+      const key = `${alert.type}-${alert.location.coordinates[0].toFixed(4)}-${alert.location.coordinates[1].toFixed(4)}`;
+      const cached = alertCache.get(key);
+      
+      if (cached && Date.now() - cached.timestamp < 5000) {
+        return true; // Same alert within 5 seconds
+      }
+      
+      alertCache.set(key, { timestamp: Date.now(), id: alert._id });
+      return false;
+    }
     async function confirmAlertLocation(location, alertType) {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -2946,7 +3071,6 @@
     showToast('Failed to post alert: No data available.');
     return;
   }
-  
   const isTrafficCamera = navState.tempAlertData.type === 'Traffic Camera';
   if (isTrafficCamera && !showTrafficCameras) {
     console.log('Traffic camera alert not posted: traffic cameras disabled');
@@ -2957,7 +3081,6 @@
     showToast('Traffic camera alert not posted: cameras disabled in settings.');
     return;
   }
-  
   try {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
     if (!token || !token.includes('.') || token === 'undefined') {
@@ -2970,7 +3093,7 @@
       return;
     }
     console.log('Posting alert with token:', token.substring(0, 20) + '...');
-    
+ 
     const response = await fetchWithRetry('/api/alerts', {
       method: 'POST',
       mode: 'cors',
@@ -2981,22 +3104,24 @@
       },
       body: JSON.stringify(navState.tempAlertData)
     });
-    
+ 
     console.log('Post alert response:', { status: response.status, ok: response.ok });
     const result = await response.json();
     console.log('Post alert result:', result);
-    
+ 
     if (response.status === 201 && result.alert && result.alert._id) {
       const alertId = result.alert._id;
-      
-      // Dedupe check against currentAlerts (global array)
-      if (!currentAlerts.some(a => a._id === alertId)) {
-        currentAlerts.push(result.alert);
-        console.log('Added new alert to currentAlerts:', alertId);
+      const alert = result.alert;
+      if (!isDuplicateAlert(alert)) {
+        if (!currentAlerts.some(a => a._id === alertId)) {
+          currentAlerts.push(alert);
+          console.log('Added new alert to currentAlerts:', alertId);
+        }
+        displayAlertsInHud(currentAlerts);
       } else {
-        console.log('Alert already in currentAlerts, skipping push:', alertId);
+        console.log('Duplicate alert ignored via cache:', alertId);
       }
-      
+   
       // Create marker only if not already present
       if (!markers.has(alertId)) {
         const marker = new google.maps.marker.AdvancedMarkerElement({
@@ -3010,13 +3135,10 @@
       } else {
         console.log('Marker already exists for alert, skipping creation:', alertId);
       }
-      
-      // Update HUD explicitly
-      displayAlertsInHud(currentAlerts);
-      
+   
       console.log('Alert saved to MongoDB:', result.alert);
       showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
-      
+   
       if (isTrafficCamera) {
         cameraPositions.push({
           lat: navState.tempAlertData.location.coordinates[1],
@@ -3025,29 +3147,32 @@
       } else if (navState.isNavigating) {
         checkHazardsAndOfferReroute();
       }
-      
+   
       if (socket && socket.connected) {
         socket.emit('alert', result.alert);
         console.log('Emitted alert event:', alertId);
       }
-      
+   
       // Refresh profile
       const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
       fetchProfile(ownId, true).then(populateAccountProfile);
-      
+   
       // Final sync via poll to catch any server-side changes
       setTimeout(() => pollAlerts(), 1000);
-      
+   
     } else if (response.status === 409 && result.alert && result.alert._id) {
       const alertId = result.alert._id;
-      if (!currentAlerts.some(a => a._id === alertId)) {
-        currentAlerts.push(result.alert);
-        displayAlertsInHud(currentAlerts);
+      const alert = result.alert;
+      if (!isDuplicateAlert(alert)) {
+        if (!currentAlerts.some(a => a._id === alertId)) {
+          currentAlerts.push(alert);
+          displayAlertsInHud(currentAlerts);
+        }
       }
       showToast(result.message || 'Duplicate alert ignored.');
       console.log('Duplicate alert ignored:', alertId);
       setTimeout(() => pollAlerts(), 1000);
-      
+   
     } else {
       console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
       showToast(`Failed to save alert: ${result.error || 'Server error'}`);
@@ -3170,7 +3295,7 @@
       return;
     }
     console.log('Deleting alert with token:', token.substring(0, 20) + '...');
-    
+ 
     // Always attempt server deletion first, regardless of local marker
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
@@ -3178,13 +3303,13 @@
       credentials: 'include',
       headers: { 'Authorization': `Bearer ${token.trim()}` }
     });
-    
+ 
     if (!response.ok) {
       throw new Error(`Failed to delete alert: ${response.statusText}`);
     }
-    
+ 
     console.log('Delete alert response:', { status: response.status, ok: response.ok });
-    
+ 
     // Now handle local cleanup on success
     const marker = markers.get(id);
     if (marker) {
@@ -3194,7 +3319,7 @@
     } else {
       console.warn('Marker not found locally, but server deletion succeeded:', id);
     }
-    
+ 
     // Remove from currentAlerts and update HUD
     const alertIndex = currentAlerts.findIndex(a => a._id === id);
     if (alertIndex !== -1) {
@@ -3208,13 +3333,13 @@
       displayAlertsInHud(currentAlerts);
       console.log('Alert removed from currentAlerts:', id);
     }
-    
+ 
     // Remove UI item if provided
     item?.remove();
-    
+ 
     showToast('Alert deleted successfully.');
     console.log('Alert deletion complete:', id);
-    
+ 
     // Emit deletion event if socket connected
     if (socket && socket.connected) {
       socket.emit('alertDeleted', id);
@@ -3224,11 +3349,11 @@
       console.warn('Socket not connected, relying on polling for alert deletion:', id);
       setTimeout(() => pollAlerts(), 1000);
     }
-    
+ 
     // Refresh profile if own alert
     const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
     fetchProfile(ownId, true).then(populateAccountProfile);
-    
+ 
   } catch (error) {
     console.error('Error deleting alert:', error);
     showToast(`Failed to delete alert: ${error.message}`);
@@ -3262,7 +3387,7 @@
         });
         currentAlerts = [...new Map(serverAlerts.filter(alert => {
           if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
-          const filterKey = alert.type.toLowerCase().replace(' ', '-');
+          const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
           return navState.alertFilters[filterKey] !== false;
         }).map(a => [a._id, a])).values()];
         displayAlertsInHud(currentAlerts);
@@ -3293,7 +3418,7 @@
         cameraPositions = [];
         markersData.filter(markerData => {
           if (markerData.type === 'Traffic Camera' && !showTrafficCameras) return false;
-          const filterKey = markerData.type.toLowerCase().replace(' ', '-');
+          const filterKey = markerData.type.toLowerCase().replace(/\s+/g, '-');
           return navState.alertFilters[filterKey] !== false;
         }).forEach(markerData => {
           const isTrafficCamera = markerData.type === 'Traffic Camera';
@@ -3316,7 +3441,7 @@
         });
         currentAlerts = [...new Map(markersData.filter(alert => {
           if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
-          const filterKey = alert.type.toLowerCase().replace(' ', '-');
+          const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
           return navState.alertFilters[filterKey] !== false;
         }).map(a => [a._id, a])).values()];
         displayAlertsInHud(currentAlerts);
@@ -3348,7 +3473,7 @@
         const alerts = await response.json();
         currentAlerts = [...new Map(alerts.filter(alert => {
           if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
-          const filterKey = alert.type.toLowerCase().replace(' ', '-');
+          const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
           return navState.alertFilters[filterKey] !== false;
         }).map(a => [a._id, a])).values()];
         lastAlertFetchTime = Date.now();
@@ -3787,6 +3912,18 @@
         console.error('Error updating server location:', error);
       }
     }
+    function buildRouteIndex(path) {
+      const index = new Map();
+      const gridSize = 0.01; // ~1km cells
+      
+      path.forEach(point => {
+        const key = `${Math.floor(point.lat() / gridSize)},${Math.floor(point.lng() / gridSize)}`;
+        if (!index.has(key)) index.set(key, []);
+        index.get(key).push(point);
+      });
+      
+      return index;
+    }
     function onPositionUpdate(position, isSimulation = false) {
       console.log('onPositionUpdate called:', { isSimulation });
       try {
@@ -3796,7 +3933,6 @@
         const now = Date.now();
         // Allow marker updates always, but throttle camera/route updates
         const shouldUpdateCamera = (now - lastLocationUpdate >= LOCATION_UPDATE_THRESHOLD);
-
         if (shouldUpdateCamera) {
           lastLocationUpdate = now;
         }
@@ -3837,6 +3973,7 @@
             );
             if (distance > MAX_GPS_DISTANCE) {
               const numPoints = Math.ceil(distance / 100);
+              const interpolatedPath = [];
               for (let i = 1; i < numPoints; i++) {
                 const fraction = i / numPoints;
                 const interpolated = google.maps.geometry.spherical.interpolate(
@@ -3844,8 +3981,21 @@
                   new google.maps.LatLng(pos),
                   fraction
                 );
-                console.log('Interpolated point added:', { lat: interpolated.lat(), lng: interpolated.lng() });
+                interpolatedPath.push(interpolated);
               }
+              // Animate marker along interpolated path for smoother movement
+              let interpIndex = 0;
+              const interpInterval = setInterval(() => {
+                if (interpIndex < interpolatedPath.length) {
+                  const interpPos = interpolatedPath[interpIndex];
+                  userMarker.position = interpPos;
+                  interpIndex++;
+                } else {
+                  clearInterval(interpInterval);
+                  userMarker.position = pos;
+                }
+              }, 50);
+              console.log('Interpolated path used for smoother marker movement:', { numPoints, distance });
             }
           }
           if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && index < path.length - 1) {
@@ -3879,33 +4029,40 @@
           ProgrammaticUpdateManager.start();
           userMarker.position = pos;
           userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-          setTimeout(() => ProgrammaticUpdateManager.end(), 150);
+          ProgrammaticUpdateManager.end();
           console.log('Marker position updated:', { pos, heading: navState.currentHeading, orientation: navState.mapOrientation });
         }
         // FIXED: Ensure marker in view after update
         ensureMarkerInView(pos);
-        
-        // FIXED: Update camera more reliably - lower distance threshold to 2m, always update if simulating or significant change
+     
+        // FIXED: Update camera more reliably - lower distance threshold to 1m, always update if simulating or significant change
         if (navState.isFollowing && navState.isNavigating) {
-          const movedEnough = !lastCameraPosition || 
+          const movedEnough = !lastCameraPosition ||
             google.maps.geometry.spherical.computeDistanceBetween(
               new google.maps.LatLng(lastCameraPosition),
               new google.maps.LatLng(pos)
-            ) > 2; // Lowered from 5m
+            ) > 1; // Lowered to 1m
           const headingChanged = Math.abs(navState.currentHeading - lastHeading) > 3; // Lowered from 5°
-          
+       
           // Add time-based throttle to prevent too-frequent updates
           const timeSinceLastUpdate = now - navState.lastCameraUpdateTime;
           const shouldUpdateByTime = timeSinceLastUpdate >= navState.CAMERA_UPDATE_INTERVAL;
-          
+       
           // FIXED: Force update during simulation or if conditions met
           const shouldForceUpdate = isSimulation || (movedEnough || headingChanged) && shouldUpdateByTime;
-          
+       
           console.log('Camera update conditions check:', { movedEnough, headingChanged, shouldUpdateByTime, shouldForceUpdate, isSimulation });
-          
+       
           if (shouldForceUpdate) {
             console.log('Triggering camera update');
-            updateCameraView(pos, navState.currentHeading, speed);
+            let updatePos = pos;
+            const timeSinceLastUpdateMs = now - lastLocationUpdate;
+            if (speed > 20) {
+              const predicted = predictPosition(pos, navState.currentHeading, speed, timeSinceLastUpdateMs);
+              updatePos = { lat: predicted.lat(), lng: predicted.lng() };
+              console.log('Using predicted position for high-speed update:', { original: pos, predicted: updatePos, speed, timeSinceLastUpdateMs });
+            }
+            updateCameraView(updatePos, navState.currentHeading, speed);
             lastCameraPosition = pos;
             lastHeading = navState.currentHeading;
             navState.lastCameraUpdateTime = now;
@@ -3947,7 +4104,7 @@
       }
       actualDrag = false;
       dragStartPos = null;
-      
+   
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
       sessionStorage.setItem('isFollowing', navState.isFollowing);
@@ -3999,23 +4156,32 @@
         updateOffRoadPolyline(rawUserLocation || navState.userLocation, startLocation);
         const path = navState.detailedPath.length > 0 ? navState.detailedPath : navState.routePolyline;
         const { point } = findClosestRoutePoint(navState.userLocation, path, navState.currentHeading, 0);
-        navState.userLocation = point;
-        console.log('Forced snap to route start:', navState.userLocation);
+        const initialPos = point;
+        // FIXED: Smooth initial snap using TWEEN
         ProgrammaticUpdateManager.start();
-        requestAnimationFrame(() => {
-          userMarker.position = navState.userLocation;
-          userMarker.setMap(map);
-          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-          console.log('Initial marker position set:', navState.userLocation);
-          ProgrammaticUpdateManager.end(50);
-        });
+        new TWEEN.Tween({ lat: navState.userLocation.lat, lng: navState.userLocation.lng })
+          .to({ lat: initialPos.lat, lng: initialPos.lng }, 500)
+          .easing(TWEEN.Easing.Quadratic.Out)
+          .onUpdate((obj) => {
+            navState.userLocation = { lat: obj.lat, lng: obj.lng };
+            userMarker.position = navState.userLocation;
+          })
+          .onComplete(() => {
+            navState.isInitialSnap = false;
+            ProgrammaticUpdateManager.end();
+            console.log('Initial snap completed smoothly');
+          })
+          .start();
+        console.log('Smooth initial snap started:', { from: navState.userLocation, to: initialPos });
         directionsRenderer.setMap(map);
         directionsRenderer.setDirections(navState.currentRoute);
         updateHUD(navState.currentRoute, navState.userLocation);
         updateBottomHUD(navState.currentRoute);
         fetchCurrentAlerts();
+        checkHazardsAndOfferReroute();
         startRerouteCheck();
-        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 10000);
+        navState.ignoredHazards = [];
+        navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 5000);
         if (showTrafficCameras) {
           cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
         }
@@ -4058,7 +4224,7 @@
           map.setTilt(tilt);
           userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
           console.log('Initial navigation view set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
-          ProgrammaticUpdateManager.end(100);
+          ProgrammaticUpdateManager.end();
         });
         onPositionUpdate({
           coords: {
@@ -4182,10 +4348,10 @@
         currentHeadingTween = null;
       }
       TWEEN.removeAll();
-      
+   
       // Clear all timers
       if (dragTimer) clearTimeout(dragTimer);
-      ProgrammaticUpdateManager.end(0);
+      ProgrammaticUpdateManager.end();
       navState.isNavigating = false;
       navState.isFollowing = false;
       navState.isInitialSnap = false;
@@ -4308,7 +4474,7 @@
               map.setTilt(tilt);
               userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
               console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading: targetHeading, tilt, orientation: navState.mapOrientation });
-              ProgrammaticUpdateManager.end(100);
+              ProgrammaticUpdateManager.end();
             });
           }
           console.log('Route calculated:', {
@@ -4465,25 +4631,59 @@
       }
       const userLatLng = new google.maps.LatLng(navState.userLocation);
       const path = navState.currentRoute.routes[0].overview_path;
+   
+      // Use detailed path if available for more accurate detection
+      const checkPath = navState.detailedPath.length > 0 ? navState.detailedPath : path;
+      const routeIndex = buildRouteIndex(checkPath);
+   
       for (const alert of currentAlerts) {
+        // Skip traffic cameras and already ignored hazards
         if (alert.type === 'Traffic Camera' || navState.ignoredHazards.includes(alert._id)) continue;
+     
+        const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
+        if (navState.alertFilters[filterKey] === false) continue;
+     
         const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
         const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
+     
+        // Check if alert is within warning distance
         if (distance <= hazardAlertDistance * 1609.34) {
           let isOnRoute = false;
-          for (const point of path) {
+          let minDistanceToRoute = Infinity;
+          const gridKey = `${Math.floor(alertLatLng.lat() / 0.01)},${Math.floor(alertLatLng.lng() / 0.01)}`;
+          
+          if (!routeIndex.has(gridKey)) continue; // Not near route
+          
+          // Now check actual distance only for nearby cells
+          const nearbyPoints = routeIndex.get(gridKey);
+          for (const point of nearbyPoints) {
             const pointLatLng = new google.maps.LatLng(point);
             const distanceToPoint = google.maps.geometry.spherical.computeDistanceBetween(alertLatLng, pointLatLng);
-            if (distanceToPoint < 50) {
+            minDistanceToRoute = Math.min(minDistanceToRoute, distanceToPoint);
+         
+            // Increased threshold to 100 meters for better detection
+            if (distanceToPoint < 100) {
               isOnRoute = true;
               break;
             }
           }
+       
           if (isOnRoute) {
-            console.log('Hazard detected on route:', { alertId: alert._id, type: alert.type, distance });
+            console.log('Hazard detected on route:', {
+              alertId: alert._id,
+              type: alert.type,
+              distanceToUser: distance,
+              minDistanceToRoute: minDistanceToRoute
+            });
             navState.currentHazard = alert;
             calculateAlternativeRoute(alert);
             break;
+          } else {
+            console.log('Alert nearby but not on route:', {
+              alertId: alert._id,
+              type: alert.type,
+              minDistanceToRoute: minDistanceToRoute
+            });
           }
         }
       }
@@ -4739,7 +4939,7 @@
         map.setTilt(tilt);
         userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
         console.log('Navigation view restored:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
-        ProgrammaticUpdateManager.end(100);
+        ProgrammaticUpdateManager.end();
       });
     }
     async function fetchUsers(query = '') {
@@ -5053,62 +5253,64 @@
       });
       socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
-  
   // ❌ Fixed: Validate alert structure before processing
   if (!alert || !alert._id || !alert.location || !Array.isArray(alert.location.coordinates) || alert.location.coordinates.length < 2 || !alert.type) {
     console.error('Invalid alert structure received via Socket.IO:', alert);
     return;
   }
-  
   const alertId = alert._id;
   const isTrafficCamera = alert.type === 'Traffic Camera';
-  
   // Skip if filtered out
   if (isTrafficCamera && !showTrafficCameras) {
     console.log('Skipping traffic camera alert: disabled in settings');
     return;
   }
-  const filterKey = alert.type.toLowerCase().replace(' ', '-');
+  const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
   if (navState.alertFilters[filterKey] === false) {
     console.log('Skipping filtered alert:', filterKey);
     return;
   }
-  
-  // Dedupe in currentAlerts
-  if (!currentAlerts.some(a => a._id === alertId)) {
-    currentAlerts.push(alert);
-    displayAlertsInHud(currentAlerts);
-    console.log('Added alert to currentAlerts via socket:', alertId);
+  if (!isDuplicateAlert(alert)) {
+    // Dedupe in currentAlerts
+    if (!currentAlerts.some(a => a._id === alertId)) {
+      currentAlerts.push(alert);
+      displayAlertsInHud(currentAlerts);
+      console.log('Added alert to currentAlerts via socket:', alertId);
+    } else {
+      console.log('Alert already in currentAlerts, skipping push:', alertId);
+    }
+    // Dedupe marker creation
+    if (!markers.has(alertId)) {
+      const marker = new google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
+        content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+        title: `${alert.type} Alert`
+      });
+      markers.set(alertId, marker);
+      console.log('Created marker for socket alert:', alertId);
+    } else {
+      console.log('Marker already exists for socket alert, skipping creation:', alertId);
+    }
+    if (isTrafficCamera) {
+      cameraPositions.push({
+        lat: alert.location.coordinates[1],
+        lng: alert.location.coordinates[0]
+      });
+    } else if (navState.isNavigating) {
+      checkHazardsAndOfferReroute();
+    }
+    showToast(`New ${alert.type} alert received.`);
   } else {
-    console.log('Alert already in currentAlerts, skipping push:', alertId);
+    console.log('Duplicate alert ignored via cache:', alertId);
   }
-  
-  // Dedupe marker creation
-  if (!markers.has(alertId)) {
-    const marker = new google.maps.marker.AdvancedMarkerElement({
-      map,
-      position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
-      content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-      title: `${alert.type} Alert`
-    });
-    markers.set(alertId, marker);
-    console.log('Created marker for socket alert:', alertId);
-  } else {
-    console.log('Marker already exists for socket alert, skipping creation:', alertId);
-  }
-  
-  if (isTrafficCamera) {
-    cameraPositions.push({
-      lat: alert.location.coordinates[1],
-      lng: alert.location.coordinates[0]
-    });
-  } else if (navState.isNavigating) {
-    checkHazardsAndOfferReroute();
-  }
-  
-  showToast(`New ${alert.type} alert received.`);
 });
       socket.on('alertDeleted', (alertId) => {
+        // Add validation:
+        if (!alertId || typeof alertId !== 'string') {
+          console.error('Invalid alertDeleted event:', alertId);
+          return;
+        }
         console.log('Alert deleted via Socket.IO:', alertId);
         const marker = markers.get(alertId);
         if (marker) {
@@ -5131,6 +5333,11 @@
         showToast('Alert removed.');
       });
       socket.on('extendAlert', (alertId) => {
+        // Same here - validate before processing
+        if (!alertId || typeof alertId !== 'string') {
+          console.error('Invalid extendAlert event:', alertId);
+          return;
+        }
         console.log('Alert duration extended:', alertId);
         showToast('Alert duration extended.');
       });
