@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v14';  // Bumped to v14 for auth refresh integration & frontend tweaks
+const CACHE_NAME = 'gps-app-cache-v15';  // Bumped to v14 for auth refresh integration & frontend tweaks
 
 const urlsToCache = [
   '/',
