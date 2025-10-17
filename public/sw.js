@@ -1,14 +1,14 @@
-const CACHE_NAME = 'gps-app-cache-v13';  // Bumped to v10 for index.html updates (camera logic, heading smoothing, etc.)
+const CACHE_NAME = 'gps-app-cache-v14';  // Bumped to v14 for auth refresh integration & frontend tweaks
 
 const urlsToCache = [
   '/',
   '/index.html',
-  '/manifest.json',  // Added: For PWA offline support
+  '/manifest.json',  // For PWA offline support
   '/sw.js',
   '/favicon.ico',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',  // Added ?v=1.0.3 to match index.html
-  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',  // Added ?v=1.0.3 to match index.html
-  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3'  // Added ?v=1.0.3 to match index.html
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
+  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
+  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3'
 ];
 
 self.addEventListener('install', event => {
@@ -16,7 +16,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Caching assets for v9 (includes updated index.html & manifest):', urlsToCache);
+        console.log('Caching assets for v14 (auth refresh & frontend updates):', urlsToCache);
         return cache.addAll(urlsToCache);
       })
       .catch(error => {
@@ -46,11 +46,18 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   
+  // Skip cache for dynamic API & real-time (includes auth endpoints like /auth/refresh)
   if (url.pathname.startsWith('/api/') || url.pathname.includes('socket.io')) {
     event.respondWith(
       fetch(event.request).catch(error => {
-        console.error('API fetch failed:', error, 'URL:', event.request.url);
-        return new Response(JSON.stringify({ error: 'Network unavailable' }), {
+        console.error('API fetch failed (check auth/token):', error, 'URL:', event.request.url);
+        // Enhanced: Provide a more specific offline message for auth-related paths
+        const isAuthPath = url.pathname.startsWith('/api/auth');
+        return new Response(JSON.stringify({ 
+          error: 'Network unavailable', 
+          offline: true, 
+          suggest: isAuthPath ? 'Reconnect and refresh token' : 'Check connection' 
+        }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -59,40 +66,50 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  // Handle document requests (e.g., index.html) with network-first, cache fallback
   if (event.request.destination === 'document' || url.pathname === '/' || url.pathname.includes('index.html')) {
     event.respondWith(
       fetch(event.request)
         .then(networkResponse => {
-          // Minor tweak: Add MIME type check for security (optional, but good practice)
           if (networkResponse && networkResponse.status === 200 && networkResponse.headers.get('content-type')?.includes('text/html')) {
             const responseToCache = networkResponse.clone();
             caches.open(CACHE_NAME).then(cache => {
               cache.put(event.request, responseToCache);
             });
           } else {
-            console.warn('Network response invalid for document:', networkResponse ? networkResponse.status : 'No response', 'MIME:', networkResponse?.headers.get('content-type'));  // Enhanced logging
+            console.warn('Network response invalid for document:', networkResponse ? networkResponse.status : 'No response', 'MIME:', networkResponse?.headers.get('content-type'));
           }
           return networkResponse;
         })
         .catch(() => {
-          console.log('Serving cached index.html for:', url.pathname);
-          return caches.match('/index.html') || new Response('Offline page unavailable', { status: 503 });
+          console.log('Serving cached index.html for offline:', url.pathname);
+          return caches.match('/index.html') || new Response(`
+            <!DOCTYPE html>
+            <html><head><title>Offline</title></head><body>
+              <h1>You're offline</h1>
+              <p>Reconnect to access the app. Cached content available.</p>
+              <script>if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(() => location.reload());</script>
+            </body></html>
+          `, { 
+            status: 503,
+            headers: { 'Content-Type': 'text/html' }
+          });
         })
     );
     return;
   }
 
+  // Default: Cache-first with network update
   event.respondWith(
     caches.open(CACHE_NAME).then(cache => {
       return cache.match(event.request).then(cachedResponse => {
         const fetchPromise = fetch(event.request).then(networkResponse => {
-          // Minor tweak: Only cache if basic response and valid status (prevents caching errors)
           if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
             cache.put(event.request, networkResponse.clone());
           }
           return networkResponse;
         }).catch(() => {
-          console.log('Network fetch failed for:', url.pathname);
+          console.log('Network fetch failed, using cache for:', url.pathname);
           return cachedResponse;
         });
         return cachedResponse || fetchPromise;
