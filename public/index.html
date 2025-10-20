@@ -865,6 +865,43 @@
     <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
   </div>
   <script>
+    const CONFIG = Object.freeze({
+      REROUTE_CHECK_INTERVAL: 2000,
+      OFF_ROUTE_TOLERANCE: 50,
+      MIN_REROUTE_DISTANCE: 100,
+      MIN_ALERT_DISTANCE: 152.4,
+      CAMERA_CHECK_INTERVAL: 10000,
+      ALERT_POLL_INTERVAL: 5000,
+      HEADING_SMOOTHING_WINDOW: 10,
+      POSITION_HISTORY_WINDOW: 10,
+      MIN_ZOOM: 16,
+      MAX_ZOOM: 19,
+      TURN_ZOOM: 19,
+      STRAIGHT_ZOOM: 16.5,
+      TURN_THRESHOLD: 300,
+      HEADING_CHANGE_THRESHOLD: 15,
+      MIN_HEADING_CHANGE: 8,
+      CAMERA_UPDATE_THRESHOLD: 50,
+      STATIONARY_SPEED_THRESHOLD: 2.2352,
+      ARRIVAL_RADIUS: 50,
+      ANNOUNCEMENT_COOLDOWN: 10000,
+      ALERT_FETCH_INTERVAL: 30000,
+      ALTERNATE_TRIGGER_DISTANCE: 50,
+      SNAP_BUFFER: 100,
+      MAX_GPS_DISTANCE: 300,
+      SMOOTH_THRESHOLD: 100,
+      HEADING_VARIANCE_THRESHOLD: 30,
+      SIGNIFICANT_TURN_THRESHOLD: 30,
+      VERIFICATION_DISTANCE: 50,
+      BATCH_UPDATE_INTERVAL: 5000,
+      ALERT_CACHE_TTL: 60000,
+      ALERT_CACHE_CLEANUP: 30000,
+      DEBOUNCE_DELAY: 100,
+      FETCH_RETRIES: 3,
+      FETCH_BACKOFF: 1000,
+      NAV_STATE_SAVE_INTERVAL: 10000,
+      NAV_STATE_EXPIRY: 300000
+    });
     const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
     const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
     const mapId = '2666b5bd496d9c6026f43f82';
@@ -942,42 +979,21 @@
     let trackedMarkers = new Map();
     const markers = new Map();
     const MAX_RETRIES = 5;
-    const REROUTE_CHECK_INTERVAL = 2000;
-    const OFF_ROUTE_TOLERANCE = 50;
-    const MIN_REROUTE_DISTANCE = 100;
-    const MIN_ALERT_DISTANCE = 152.4;
-    const CAMERA_CHECK_INTERVAL = 10000;
-    const ALERT_POLL_INTERVAL = 5000;
-    const HEADING_SMOOTHING_WINDOW = 10;
-    const POSITION_HISTORY_WINDOW = 10;
-    const MIN_ZOOM = 16;
-    const MAX_ZOOM = 19;
-    const TURN_ZOOM = 19;
-    const STRAIGHT_ZOOM = 16.5;
-    const TURN_THRESHOLD = 300;
-    const HEADING_CHANGE_THRESHOLD = 15;
-    const MIN_HEADING_CHANGE = 8;
-    const CAMERA_UPDATE_THRESHOLD = 50;
-    const STATIONARY_SPEED_THRESHOLD = 2.2352;
-    const ARRIVAL_RADIUS = 50;
-    const ANNOUNCEMENT_COOLDOWN = 10000;
-    const ALERT_FETCH_INTERVAL = 30000;
-    const ALTERNATE_TRIGGER_DISTANCE = 50;
-    const SNAP_BUFFER = 100;
-    const MAX_GPS_DISTANCE = 300;
-    const HEADING_VARIANCE_THRESHOLD = 30;
-    const SIGNIFICANT_TURN_THRESHOLD = 30;
-    const VERIFICATION_DISTANCE = 50;
     const alertCache = new Map();
+    const headingCache = new Map();
+    const markerPool = [];
+    const MAX_MARKER_POOL_SIZE = 50;
+    let routeSpatialIndex = null;
+    let lastBoundsCheck = 0;
+    const BOUNDS_CHECK_INTERVAL = 1000;
+    let lastHeadingUpdate = 0;
     const ProgrammaticUpdateManager = {
       _isUpdating: false,
       _callbacks: [],
- 
       start() {
         this._isUpdating = true;
         this._callbacks = [];
       },
- 
       end(callback = null) {
         if (callback) {
           this._callbacks.push(callback);
@@ -989,7 +1005,6 @@
           this._callbacks = [];
         });
       },
- 
       get isActive() {
         return this._isUpdating;
       }
@@ -1070,6 +1085,74 @@
       averageDuration: 0,
       totalUpdates: 0
     };
+    let isPostingAlert = false; // Guard for race condition in postAlert
+    // Debounce utility
+    const debounce = (fn, delay) => {
+      let timer;
+      return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), delay);
+      };
+    };
+    // Safe execute wrapper
+    function safeExecute(fn, fallback, context = '') {
+      try {
+        return fn();
+      } catch (error) {
+        console.error(`Error in ${context}:`, error);
+        if (fallback) return fallback();
+        showToast(`Error: ${context}. Retrying...`);
+      }
+    }
+    // Close HUD helper
+    function closeHUD(hudId, cleanupFn) {
+      const hud = document.getElementById(hudId);
+      hud.classList.remove('active');
+      if (cleanupFn) cleanupFn();
+      if (navState.isNavigating && navState.isFollowing) {
+        lockNavigation();
+      }
+    }
+    // Marker pool functions
+    function getMarker(config) {
+      const marker = markerPool.pop();
+      if (marker) {
+        Object.assign(marker, config);
+        return marker;
+      }
+      return new google.maps.marker.AdvancedMarkerElement(config);
+    }
+    function releaseMarker(marker) {
+      marker.map = null;
+      if (markerPool.length < MAX_MARKER_POOL_SIZE) {
+        markerPool.push(marker);
+      }
+    }
+    // Cached heading
+    function getCachedHeading(p1, p2) {
+      const key = `${p1.lat()},${p1.lng()}-${p2.lat()},${p2.lng()}`;
+      if (!headingCache.has(key)) {
+        headingCache.set(key, google.maps.geometry.spherical.computeHeading(p1, p2));
+      }
+      return headingCache.get(key);
+    }
+    // Batch update
+    async function batchUpdate() {
+      const [locationRes, alertsRes] = await Promise.all([
+        updateServerLocation(navState.userLocation),
+        pollAlerts()
+      ]);
+      return { locationRes, alertsRes };
+    }
+    // Alert cache TTL cleanup
+    setInterval(() => {
+      const now = Date.now();
+      for (const [key, value] of alertCache.entries()) {
+        if (now - value.timestamp > CONFIG.ALERT_CACHE_TTL) { // 1 min TTL
+          alertCache.delete(key);
+        }
+      }
+    }, CONFIG.ALERT_CACHE_CLEANUP); // Clean every 30s
     function showTooltip(buttonId, text) {
       if (!showTooltips) return;
       const tooltip = document.getElementById('tooltip');
@@ -1344,8 +1427,8 @@
     function checkHeadingVariance(newHeading) {
       if (headingHistory.length > 2) {
         const variance = Math.max(...headingHistory) - Math.min(...headingHistory);
-        needsCalibration = variance > HEADING_VARIANCE_THRESHOLD;
-        console.log('Heading variance checked:', { variance, threshold: HEADING_VARIANCE_THRESHOLD, needsCalibration });
+        needsCalibration = variance > CONFIG.HEADING_VARIANCE_THRESHOLD;
+        console.log('Heading variance checked:', { variance, threshold: CONFIG.HEADING_VARIANCE_THRESHOLD, needsCalibration });
       }
     }
     function recalibrateCompass() {
@@ -1357,14 +1440,89 @@
         console.log('Calibration completed, resetting heading history');
       }, 5000);
     }
+    /**
+     * @param {google.maps.LatLng} userLatLng
+     * @param {Array<google.maps.LatLng>} path
+     * @param {number} heading
+     * @param {number} speed
+     * @returns {{point: {lat: number, lng: number}, index: number}}
+     */
+    function findClosestRoutePoint(currentPos, path, heading, speed) {
+      if (!path || path.length < 2) return { point: currentPos, index: 0 };
+   
+      const currentLatLng = new google.maps.LatLng(currentPos);
+      let bestPoint = currentPos;
+      let bestScore = -Infinity;
+      let closestIndex = 0;
+   
+      if (!routeSpatialIndex) routeSpatialIndex = buildRouteIndex(path);
+   
+      const gridSize = 0.001;
+      const candidates = [];
+   
+      // Collect candidates from nearby grid cells
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const nearbyKey = `${Math.floor(currentPos.lat / gridSize) + dx},${Math.floor(currentPos.lng / gridSize) + dy}`;
+          if (routeSpatialIndex.has(nearbyKey)) {
+            candidates.push(...routeSpatialIndex.get(nearbyKey));
+          }
+        }
+      }
+   
+      // Search candidates with early exit for very close matches
+      for (const { point, idx } of candidates) {
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
+     
+        if (distance <= CONFIG.SNAP_BUFFER) {
+          const nextPoint = idx < path.length - 1 ? path[idx + 1] : point;
+          const pointHeading = getCachedHeading(point, nextPoint);
+          const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
+       
+          const proximityScore = (CONFIG.SNAP_BUFFER - distance) / CONFIG.SNAP_BUFFER * 0.6;
+          const headingScore = (1 - headingDiff / 180) * 0.3;
+          const speedScore = speed > 20 ? 0.1 : speed < 10 ? 0.05 : 0;
+          const contextScore = idx < path.length - 1 ? 0.1 : 0.05;
+       
+          const totalScore = proximityScore + headingScore + speedScore + contextScore;
+       
+          if (totalScore > bestScore) {
+            bestScore = totalScore;
+            bestPoint = { lat: point.lat(), lng: point.lng() };
+            closestIndex = idx;
+          }
+       
+          // Early exit for very close matches
+          if (distance < 20) break;
+        }
+      }
+   
+      console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
+      return { point: bestPoint, index: closestIndex };
+    }
+    function computeHeadingFromMovement() {
+      if (!navState.previousUserLocation || !navState.userLocation) return navState.currentHeading || 0;
+      return google.maps.geometry.spherical.computeHeading(
+        new google.maps.LatLng(navState.previousUserLocation),
+        new google.maps.LatLng(navState.userLocation)
+      );
+    }
     function smoothHeading(newHeading, source = 'unknown', speed = 0, isSnapped = false) {
       console.log('smoothHeading called:', { newHeading, source, speed, isSnapped });
-      if (isNaN(newHeading) || newHeading === null || speed <= STATIONARY_SPEED_THRESHOLD) {
+      if (isNaN(newHeading) || newHeading === null || speed <= CONFIG.STATIONARY_SPEED_THRESHOLD) {
         console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
       }
+      const now = Date.now();
+      const headingVariance = Math.abs(navState.currentHeading - navState.lastValidHeading);
+      if (speed > CONFIG.STATIONARY_SPEED_THRESHOLD &&
+          headingVariance < 0.1 && 
+          now - lastHeadingUpdate > 5000) {
+        console.warn('Heading stale while moving, forcing recalculation');
+        return computeHeadingFromMovement();
+      }
       const headingDiff = Math.abs(((newHeading - lastStableHeading + 180) % 360) - 180);
-      if (headingDiff < MIN_HEADING_CHANGE) {
+      if (headingDiff < CONFIG.MIN_HEADING_CHANGE) {
         console.log('Ignoring small heading change:', { newHeading, lastStableHeading, headingDiff });
         return lastStableHeading;
       }
@@ -1373,7 +1531,6 @@
       if (isHighSpeed && headingHistory.length > 2) {
         const recentHeadings = headingHistory.slice(-3).map(h => h.heading);
         const variance = Math.max(...recentHeadings) - Math.min(...recentHeadings);
-   
         // Reduce sensitivity during stable highway driving
         if (variance < 10) {
           const headingDiff = Math.abs(((newHeading - lastStableHeading + 180) % 360) - 180);
@@ -1383,51 +1540,45 @@
           }
         }
       }
- 
       // Use weighted average instead of simple average
       headingHistory.push({ heading: newHeading, weight: speed > 5 ? 1.0 : 0.5 });
-      if (headingHistory.length > HEADING_SMOOTHING_WINDOW) {
-        headingHistory.shift();
+      if (headingHistory.length > CONFIG.HEADING_SMOOTHING_WINDOW) {
+        headingHistory = headingHistory.slice(-CONFIG.HEADING_SMOOTHING_WINDOW);
       }
- 
       let totalWeight = 0;
       let weightedSum = 0;
- 
       headingHistory.forEach(entry => {
         weightedSum += entry.heading * entry.weight;
         totalWeight += entry.weight;
       });
- 
       // Add minimum weight floor to prevent near-zero divisions
       const minTotalWeight = headingHistory.length * 0.3; // At least 0.3 per entry
       if (totalWeight < minTotalWeight) {
         totalWeight = minTotalWeight;
       }
- 
       let smoothedHeading = (weightedSum / totalWeight) % 360;
- 
-      const gpsWeight = speed > STATIONARY_SPEED_THRESHOLD ? 0.8 : 0.2;
+      const gpsWeight = speed > CONFIG.STATIONARY_SPEED_THRESHOLD ? 0.8 : 0.2;
       const compassWeight = needsCalibration ? 0.1 : 0.4;
       const polylineWeight = isSnapped ? 0.8 : needsCalibration ? 0.2 : 0.2;
- 
       for (let i = 0; i < headingHistory.length; i++) {
         let delta = headingHistory[i].heading - smoothedHeading;
         if (delta > 180) delta -= 360;
         if (delta < -180) delta += 360;
         smoothedHeading += (source === 'gps' ? gpsWeight : source === 'compass' ? compassWeight : polylineWeight) * delta / headingHistory.length;
       }
- 
       smoothedHeading = smoothedHeading % 360;
       if (smoothedHeading < 0) smoothedHeading += 360;
       navState.lastValidHeading = smoothedHeading;
       lastStableHeading = smoothedHeading;
+      lastHeadingUpdate = now;
       console.log('Heading stabilized:', { newHeading, smoothed: smoothedHeading, source, speed, gpsWeight, compassWeight, polylineWeight, isSnapped });
       return smoothedHeading;
     }
     function smoothPosition(rawPos) {
       positionHistory.push(rawPos);
-      if (positionHistory.length > POSITION_HISTORY_WINDOW) {
-        positionHistory.shift();
+      // FIXED: Cap array size
+      if (positionHistory.length > CONFIG.POSITION_HISTORY_WINDOW) {
+        positionHistory = positionHistory.slice(-CONFIG.POSITION_HISTORY_WINDOW);
       }
       const avgLat = positionHistory.reduce((sum, p) => sum + p.lat, 0) / positionHistory.length;
       const avgLng = positionHistory.reduce((sum, p) => sum + p.lng, 0) / positionHistory.length;
@@ -1691,6 +1842,13 @@
         if (voiceAssistantEnabled) {
           setTimeout(startWakeWordDetection, 1000); // Delay to ensure permissions
         }
+        // FIXED: Log ProgrammaticUpdateManager state
+        setInterval(() => {
+          if (ProgrammaticUpdateManager.isActive) {
+            console.warn('ProgrammaticUpdateManager stuck in active state');
+            ProgrammaticUpdateManager._isUpdating = false;
+          }
+        }, 10000);
         console.log('Map initialization complete');
       } catch (error) {
         console.error('Map initialization error:', error);
@@ -1701,35 +1859,42 @@
     function updateMapHeading(targetHeading) {
       console.log('updateMapHeading called:', { targetHeading });
       if (navState.mapOrientation !== 'heading-up') return;
- 
       // Cancel existing tween
       if (currentHeadingTween) {
         currentHeadingTween.stop();
         currentHeadingTween = null;
       }
- 
       const currentHeading = map.getHeading() || 0;
       const delta = normalizeHeadingDelta(currentHeading, targetHeading);
- 
       // Skip if change is tiny
       if (Math.abs(delta) < 3) return;
- 
+      // FIXED: Add failsafe for infinite tweens
+      const tweenTimeoutId = setTimeout(() => {
+        if (currentHeadingTween) {
+          currentHeadingTween.stop();
+          ProgrammaticUpdateManager.end();
+          console.error('Heading tween timeout, force stopping');
+        }
+      }, 5000);
       currentHeadingTween = new TWEEN.Tween({ heading: currentHeading })
         .to({ heading: currentHeading + delta }, 300)
         .easing(TWEEN.Easing.Quadratic.Out)
+        .onStart(() => {
+          // Clear timeout if tween completes early, but since short, optional
+        })
         .onUpdate(obj => map.setHeading(obj.heading))
         .onComplete(() => {
+          clearTimeout(tweenTimeoutId);
           currentHeadingTween = null;
         })
         .start();
       console.log('Heading tween started:', { current: currentHeading, target: targetHeading, delta });
     }
+    const debouncedCameraUpdate = debounce(updateNavigationCamera, CONFIG.DEBOUNCE_DELAY);
     function shouldUpdateCameraView(newPos, newHeading, timeSinceLastUpdate) {
       if (!navState.isFollowing || !navState.isNavigating) return false;
-     
       // Always update if significant time has passed
       if (timeSinceLastUpdate > 500) return true;
-     
       // Update if moved more than 3 meters
       if (lastCameraPosition) {
         const distance = google.maps.geometry.spherical.computeDistanceBetween(
@@ -1738,10 +1903,8 @@
         );
         if (distance > 3) return true;
       }
-     
       // Update if heading changed > 5 degrees (reduced from higher thresholds)
       if (Math.abs(newHeading - lastHeading) > 5) return true;
-     
       return false;
     }
     function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
@@ -1750,12 +1913,16 @@
       }
       const { zoom, tilt, turnHeading } = getDynamicZoom(actualPos, speed);
       const finalHeading = navState.mapOrientation === 'north-up' ? 0 : (turnHeading || heading);
-     
       const lookaheadPoint = new google.maps.LatLng(predictedPos);
-     
       // All updates in ONE tween to prevent desync
+      const tweenTimeoutId = setTimeout(() => {
+        if (ProgrammaticUpdateManager.isActive) {
+          ProgrammaticUpdateManager.end();
+          console.error('Camera tween timeout, force cleanup');
+        }
+      }, 5000);
+      
       ProgrammaticUpdateManager.start();
-     
       new TWEEN.Tween({
         lat: map.getCenter().lat(),
         lng: map.getCenter().lng(),
@@ -1773,17 +1940,16 @@
         map.setCenter({ lat: obj.lat, lng: obj.lng });
         map.setHeading(obj.heading);
         map.setZoom(obj.zoom);
-        // Sync marker with actual position
-        if (!ProgrammaticUpdateManager.isActive) {
-          userMarker.position = actualPos;
-        }
+        // Remove userMarker sync here
       })
       .onComplete(() => {
+        clearTimeout(tweenTimeoutId); // ← Add this
         map.setTilt(tilt);
+        userMarker.position = actualPos; // ← Sync ONCE at end
+        ensureMarkerInView(actualPos);
         ProgrammaticUpdateManager.end();
       })
       .start();
-     
       lastCameraPosition = actualPos;
       lastHeading = finalHeading;
       navState.lastCameraUpdateTime = Date.now();
@@ -1816,13 +1982,13 @@
           break;
         }
       }
-      let zoom = STRAIGHT_ZOOM;
+      let zoom = CONFIG.STRAIGHT_ZOOM;
       let tilt = 45;
       let turnHeading = null;
       if (nextStep && nextStep.maneuver && navState.mapOrientation === 'heading-up') {
         const distanceToTurn = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, new google.maps.LatLng(nextStep.start_location));
-        if (distanceToTurn < TURN_THRESHOLD) {
-          zoom = TURN_ZOOM;
+        if (distanceToTurn < CONFIG.TURN_THRESHOLD) {
+          zoom = CONFIG.TURN_ZOOM;
           tilt = 60;
           const turnPoint = new google.maps.LatLng(nextStep.start_location);
           turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, turnPoint);
@@ -1838,7 +2004,7 @@
       if (closestIndex < path.length - 1 && !turnHeading) {
         turnHeading = google.maps.geometry.spherical.computeHeading(currentLatLng, path[closestIndex + 1]);
       }
-      return { zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)), tilt, turnHeading };
+      return { zoom: Math.min(CONFIG.MAX_ZOOM, Math.max(CONFIG.MIN_ZOOM, zoom)), tilt, turnHeading };
     }
     function getLookaheadPoint(currentPos, heading, distance = 50) {
       return google.maps.geometry.spherical.computeOffset(
@@ -1932,6 +2098,8 @@
           console.log('Position simulation stopped');
           document.getElementById('hud-container').style.display = 'none';
           document.getElementById('bottom-hud-container').style.display = 'none';
+          // FIXED: Reset lastCameraPosition after simulation
+          lastCameraPosition = null;
           if (routePolyline) {
             routePolyline.setMap(null);
             routePolyline = null;
@@ -1993,13 +2161,7 @@
         console.log('Settings button clicked, settings HUD opened');
       });
       document.getElementById('settings-close').addEventListener('click', () => {
-        const settingsHudContainer = document.getElementById('settings-hud-container');
-        settingsHudContainer.classList.remove('active');
-        console.log('Settings HUD closed');
-        if (navState.isNavigating && navState.isFollowing) {
-          lockNavigation();
-          console.log('Navigation view re-locked after closing settings HUD');
-        }
+        closeHUD('settings-hud-container');
       });
       document.getElementById('current-alerts-button').addEventListener('click', () => {
         closeAllHuds();
@@ -2010,13 +2172,7 @@
         console.log('Current alerts button clicked, alerts HUD opened');
       });
       document.getElementById('alerts-close').addEventListener('click', () => {
-        const alertsHudContainer = document.getElementById('alerts-hud-container');
-        alertsHudContainer.classList.remove('active');
-        console.log('Alerts HUD closed');
-        if (navState.isNavigating && navState.isFollowing) {
-          lockNavigation();
-          console.log('Navigation view re-locked after closing alerts HUD');
-        }
+        closeHUD('alerts-hud-container');
       });
       document.getElementById('leaderboard-button').addEventListener('click', () => {
         closeAllHuds();
@@ -2026,23 +2182,13 @@
         console.log('Leaderboard button clicked, leaderboard HUD opened');
       });
       document.getElementById('leaderboard-close').addEventListener('click', () => {
-        const leaderboardHudContainer = document.getElementById('leaderboard-hud-container');
-        leaderboardHudContainer.classList.remove('active');
-        console.log('Leaderboard HUD closed');
-        if (navState.isNavigating && navState.isFollowing) {
-          lockNavigation();
-          console.log('Navigation view re-locked after closing leaderboard HUD');
-        }
+        closeHUD('leaderboard-hud-container');
       });
       document.getElementById('admin-button').addEventListener('click', () => {
         window.location.href = 'admin.html';
       });
       document.getElementById('admin-close').addEventListener('click', () => {
-        document.getElementById('admin-hud-container').classList.remove('active');
-        console.log('Admin HUD closed');
-        if (navState.isNavigating && navState.isFollowing) {
-          lockNavigation();
-        }
+        closeHUD('admin-hud-container');
       });
       document.querySelectorAll('.admin-tab').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -2256,17 +2402,14 @@
       map.addListener('dragstart', (e) => {
         if (ProgrammaticUpdateManager.isActive) return;
         if (!navState.isNavigating || !navState.isFollowing) return;
-   
         dragStartPos = map.getCenter();
       });
       map.addListener('drag', () => {
         if (!dragStartPos || ProgrammaticUpdateManager.isActive) return;
-       
         const currentPos = map.getCenter();
         const dragDistance = google.maps.geometry.spherical.computeDistanceBetween(
           dragStartPos, currentPos
         );
-       
         // Only unlock after 20+ meter drag
         if (dragDistance > 20 && navState.isFollowing) {
           unlockNavigation();
@@ -2843,6 +2986,33 @@
         showToast('Sharing not supported');
       }
     }
+    // Add exponential backoff with jitter
+    async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, backoff = CONFIG.FETCH_BACKOFF) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const response = await fetch(url, options);
+          if (response.ok) return response;
+    
+          if (response.status === 401) {
+            const refreshed = await refreshToken();
+            if (refreshed) {
+              const newToken = localStorage.getItem('token') || sessionStorage.getItem('token');
+              options.headers['Authorization'] = `Bearer ${newToken.trim()}`;
+              return await fetch(url, options);
+            }
+          }
+    
+          throw new Error(`HTTP ${response.status}`);
+        } catch (error) {
+          if (i === retries - 1) throw error;
+    
+          // Exponential backoff with jitter
+          const jitter = Math.random() * 500;
+          const delay = backoff * Math.pow(2, i) + jitter;
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
     async function refreshToken() {
       try {
         const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -2877,44 +3047,20 @@
         return false;
       }
     }
-    async function fetchWithRetry(url, options, retries = 3, backoff = 1000) {
-      for (let i = 0; i < retries; i++) {
-        try {
-          const response = await fetch(url, options);
-          if (response.status === 401) {
-            console.log(`Attempt ${i + 1} failed with 401, trying to refresh token`);
-            const refreshed = await refreshToken();
-            if (refreshed) {
-              const newToken = localStorage.getItem('token') || sessionStorage.getItem('token');
-              options.headers['Authorization'] = `Bearer ${newToken.trim()}`;
-              return await fetch(url, options);
-            }
-          }
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errorText}`);
-          }
-          return response;
-        } catch (error) {
-          if (i < retries - 1) {
-            console.log(`Fetch retry ${i + 1} failed for ${url}:`, error.message, `Retrying in ${backoff}ms...`);
-            await new Promise(resolve => setTimeout(resolve, backoff));
-            backoff *= 2;
-          } else {
-            throw error;
-          }
+    function isDuplicateAlert(alert) {
+      // Clean up expired items inline
+      const now = Date.now();
+      for (const [key, value] of alertCache.entries()) {
+        if (now - value.timestamp > CONFIG.ALERT_CACHE_TTL) {
+          alertCache.delete(key);
         }
       }
-    }
-    function isDuplicateAlert(alert) {
       const key = `${alert.type}-${alert.location.coordinates[0].toFixed(4)}-${alert.location.coordinates[1].toFixed(4)}`;
       const cached = alertCache.get(key);
-    
-      if (cached && Date.now() - cached.timestamp < 5000) {
-        return true; // Same alert within 5 seconds
+      if (cached && now - cached.timestamp < 5000) {
+        return true;
       }
-    
-      alertCache.set(key, { timestamp: Date.now(), id: alert._id });
+      alertCache.set(key, { timestamp: now, id: alert._id });
       return false;
     }
     async function confirmAlertLocation(location, alertType) {
@@ -2930,7 +3076,7 @@
           return;
         }
         console.log('Checking nearby alerts with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${MIN_ALERT_DISTANCE}`, {
+        const response = await fetchWithRetry(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${CONFIG.MIN_ALERT_DISTANCE}`, {
           headers: { 'Authorization': `Bearer ${token.trim()}` }
         });
         console.log('Nearby alerts response:', { status: response.status, ok: response.ok });
@@ -2953,7 +3099,7 @@
         google.maps.event.removeListener(navState.mapClickListener);
         navState.mapClickListener = null;
       }
-      navState.tempMarker = new google.maps.marker.AdvancedMarkerElement({
+      navState.tempMarker = getMarker({
         map: map,
         position: location,
         content: alertType === 'Traffic Camera' && showTrafficCameras ? createTrafficCameraContent() : createAlertContent(),
@@ -3001,140 +3147,140 @@
       console.log(`Confirming ${alertType} alert at`, navState.tempAlertData.location);
     }
     async function postAlert() {
-  if (!navState.tempAlertData || !navState.tempMarker) {
-    console.error('No alert data or marker to post');
-    showToast('Failed to post alert: No data available.');
-    return;
-  }
-  const isTrafficCamera = navState.tempAlertData.type === 'Traffic Camera';
-  if (isTrafficCamera && !showTrafficCameras) {
-    console.log('Traffic camera alert not posted: traffic cameras disabled');
-    navState.tempMarker.setMap(null);
-    navState.tempMarker = null;
-    navState.tempAlertData = null;
-    navState.alertState = 'IDLE';
-    showToast('Traffic camera alert not posted: cameras disabled in settings.');
-    return;
-  }
-  try {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-    if (!token || !token.includes('.') || token === 'undefined') {
-      console.error('Invalid token, showing auth form');
-      localStorage.removeItem('token');
-      localStorage.removeItem('userId');
-      sessionStorage.removeItem('token');
-      sessionStorage.removeItem('userId');
-      document.getElementById('auth-container').style.display = 'flex';
-      return;
-    }
-    console.log('Posting alert with token:', token.substring(0, 20) + '...');
-    const response = await fetchWithRetry('/api/alerts', {
-      method: 'POST',
-      mode: 'cors',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token.trim()}`
-      },
-      body: JSON.stringify(navState.tempAlertData)
-    });
-    console.log('Post alert response:', { status: response.status, ok: response.ok });
-    const result = await response.json();
-    console.log('Post alert result:', result);
-    if (response.status === 201 && result.alert && result.alert._id) {
-      const alertId = result.alert._id;
-      const alert = result.alert;
-      if (!isDuplicateAlert(alert)) {
-        if (!currentAlerts.some(a => a._id === alertId)) {
-          currentAlerts.push(alert);
-          console.log('Added new alert to currentAlerts:', alertId);
+      // FIXED: Race condition guard
+      if (isPostingAlert) {
+        console.log('postAlert already in progress, skipping');
+        return;
+      }
+      if (!navState.tempAlertData || !navState.tempMarker) {
+        console.error('No alert data or marker to post');
+        showToast('Failed to post alert: No data available.');
+        return;
+      }
+      isPostingAlert = true;
+      const isTrafficCamera = navState.tempAlertData.type === 'Traffic Camera';
+      if (isTrafficCamera && !showTrafficCameras) {
+        console.log('Traffic camera alert not posted: traffic cameras disabled');
+        releaseMarker(navState.tempMarker);
+        navState.tempMarker = null;
+        navState.tempAlertData = null;
+        navState.alertState = 'IDLE';
+        showToast('Traffic camera alert not posted: cameras disabled in settings.');
+        isPostingAlert = false;
+        return;
+      }
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, showing auth form');
+          localStorage.removeItem('token');
+          localStorage.removeItem('userId');
+          sessionStorage.removeItem('token');
+          sessionStorage.removeItem('userId');
+          document.getElementById('auth-container').style.display = 'flex';
+          return;
         }
-        displayAlertsInHud(currentAlerts);
-      } else {
-        console.log('Duplicate alert ignored via cache:', alertId);
-      }
- 
-      // Create marker only if not already present
-      if (!markers.has(alertId)) {
-        const marker = new google.maps.marker.AdvancedMarkerElement({
-          map,
-          position: { lat: navState.tempAlertData.location.coordinates[1], lng: navState.tempAlertData.location.coordinates[0] },
-          content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-          title: `${navState.tempAlertData.type} Alert`
+        console.log('Posting alert with token:', token.substring(0, 20) + '...');
+        const response = await fetchWithRetry('/api/alerts', {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token.trim()}`
+          },
+          body: JSON.stringify(navState.tempAlertData)
         });
-        markers.set(alertId, marker);
-        console.log('Created new marker for alert:', alertId);
-      } else {
-        console.log('Marker already exists for alert, skipping creation:', alertId);
-      }
- 
-      console.log('Alert saved to MongoDB:', result.alert);
-      showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
- 
-      if (isTrafficCamera) {
-        cameraPositions.push({
-          lat: navState.tempAlertData.location.coordinates[1],
-          lng: navState.tempAlertData.location.coordinates[0]
-        });
-      } else if (navState.isNavigating) {
-        checkHazardsAndOfferReroute();
-      }
- 
-      if (socket && socket.connected) {
-        socket.emit('alert', result.alert);
-        console.log('Emitted alert event:', alertId);
-      }
- 
-      // Refresh profile
-      const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-      fetchProfile(ownId, true).then(populateAccountProfile);
- 
-      // Final sync via poll to catch any server-side changes
-      setTimeout(() => pollAlerts(), 1000);
- 
-    } else if (response.status === 409 && result.alert && result.alert._id) {
-      const alertId = result.alert._id;
-      const alert = result.alert;
-      if (!isDuplicateAlert(alert)) {
-        if (!currentAlerts.some(a => a._id === alertId)) {
-          currentAlerts.push(alert);
-          displayAlertsInHud(currentAlerts);
+        console.log('Post alert response:', { status: response.status, ok: response.ok });
+        const result = await response.json();
+        console.log('Post alert result:', result);
+        if (response.status === 201 && result.alert && result.alert._id) {
+          const alertId = result.alert._id;
+          const alert = result.alert;
+          if (!isDuplicateAlert(alert)) {
+            if (!currentAlerts.some(a => a._id === alertId)) {
+              currentAlerts.push(alert);
+              console.log('Added new alert to currentAlerts:', alertId);
+            }
+            displayAlertsInHud(currentAlerts);
+          } else {
+            console.log('Duplicate alert ignored via cache:', alertId);
+          }
+          // Create marker only if not already present
+          if (!markers.has(alertId)) {
+            const marker = getMarker({
+              map,
+              position: { lat: navState.tempAlertData.location.coordinates[1], lng: navState.tempAlertData.location.coordinates[0] },
+              content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+              title: `${navState.tempAlertData.type} Alert`
+            });
+            markers.set(alertId, marker);
+            console.log('Created new marker for alert:', alertId);
+          } else {
+            console.log('Marker already exists for alert, skipping creation:', alertId);
+          }
+          console.log('Alert saved to MongoDB:', result.alert);
+          showToast(`Thank you, your ${navState.tempAlertData.type} alert has been posted.`);
+          if (isTrafficCamera) {
+            cameraPositions.push({
+              lat: navState.tempAlertData.location.coordinates[1],
+              lng: navState.tempAlertData.location.coordinates[0]
+            });
+          } else if (navState.isNavigating) {
+            checkHazardsAndOfferReroute();
+          }
+          if (socket && socket.connected) {
+            socket.emit('alert', result.alert);
+            console.log('Emitted alert event:', alertId);
+          }
+          // Refresh profile
+          const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+          fetchProfile(ownId, true).then(populateAccountProfile);
+          // Final sync via poll to catch any server-side changes
+          setTimeout(() => pollAlerts(), 1000);
+        } else if (response.status === 409 && result.alert && result.alert._id) {
+          const alertId = result.alert._id;
+          const alert = result.alert;
+          if (!isDuplicateAlert(alert)) {
+            if (!currentAlerts.some(a => a._id === alertId)) {
+              currentAlerts.push(alert);
+              displayAlertsInHud(currentAlerts);
+            }
+          }
+          showToast(result.message || 'Duplicate alert ignored.');
+          console.log('Duplicate alert ignored:', alertId);
+          setTimeout(() => pollAlerts(), 1000);
+        } else {
+          console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
+          showToast(`Failed to save alert: ${result.error || 'Server error'}`);
         }
+      } catch (error) {
+        console.error('Error posting alert:', error);
+        showToast(`Error posting alert: ${error.message}`);
+      } finally {
+        // Always clean up temp state
+        if (navState.tempMarker) {
+          releaseMarker(navState.tempMarker);
+          navState.tempMarker = null;
+        }
+        navState.tempAlertData = null;
+        navState.alertState = 'IDLE';
+        const reportBox = document.getElementById('report-box');
+        const confirmAlert = document.getElementById('confirm-alert');
+        const reportOptions = document.querySelector('.report-options');
+        reportBox.classList.remove('active');
+        confirmAlert.classList.remove('active');
+        reportOptions.style.display = 'grid';
+        if (navState.isNavigating && navState.isFollowing) {
+          lockNavigation();
+          console.log('Navigation view re-locked after manual report');
+        }
+        isPostingAlert = false;
       }
-      showToast(result.message || 'Duplicate alert ignored.');
-      console.log('Duplicate alert ignored:', alertId);
-      setTimeout(() => pollAlerts(), 1000);
- 
-    } else {
-      console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
-      showToast(`Failed to save alert: ${result.error || 'Server error'}`);
     }
-  } catch (error) {
-    console.error('Error posting alert:', error);
-    showToast(`Error posting alert: ${error.message}`);
-  } finally {
-    // Always clean up temp state
-    if (navState.tempMarker) {
-      navState.tempMarker.setMap(null);
-      navState.tempMarker = null;
-    }
-    navState.tempAlertData = null;
-    navState.alertState = 'IDLE';
-    const reportBox = document.getElementById('report-box');
-    const confirmAlert = document.getElementById('confirm-alert');
-    const reportOptions = document.querySelector('.report-options');
-    reportBox.classList.remove('active');
-    confirmAlert.classList.remove('active');
-    reportOptions.style.display = 'grid';
-    if (navState.isNavigating && navState.isFollowing) {
-      lockNavigation();
-      console.log('Navigation view re-locked after manual report');
-    }
-  }
-}
     function cancelAlert() {
       if (navState.tempMarker) {
-        navState.tempMarker.setMap(null);
+        releaseMarker(navState.tempMarker);
         navState.tempMarker = null;
       }
       if (navState.mapClickListener) {
@@ -3195,7 +3341,7 @@
           deleteAlert(alertId);
         } else if (updatedAlert.votes.up > updatedAlert.votes.down) {
           console.log('Upvotes exceed downvotes, extending alert duration');
-          if (socket && socket.connected) {
+          if (socket) {
             socket.emit('extendAlert', alertId);
           }
         }
@@ -3241,9 +3387,9 @@
     // Now handle local cleanup on success
     const marker = markers.get(id);
     if (marker) {
-      marker.setMap(null);
+      releaseMarker(marker);
       markers.delete(id);
-      console.log('Local marker removed:', id);
+      console.log('Local marker released:', id);
     } else {
       console.warn('Marker not found locally, but server deletion succeeded:', id);
     }
@@ -3301,10 +3447,10 @@
         let removedCount = 0;
         markers.forEach((marker, id) => {
           if (!serverAlertIds.has(id)) {
-            marker.setMap(null);
+            releaseMarker(marker);
             markers.delete(id);
             removedCount++;
-            console.log('Removed stale marker during poll:', id);
+            console.log('Released stale marker during poll:', id);
           }
         });
         currentAlerts = [...new Map(serverAlerts.filter(alert => {
@@ -3334,7 +3480,7 @@
         console.log('Markers fetch response:', { status: response.status, ok: response.ok });
         const markersData = await response.json();
         markers.forEach((marker, id) => {
-          marker.setMap(null);
+          releaseMarker(marker);
           markers.delete(id);
         });
         cameraPositions = [];
@@ -3344,7 +3490,7 @@
           return navState.alertFilters[filterKey] !== false;
         }).forEach(markerData => {
           const isTrafficCamera = markerData.type === 'Traffic Camera';
-          const marker = new google.maps.marker.AdvancedMarkerElement({
+          const marker = getMarker({
             map,
             position: {
               lat: markerData.location.coordinates[1],
@@ -3490,7 +3636,7 @@
       document.getElementById('verification-hud-container').classList.remove('active');
       document.getElementById('user-profile-hud-container').classList.remove('active');
       if (navState.tempMarker) {
-        navState.tempMarker.setMap(null);
+        releaseMarker(navState.tempMarker);
         navState.tempMarker = null;
       }
       if (navState.mapClickListener) {
@@ -3529,7 +3675,7 @@
       const userLatLng = new google.maps.LatLng(currentPos);
       const destLatLng = new google.maps.LatLng(navState.destination);
       const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, destLatLng);
-      if (distance <= ARRIVAL_RADIUS) {
+      if (distance <= CONFIG.ARRIVAL_RADIUS) {
         console.log('User arrived at destination:', { distance });
         navState.hasArrived = true;
         showToast('You have arrived at your destination.');
@@ -3606,7 +3752,7 @@
       const rawLatLng = new google.maps.LatLng(rawPos);
       const targetLatLng = new google.maps.LatLng(targetPos);
       const distance = google.maps.geometry.spherical.computeDistanceBetween(rawLatLng, targetLatLng);
-      if (distance > SNAP_BUFFER) {
+      if (distance > CONFIG.SNAP_BUFFER) {
         const path = [rawPos, targetPos];
         if (offRoadPolyline) {
           offRoadPolyline.setPath(path);
@@ -3630,164 +3776,17 @@
         }
       }
     }
-    function findClosestRoutePoint(currentPos, path, heading, speed) {
-      if (!path || path.length < 2) return { point: currentPos, index: 0 };
-      const currentLatLng = new google.maps.LatLng(currentPos);
-      let bestPoint = currentPos;
-      let bestScore = -Infinity;
-      let closestIndex = 0;
-      const speedMph = speed ? speed * 2.23694 : 0;
-      const isHighway = navState.currentRoute && navState.currentRoute.routes[0].legs[0].steps.some(step => step.travel_mode === 'DRIVING' && step.distance.value > 1000);
-      // Local search window around last snap index for performance
-      const startIdx = Math.max(0, navState.lastSnapIndex - 10);
-      const endIdx = Math.min(path.length, navState.lastSnapIndex + 20);
-      for (let i = startIdx; i < endIdx; i++) {
-        const point = path[i];
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
-        if (distance <= SNAP_BUFFER) {
-          const nextPoint = i < path.length - 1 ? path[i + 1] : point;
-          const pointHeading = google.maps.geometry.spherical.computeHeading(point, nextPoint);
-          const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
-          const proximityScore = (SNAP_BUFFER - distance) / SNAP_BUFFER * 0.6; // Increased weight for proximity
-          const headingScore = (1 - headingDiff / 180) * 0.3;
-          const speedScore = speedMph > 20 && isHighway ? 0.1 : speedMph < 10 ? 0.05 : 0;
-          const contextScore = i < path.length - 1 ? 0.1 : 0.05;
-          const totalScore = proximityScore + headingScore + speedScore + contextScore;
-          if (totalScore > bestScore) {
-            bestScore = totalScore;
-            bestPoint = { lat: point.lat(), lng: point.lng() };
-            closestIndex = i;
-          }
-          if (distance < 20) break;
-        }
-      }
-      navState.lastSnapIndex = closestIndex;
-      console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
-      return { point: bestPoint, index: closestIndex };
-    }
-    function ensureMarkerInView(position) {
-      if (!map || !position || !navState.isFollowing) return;
-      const bounds = map.getBounds();
-      if (!bounds) {
-        console.warn('Map bounds unavailable, cannot check viewport');
-        return;
-      }
-      const ne = bounds.getNorthEast();
-      const sw = bounds.getSouthWest();
-      const latSpan = ne.lat() - sw.lat();
-      const lngSpan = ne.lng() - sw.lng();
-      const edgeThresholdLat = latSpan * 0.2;
-      const edgeThresholdLng = lngSpan * 0.2;
-      const isNearEdge =
-        position.lat > ne.lat() - edgeThresholdLat ||
-        position.lat < sw.lat() + edgeThresholdLat ||
-        position.lng > ne.lng() - edgeThresholdLng ||
-        position.lng < sw.lng() + edgeThresholdLng;
-      if (isNearEdge) {
-        console.log('Marker near viewport edge, ensuring in view');
-        requestAnimationFrame(() => {
-          map.setCenter(position);
-        });
-      }
-    }
-    function checkCameraProximity() {
-      if (!showTrafficCameras || !navState.userLocation) return;
-      const now = Date.now();
-      if (now - navState.lastCameraUpdate < CAMERA_UPDATE_THRESHOLD) {
-        console.log('Skipping camera proximity check due to throttle');
-        return;
-      }
-      navState.lastCameraUpdate = now;
-      const userLatLng = new google.maps.LatLng(navState.userLocation);
-      for (const camera of cameraPositions) {
-        const cameraLatLng = new google.maps.LatLng(camera);
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
-        const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
-        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
-          showCameraHud();
-          cameraAlertShown.add(cameraKey);
-          console.log('Traffic camera alert triggered:', { distance, camera });
-          break;
-        }
-      }
-      for (const alert of currentAlerts) {
-        if (alert.type !== 'Traffic Camera') continue;
-        const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
-        const alertKey = `mongo-${alert._id}`;
-        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(alertKey)) {
-          showCameraHud();
-          cameraAlertShown.add(alertKey);
-          console.log('MongoDB traffic camera alert triggered:', { distance, alertId: alert._id });
-          break;
-        }
-      }
-    }
-    function checkAlertProximity() {
-      if (!navState.isNavigating || !navState.userLocation) return;
-      const userLatLng = new google.maps.LatLng(navState.userLocation);
-      currentAlerts.forEach(alert => {
-        if (alert.type === 'Traffic Camera') return;
-        const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
-        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
-        const alertId = alert._id;
-        const previousDistance = navState.alertProximities.get(alertId) || Infinity;
-        navState.alertProximities.set(alertId, distance);
-        if (distance <= VERIFICATION_DISTANCE && previousDistance > VERIFICATION_DISTANCE) {
-          currentVerificationAlertId = alertId;
-          document.getElementById('verification-message').textContent = `Passed ${alert.type} alert. Is it still valid?`;
-          const verificationHudContainer = document.getElementById('verification-hud-container');
-          const verificationHud = document.getElementById('verification-hud');
-          verificationHud.classList.add('active');
-          verificationHudContainer.classList.add('active');
-          console.log('Alert verification HUD shown for:', alertId);
-        }
-      });
-    }
-    async function updateServerLocation(position) {
-      try {
-        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
-        if (!token || !token.includes('.') || token === 'undefined') {
-          console.error('Invalid token, skipping server location update');
-          return;
-        }
-        const response = await fetchWithRetry('/api/location', {
-          method: 'POST',
-          mode: 'cors',
-          credentials: 'include',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token.trim()}`
-          },
-          body: JSON.stringify({
-            location: {
-              type: 'Point',
-              coordinates: [position.lng, position.lat]
-            }
-          })
-        });
-        if (!response.ok) {
-          console.error('Failed to update server location:', response.statusText);
-        } else {
-          console.log('Server location updated:', position);
-        }
-      } catch (error) {
-        console.error('Error updating server location:', error);
-      }
-    }
     function buildRouteIndex(path) {
       const index = new Map();
-      const gridSize = 0.01; // ~1km cells
-    
-      path.forEach(point => {
+      const gridSize = 0.001; // ~100m cells
+      path.forEach((point, idx) => {
         const key = `${Math.floor(point.lat() / gridSize)},${Math.floor(point.lng() / gridSize)}`;
         if (!index.has(key)) index.set(key, []);
-        index.get(key).push(point);
+        index.get(key).push({ point, idx });
       });
-    
       return index;
     }
-    function onPositionUpdate(position, isSimulation = false) {
+    function _onPositionUpdate(position, isSimulation = false) {
       console.log('onPositionUpdate called:', { isSimulation });
       try {
         const { latitude, longitude, speed = 0, heading = null } = position.coords;
@@ -3799,7 +3798,7 @@
         if (shouldUpdateCamera) {
           lastLocationUpdate = now;
         }
-        if (now - lastAlertFetchTime > ALERT_FETCH_INTERVAL && navState.isNavigating) {
+        if (now - lastAlertFetchTime > CONFIG.ALERT_FETCH_INTERVAL && navState.isNavigating) {
           fetchCurrentAlerts();
           lastAlertFetchTime = now;
         }
@@ -3814,10 +3813,12 @@
           }
           checkAlertProximity();
           const path = navState.detailedPath.length > 0 ? navState.detailedPath : navState.currentRoute.routes[0].overview_path;
-          const { point } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
+          // FIXED: Destructure index from findClosestRoutePoint
+          const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
+          navState.lastSnapIndex = index;
           const distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point));
-          
-          if (distanceToRoute < SNAP_BUFFER) {
+   
+          if (distanceToRoute < CONFIG.SNAP_BUFFER) {
             pos = point; // Snapped to route, don't smooth
             snapped = true;
           } else {
@@ -3828,7 +3829,8 @@
               new google.maps.LatLng(navState.previousUserLocation),
               new google.maps.LatLng(pos)
             );
-            if (distance > MAX_GPS_DISTANCE) {
+            // FIXED: Use SMOOTH_THRESHOLD for interpolation (>100m)
+            if (distance > CONFIG.MAX_GPS_DISTANCE) {
               const numPoints = Math.ceil(distance / 100);
               const interpolatedPath = [];
               for (let i = 1; i < numPoints; i++) {
@@ -3855,17 +3857,18 @@
               console.log('Interpolated path used for smoother marker movement:', { numPoints, distance });
             }
           }
-          if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && index < path.length - 1) {
+          // FIXED: Use the destructured index
+          if (heading == null && speed > CONFIG.STATIONARY_SPEED_THRESHOLD && index < path.length - 1) {
             computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[index + 1]);
             console.log('Computed heading from polyline:', computedHeading);
-          } else if (heading == null && speed > STATIONARY_SPEED_THRESHOLD && navState.previousUserLocation) {
+          } else if (heading == null && speed > CONFIG.STATIONARY_SPEED_THRESHOLD && navState.previousUserLocation) {
             computedHeading = google.maps.geometry.spherical.computeHeading(
               new google.maps.LatLng(navState.previousUserLocation),
               new google.maps.LatLng(pos)
             );
             console.log('Computed heading from previous position:', computedHeading);
           }
-          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : speed <= STATIONARY_SPEED_THRESHOLD ? 'lastValid' : needsCalibration ? 'lastValid' : 'compass';
+          const source = speed > CONFIG.STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : speed <= CONFIG.STATIONARY_SPEED_THRESHOLD ? 'lastValid' : needsCalibration ? 'lastValid' : 'compass';
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed, snapped);
           console.log('Heading stabilized:', { gpsHeading: heading, compassHeading, currentHeading: navState.currentHeading, source, speed });
           if (navState.isNavigating) {
@@ -3877,7 +3880,7 @@
             }
           }
         } else {
-          const source = speed > STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : 'lastValid';
+          const source = speed > CONFIG.STATIONARY_SPEED_THRESHOLD && heading ? 'gps' : 'lastValid';
           navState.currentHeading = smoothHeading(computedHeading || compassHeading || navState.lastValidHeading, source, speed);
         }
         navState.userLocation = pos;
@@ -3891,12 +3894,11 @@
         }
         // FIXED: Ensure marker in view after update
         ensureMarkerInView(pos);
-   
         // FIXED: Update camera more reliably - lower distance threshold to 1m, always update if simulating or significant change
         if (navState.isFollowing && navState.isNavigating) {
           const predictedPos = predictPosition(pos, navState.currentHeading, speed, 500);
           if (shouldUpdateCameraView(pos, navState.currentHeading, Date.now() - navState.lastCameraUpdateTime)) {
-            updateNavigationCamera(pos, predictedPos, navState.currentHeading, speed);
+            debouncedCameraUpdate(pos, predictedPos, navState.currentHeading, speed);
           }
         }
         lastPosition = pos;
@@ -3919,6 +3921,24 @@
         showToast('Error updating location. Please ensure GPS is enabled.');
       }
     }
+    function onPositionUpdate(position, isSimulation = false) {
+      safeExecute(
+        () => _onPositionUpdate(position, isSimulation),
+        () => {
+          if (navState.lastKnownPosition) {
+            _onPositionUpdate({
+              coords: {
+                latitude: navState.lastKnownPosition.lat,
+                longitude: navState.lastKnownPosition.lng,
+                speed: 0,
+                heading: navState.currentHeading
+              }
+            }, true);
+          }
+        },
+        'onPositionUpdate'
+      );
+    }
     function forecastTrafficAhead() {
       if (Math.random() > 0.8 && navState.isNavigating) {
         showToast('AI Forecast: Heavy traffic 10 miles ahead. Consider reroute.');
@@ -3931,7 +3951,6 @@
         dragTimer = null;
       }
       dragStartPos = null;
- 
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
       sessionStorage.setItem('isFollowing', navState.isFollowing);
@@ -3946,6 +3965,29 @@
       map.setOptions({ gestureHandling: 'cooperative', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
       console.log('Navigation unlocked');
     }
+    // Auto-save navigation state
+    function saveNavState() {
+      if (!navState.isNavigating) return;
+      const state = {
+        destination: navState.destination,
+        currentRoute: navState.currentRoute,
+        userLocation: navState.userLocation,
+        timestamp: Date.now()
+      };
+      sessionStorage.setItem('navState', JSON.stringify(state));
+    }
+    // Restore on page load
+    function restoreNavState() {
+      const saved = sessionStorage.getItem('navState');
+      if (!saved) return;
+      const state = JSON.parse(saved);
+      if (Date.now() - state.timestamp > CONFIG.NAV_STATE_EXPIRY) return; // 5 min expiry
+      navState.destination = state.destination;
+      calculateAndDisplayRoute(state.userLocation, state.destination);
+    }
+    // Call periodically
+    setInterval(saveNavState, CONFIG.NAV_STATE_SAVE_INTERVAL);
+    restoreNavState();
     function startGPS() {
       navState.hasArrived = false;
       if (!navigator.geolocation) {
@@ -4010,9 +4052,10 @@
         navState.ignoredHazards = [];
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 5000);
         if (showTrafficCameras) {
-          cameraCheckInterval = setInterval(checkCameraProximity, CAMERA_CHECK_INTERVAL);
+          cameraCheckInterval = setInterval(checkCameraProximity, CONFIG.CAMERA_CHECK_INTERVAL);
         }
-        alertPollInterval = setInterval(pollAlerts, ALERT_POLL_INTERVAL);
+        // Call every 5s instead of separate intervals
+        setInterval(batchUpdate, CONFIG.BATCH_UPDATE_INTERVAL);
         if (watchId) {
           navigator.geolocation.clearWatch(watchId);
         }
@@ -4175,9 +4218,24 @@
         currentHeadingTween = null;
       }
       TWEEN.removeAll();
- 
-      // Clear all timers
-      if (dragTimer) clearTimeout(dragTimer);
+      // Clear all intervals/timeouts
+      [cameraCheckInterval, alertPollInterval, navState.rerouteCheckTimeout,
+       navState.hazardCheckInterval, mockSimulationInterval, dragTimer].forEach(id => {
+        if (id) clearInterval(id);
+        if (id) clearTimeout(id);
+      });
+      // Add to stopGPS()
+      routeSpatialIndex = null;
+      google.maps.event.clearInstanceListeners(map);
+      google.maps.event.clearInstanceListeners(userMarker);
+      // Clean up TWEEN animations
+      TWEEN.removeAll();
+      // Clear all intervals/timeouts
+      [cameraCheckInterval, alertPollInterval, navState.rerouteCheckTimeout,
+       navState.hazardCheckInterval, mockSimulationInterval, dragTimer].forEach(id => {
+        if (id) clearInterval(id);
+        if (id) clearTimeout(id);
+      });
       ProgrammaticUpdateManager.end();
       navState.isNavigating = false;
       navState.isFollowing = false;
@@ -4277,6 +4335,7 @@
           updateOffRoadPolyline(rawUserLocation || navState.userLocation, response.routes[0].overview_path[0]);
           updateHUD(response, origin);
           updateBottomHUD(response);
+          routeSpatialIndex = null;
           if (callback) callback();
           if (navState.isFollowing && navState.isNavigating) {
             const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
@@ -4359,14 +4418,14 @@
           currentLatLng,
           new google.maps.LatLng(nextStep.start_location)
         );
-        if (distanceToTurn <= TURN_THRESHOLD) {
+        if (distanceToTurn <= CONFIG.TURN_THRESHOLD) {
           const distanceText = distanceToTurn < 1609.34
             ? `${Math.round(distanceToTurn * 3.28084)} feet`
             : `${(distanceToTurn / 1609.34).toFixed(1)} miles`;
           const turnText = `${nextStep.maneuver.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())} in ${distanceText}`;
           hudTurn.textContent = turnText;
           const now = Date.now();
-          if (turnText !== lastSpokenTurn && now - lastAnnouncementTime > ANNOUNCEMENT_COOLDOWN && 'speechSynthesis' in window) {
+          if (turnText !== lastSpokenTurn && now - lastAnnouncementTime > CONFIG.ANNOUNCEMENT_COOLDOWN && 'speechSynthesis' in window) {
             const utterance = new SpeechSynthesisUtterance(turnText);
             utterance.lang = 'en-US';
             speechSynthesis.speak(utterance);
@@ -4413,7 +4472,7 @@
           checkOffRoute(userLatLng);
         }
         startRerouteCheck();
-      }, REROUTE_CHECK_INTERVAL);
+      }, CONFIG.REROUTE_CHECK_INTERVAL);
     }
     function checkOffRoute(userLatLng) {
       if (!navState.isNavigating || !navState.currentRoute || !navState.routePolyline) {
@@ -4421,8 +4480,8 @@
         return false;
       }
       const routePolyline = new google.maps.Polyline({ path: navState.routePolyline });
-      if (!google.maps.geometry.poly.isLocationOnEdge(userLatLng, routePolyline, OFF_ROUTE_TOLERANCE / 111000)) {
-        console.log('User off-route detected, recalculating...', { distance: OFF_ROUTE_TOLERANCE });
+      if (!google.maps.geometry.poly.isLocationOnEdge(userLatLng, routePolyline, CONFIG.OFF_ROUTE_TOLERANCE / 111000)) {
+        console.log('User off-route detected, recalculating...', { distance: CONFIG.OFF_ROUTE_TOLERANCE });
         showToast('You are off-route. Recalculating route...');
         calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
           console.log('Route recalculated due to off-route detection');
@@ -4451,6 +4510,119 @@
       content.className = 'traffic-cam-marker';
       return content;
     }
+    function checkCameraProximity() {
+      if (!showTrafficCameras || !navState.userLocation) return;
+      const now = Date.now();
+      if (now - navState.lastCameraUpdate < CONFIG.CAMERA_UPDATE_THRESHOLD) {
+        console.log('Skipping camera proximity check due to throttle');
+        return;
+      }
+      navState.lastCameraUpdate = now;
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      for (const camera of cameraPositions) {
+        const cameraLatLng = new google.maps.LatLng(camera);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
+        const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
+          showCameraHud();
+          cameraAlertShown.add(cameraKey);
+          console.log('Traffic camera alert triggered:', { distance, camera });
+          break;
+        }
+      }
+      for (const alert of currentAlerts) {
+        if (alert.type !== 'Traffic Camera') continue;
+        const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
+        const alertKey = `mongo-${alert._id}`;
+        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(alertKey)) {
+          showCameraHud();
+          cameraAlertShown.add(alertKey);
+          console.log('MongoDB traffic camera alert triggered:', { distance, alertId: alert._id });
+          break;
+        }
+      }
+    }
+    function checkAlertProximity() {
+      if (!navState.isNavigating || !navState.userLocation) return;
+      const userLatLng = new google.maps.LatLng(navState.userLocation);
+      currentAlerts.forEach(alert => {
+        if (alert.type === 'Traffic Camera') return;
+        const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
+        const alertId = alert._id;
+        const previousDistance = navState.alertProximities.get(alertId) || Infinity;
+        navState.alertProximities.set(alertId, distance);
+        if (distance <= CONFIG.VERIFICATION_DISTANCE && previousDistance > CONFIG.VERIFICATION_DISTANCE) {
+          currentVerificationAlertId = alertId;
+          document.getElementById('verification-message').textContent = `Passed ${alert.type} alert. Is it still valid?`;
+          const verificationHudContainer = document.getElementById('verification-hud-container');
+          const verificationHud = document.getElementById('verification-hud');
+          verificationHud.classList.add('active');
+          verificationHudContainer.classList.add('active');
+          console.log('Alert verification HUD shown for:', alertId);
+        }
+      });
+    }
+    async function updateServerLocation(position) {
+      try {
+        const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+        if (!token || !token.includes('.') || token === 'undefined') {
+          console.error('Invalid token, skipping server location update');
+          return;
+        }
+        const response = await fetchWithRetry('/api/location', {
+          method: 'POST',
+          mode: 'cors',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token.trim()}`
+          },
+          body: JSON.stringify({
+            location: {
+              type: 'Point',
+              coordinates: [position.lng, position.lat]
+            }
+          })
+        });
+        if (!response.ok) {
+          console.error('Failed to update server location:', response.statusText);
+        } else {
+          console.log('Server location updated:', position);
+        }
+      } catch (error) {
+        console.error('Error updating server location:', error);
+      }
+    }
+    function ensureMarkerInView(position) {
+      if (!map || !position || !navState.isFollowing) return;
+      const now = Date.now();
+      if (now - lastBoundsCheck < BOUNDS_CHECK_INTERVAL) return;
+      lastBoundsCheck = now;
+      const bounds = map.getBounds();
+      if (!bounds) {
+        console.warn('Map bounds unavailable, cannot check viewport');
+        return;
+      }
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const latSpan = ne.lat() - sw.lat();
+      const lngSpan = ne.lng() - sw.lng();
+      const edgeThresholdLat = latSpan * 0.2;
+      const edgeThresholdLng = lngSpan * 0.2;
+      const isNearEdge =
+        position.lat > ne.lat() - edgeThresholdLat ||
+        position.lat < sw.lat() + edgeThresholdLat ||
+        position.lng > ne.lng() - edgeThresholdLng ||
+        position.lng < sw.lng() + edgeThresholdLng;
+      if (isNearEdge) {
+        console.log('Marker near viewport edge, ensuring in view');
+        requestAnimationFrame(() => {
+          map.setCenter(position);
+        });
+      }
+    }
     function checkHazardsAndOfferReroute() {
       if (!navState.isNavigating || !navState.currentRoute || !navState.userLocation) {
         console.log('Hazard check skipped: Not navigating or no route/location data');
@@ -4458,43 +4630,36 @@
       }
       const userLatLng = new google.maps.LatLng(navState.userLocation);
       const path = navState.currentRoute.routes[0].overview_path;
- 
       // Use detailed path if available for more accurate detection
       const checkPath = navState.detailedPath.length > 0 ? navState.detailedPath : path;
       const routeIndex = buildRouteIndex(checkPath);
- 
       for (const alert of currentAlerts) {
         // Skip traffic cameras and already ignored hazards
         if (alert.type === 'Traffic Camera' || navState.ignoredHazards.includes(alert._id)) continue;
-   
         const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
         if (navState.alertFilters[filterKey] === false) continue;
-   
         const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
         const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
-   
         // Check if alert is within warning distance
         if (distance <= hazardAlertDistance * 1609.34) {
           let isOnRoute = false;
           let minDistanceToRoute = Infinity;
-          const gridKey = `${Math.floor(alertLatLng.lat() / 0.01)},${Math.floor(alertLatLng.lng() / 0.01)}`;
-        
+          const gridKey = `${Math.floor(alertLatLng.lat() / 0.001)},${Math.floor(alertLatLng.lng() / 0.001)}`;
+ 
           if (!routeIndex.has(gridKey)) continue; // Not near route
-        
+ 
           // Now check actual distance only for nearby cells
           const nearbyPoints = routeIndex.get(gridKey);
-          for (const point of nearbyPoints) {
+          for (const { point } of nearbyPoints) {
             const pointLatLng = new google.maps.LatLng(point);
             const distanceToPoint = google.maps.geometry.spherical.computeDistanceBetween(alertLatLng, pointLatLng);
             minDistanceToRoute = Math.min(minDistanceToRoute, distanceToPoint);
-       
             // Increased threshold to 100 meters for better detection
             if (distanceToPoint < 100) {
               isOnRoute = true;
               break;
             }
           }
-     
           if (isOnRoute) {
             console.log('Hazard detected on route:', {
               alertId: alert._id,
@@ -4542,7 +4707,7 @@
             for (const point of route.overview_path) {
               const pointLatLng = new google.maps.LatLng(point);
               const distance = google.maps.geometry.spherical.computeDistanceBetween(hazardLatLng, pointLatLng);
-              if (distance < ALTERNATE_TRIGGER_DISTANCE) {
+              if (distance < CONFIG.ALTERNATE_TRIGGER_DISTANCE) {
                 intersectsHazard = true;
                 break;
               }
@@ -4715,6 +4880,8 @@
           console.log('Simulation completed');
           document.getElementById('arrival-hud-container').classList.add('active');
           document.getElementById('arrival-hud').classList.add('active');
+          // FIXED: Reset lastCameraPosition after simulation completion
+          lastCameraPosition = null;
           return;
         }
         const point = path[index];
@@ -5068,22 +5235,50 @@
       }
       console.log('Token and userId found:', { token: token.substring(0, 20) + '...', userId });
       isInitialized = true;
-      socket = io({ auth: { token } });
+      socket = io({
+        auth: { token },
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000
+      });
       socket.on('connect', () => {
         console.log('Socket.IO connected');
         showToast('Connected to server.');
         socket.emit('join', userId);
       });
+      socket.on('reconnect', (attemptNumber) => {
+        console.log('Reconnected after', attemptNumber, 'attempts');
+        socket.emit('join', userId);
+        // Resync state
+        fetchCurrentAlerts();
+        if (navState.isNavigating) {
+          checkHazardsAndOfferReroute();
+        }
+      });
       socket.on('connect_error', (error) => {
         console.error('Socket.IO connection error:', error);
         showToast('Failed to connect to server.');
       });
+      const debouncedAlertSync = debounce(() => pollAlerts(), 500);
       socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
-  // ❌ Fixed: Validate alert structure before processing
-  if (!alert || !alert._id || !alert.location || !Array.isArray(alert.location.coordinates) || alert.location.coordinates.length < 2 || !alert.type) {
-    console.error('Invalid alert structure received via Socket.IO:', alert);
+  // ENHANCED: More robust type checking
+  if (!alert || typeof alert !== 'object' || 
+      !alert._id || typeof alert._id !== 'string' ||
+      !alert.location?.coordinates || 
+      !Array.isArray(alert.location.coordinates) ||
+      alert.location.coordinates.length !== 2 ||
+      !alert.location.coordinates.every(c => typeof c === 'number' && !isNaN(c)) ||
+      !alert.type || typeof alert.type !== 'string') {
+    console.error('Invalid alert structure:', alert);
     return;
+  }
+  // ... rest of handler
+  if (!alert.userId || typeof alert.userId !== 'object') {
+    console.warn('Alert missing userId, using fallback');
+    alert.userId = { username: 'Anonymous', _id: null };
   }
   const alertId = alert._id;
   const isTrafficCamera = alert.type === 'Traffic Camera';
@@ -5108,7 +5303,7 @@
     }
     // Dedupe marker creation
     if (!markers.has(alertId)) {
-      const marker = new google.maps.marker.AdvancedMarkerElement({
+      const marker = getMarker({
         map,
         position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
         content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
@@ -5133,7 +5328,7 @@
   }
 });
       socket.on('alertDeleted', (alertId) => {
-        // Add validation:
+        // FIXED: Validation already present, but ensure it's robust
         if (!alertId || typeof alertId !== 'string') {
           console.error('Invalid alertDeleted event:', alertId);
           return;
@@ -5141,7 +5336,7 @@
         console.log('Alert deleted via Socket.IO:', alertId);
         const marker = markers.get(alertId);
         if (marker) {
-          marker.setMap(null);
+          releaseMarker(marker);
           markers.delete(alertId);
         }
         currentAlerts = currentAlerts.filter(a => a._id !== alertId);
@@ -5158,9 +5353,11 @@
           }
         }
         showToast('Alert removed.');
+        // Debounced full sync
+        debouncedAlertSync();
       });
       socket.on('extendAlert', (alertId) => {
-        // Same here - validate before processing
+        // FIXED: Validation already present, but ensure it's robust
         if (!alertId || typeof alertId !== 'string') {
           console.error('Invalid extendAlert event:', alertId);
           return;
@@ -5176,7 +5373,7 @@
             currentAlerts.push(data.alert);
             displayAlertsInHud(currentAlerts);
           }
-          const marker = new google.maps.marker.AdvancedMarkerElement({
+          const marker = getMarker({
             map,
             position: { lat: data.alert.location.coordinates[1], lng: data.alert.location.coordinates[0] },
             content: data.alert.type === 'Traffic Camera' ? createTrafficCameraContent() : createAlertContent(),

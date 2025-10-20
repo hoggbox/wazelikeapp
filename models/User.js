@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const alertSchema = new mongoose.Schema({
+  _id: { type: mongoose.Schema.Types.ObjectId, default: () => new mongoose.Types.ObjectId() },
   type: {
     type: String,
     required: true,
@@ -15,12 +16,12 @@ const alertSchema = new mongoose.Schema({
       'Low Visibility',
       'Traffic Camera',
       'Manual Traffic Camera'
-    ] // Restrict to valid alert types
+    ]
   },
   location: {
     type: { type: String, enum: ['Point'], required: true },
     coordinates: {
-      type: [Number],
+      type: [Number], // [lng, lat]
       required: true,
       validate: {
         validator: function (coords) {
@@ -35,26 +36,54 @@ const alertSchema = new mongoose.Schema({
       }
     }
   },
-  address: { type: String },
+  address: { type: String, default: 'Unknown' },
   timestamp: { type: Date, default: Date.now },
   votes: {
     up: { type: Number, default: 0 },
     down: { type: Number, default: 0 },
-    upVoters: [{ type: mongoose.Schema.Types.ObjectId }],
-    downVoters: [{ type: mongoose.Schema.Types.ObjectId }]
+    upVoters: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    downVoters: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
   },
-  expiry: { type: Date, default: () => new Date(Date.now() + 3600000) }
+  expiry: {
+    type: Date,
+    default: function () {
+      return new Date(Date.now() + (this.type === 'Traffic Camera' || this.type === 'Manual Traffic Camera' ? 24 * 3600000 : 3600000));
+    }
+  }
+});
+
+const offlineRegionSchema = new mongoose.Schema({
+  bounds: {
+    north: { type: Number, required: true, min: -90, max: 90 },
+    south: { type: Number, required: true, min: -90, max: 90 },
+    east: { type: Number, required: true, min: -180, max: 180 },
+    west: { type: Number, required: true, min: -180, max: 180 }
+  },
+  name: { type: String, required: true },
+  timestamp: { type: Date, default: Date.now }
+});
+
+const familyMemberSchema = new mongoose.Schema({
+  email: { type: String, required: true },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }
 });
 
 const userSchema = new mongoose.Schema({
-  username: { type: String, required: true, unique: true },
-  email: { type: String, required: true, unique: true },
+  username: { type: String, required: true, unique: true, trim: true },
+  email: { 
+    type: String, 
+    required: true, 
+    unique: true, 
+    trim: true, 
+    lowercase: true,
+    match: [/^\S+@\S+\.\S+$/, 'Invalid email format']
+  },
   password: { type: String, required: true },
-  firstName: { type: String, required: false },
-  lastName: { type: String, required: false },
-  birthdate: { type: Date, required: false },
-  sex: { type: String, enum: ['Male', 'Female', 'Other'], required: false },
-  location: { type: String, required: false },
+  firstName: { type: String, trim: true },
+  lastName: { type: String, trim: true },
+  birthdate: { type: Date },
+  sex: { type: String, enum: ['Male', 'Female', 'Other'] },
+  location: { type: String, trim: true },
   joinDate: { type: Date, default: Date.now },
   alerts: [alertSchema],
   totalAlerts: { type: Number, default: 0 },
@@ -63,12 +92,11 @@ const userSchema = new mongoose.Schema({
   achievements: [{ type: String }],
   isAdmin: { type: Boolean, default: false },
   isBanned: { type: Boolean, default: false },
-  ipBanned: { type: String, required: false },
+  ipBanned: { type: String, trim: true },
   lastLocation: {
-    type: { type: String, enum: ['Point'], required: false },
+    type: { type: String, enum: ['Point'] },
     coordinates: {
-      type: [Number],
-      required: false,
+      type: [Number], // [lng, lat]
       validate: {
         validator: function (coords) {
           return !coords || (
@@ -82,15 +110,32 @@ const userSchema = new mongoose.Schema({
       }
     }
   },
-  lastActive: { type: Date, required: false },
-  pushSubscription: { type: Object, required: false },
-  familyMembers: [{ email: { type: String, required: true } }]
+  lastActive: { type: Date },
+  subscriptions: [{ type: Object }], // Multiple push subscriptions
+  familyMembers: {
+    type: [familyMemberSchema],
+    validate: {
+      validator: function (members) {
+        return members.length <= 5 && new Set(members.map(m => m.email)).size === members.length;
+      },
+      message: 'Maximum 5 unique family members allowed'
+    }
+  },
+  offlineRegions: {
+    type: [offlineRegionSchema],
+    validate: {
+      validator: function (regions) {
+        return regions.length <= 10;
+      },
+      message: 'Maximum 10 offline regions allowed'
+    }
+  }
 });
 
 // Indexes
-userSchema.index({ 'alerts.location': '2dsphere' }); // For geospatial queries on alerts
+userSchema.index({ email: 1 }, { unique: true }); // Unique index for email
+userSchema.index({ 'alerts.location': '2dsphere' }); // Geospatial index for alerts
 userSchema.index({ lastLocation: '2dsphere' }, { sparse: true }); // Sparse index for lastLocation
-userSchema.index({ email: 1 }); // For faster login/register
-userSchema.index({ 'alerts.expiry': 1 }, { expireAfterSeconds: 0 }); // TTL index for auto-deleting expired alerts
+userSchema.index({ 'alerts.expiry': 1 }, { expireAfterSeconds: 0 }); // TTL index for alerts
 
 module.exports = mongoose.model('User', userSchema);

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v15';  // Bumped to v14 for auth refresh integration & frontend tweaks
+const CACHE_NAME = 'gps-app-cache-v16';  // Bumped to v16 for enhanced offline image caching & fresh load optimizations
 
 const urlsToCache = [
   '/',
@@ -6,9 +6,13 @@ const urlsToCache = [
   '/manifest.json',  // For PWA offline support
   '/sw.js',
   '/favicon.ico',
+  // Static assets
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
-  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3'
+  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
+  // App-specific images for offline resilience
+  'https://i.postimg.cc/YS0h0m7R/compass.png',
+  'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
 ];
 
 self.addEventListener('install', event => {
@@ -16,7 +20,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Caching assets for v14 (auth refresh & frontend updates):', urlsToCache);
+        console.log('Caching assets for v16 (offline images & fresh load optimizations):', urlsToCache);
         return cache.addAll(urlsToCache);
       })
       .catch(error => {

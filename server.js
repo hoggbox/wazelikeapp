@@ -3,7 +3,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 const webpush = require('web-push');
 const rateLimit = require('express-rate-limit');
 const http = require('http');
@@ -18,12 +17,12 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    methods: ['GET', 'POST', 'DELETE'],
+    methods: ['GET', 'POST', 'DELETE', 'PUT'],
     credentials: true
   }
 });
 
-// Enable trust proxy for hosting platforms like Render
+// Enable trust proxy for hosting platforms
 app.set('trust proxy', 1);
 
 // Middleware
@@ -53,39 +52,34 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// UPDATED: MongoDB Connection with Retry
+// MongoDB Connection with Retry
 async function connectDB() {
   let retries = 5;
   while (retries > 0) {
     try {
-      console.log('=== ATTEMPTING MONGODB CONNECTION ===');
+      console.log('=== Attempting MongoDB Connection ===');
       console.log('MongoDB URI exists:', !!process.env.MONGODB_URI);
       console.log('Retry attempts remaining:', retries);
-      
-      // UPDATED: Use correct connection string format with dbName option
+
       await mongoose.connect(process.env.MONGODB_URI || 
         'mongodb+srv://imhoggbox:snake1988@cluster0.xoo6m.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', 
         {
-          dbName: 'pinmap', // Explicit database name
+          dbName: 'pinmap',
           serverSelectionTimeoutMS: 5000,
           connectTimeoutMS: 10000,
           socketTimeoutMS: 45000,
           maxPoolSize: 10
         }
       );
-      
+
       console.log('✅ MongoDB connected to Atlas');
       console.log('Database name:', mongoose.connection.db.databaseName);
-      console.log('Connection state:', mongoose.connection.readyState); // 1 = connected
-      
-      // Verify collections exist
-      const collections = await mongoose.connection.db.listCollections().toArray();
-      console.log('Available collections:', collections.map(c => c.name));
-      
-      // Ensure indexes are created
+      console.log('Connection state:', mongoose.connection.readyState);
+
+      // Ensure indexes
       const existingIndexes = await User.collection.indexes();
       const indexNames = existingIndexes.map(index => index.name);
-      
+
       if (!indexNames.includes('alerts.location_2dsphere')) {
         await User.collection.createIndex({ 'alerts.location': '2dsphere' });
         console.log('Created 2dsphere index on alerts.location');
@@ -99,24 +93,21 @@ async function connectDB() {
         console.log('Created TTL index on alerts.expiry');
       }
       if (!indexNames.includes('email_1')) {
-        await User.collection.createIndex({ email: 1 });
-        console.log('Created index on email');
+        await User.collection.createIndex({ email: 1 }, { unique: true });
+        console.log('Created unique index on email');
       }
-      
-      console.log('=== MONGODB CONNECTION COMPLETE ===\n');
+
+      console.log('=== MongoDB Connection Complete ===');
       return;
     } catch (error) {
       console.error('❌ MongoDB connection error:', error.message, error.stack);
-      
-      // Helpful error messages
       if (error.message.includes('bad auth')) {
-        console.error('🔑 Authentication failed - check username/password in MongoDB Atlas');
+        console.error('🔑 Authentication failed - check username/password');
       } else if (error.message.includes('ENOTFOUND')) {
         console.error('🌐 DNS lookup failed - check cluster URL');
       } else if (error.message.includes('IP') || error.message.includes('not authorized')) {
-        console.error('🚫 IP not whitelisted - add 0.0.0.0/0 to MongoDB Atlas Network Access');
+        console.error('🚫 IP not whitelisted - add 0.0.0.0/0 to MongoDB Atlas');
       }
-      
       retries--;
       if (retries === 0) {
         console.error('💀 MongoDB connection failed after retries');
@@ -131,7 +122,7 @@ connectDB();
 // VAPID Keys
 const vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY || 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs',
-  privateKey: process.env.VAPID_PRIVATE_KEY || 'your_private_vapid_key' // Replace with your actual VAPID private key
+  privateKey: process.env.VAPID_PRIVATE_KEY || 'your_private_vapid_key' // Replace with actual VAPID private key
 };
 webpush.setVapidDetails(
   'mailto:admin@example.com',
@@ -147,7 +138,7 @@ app.get('/api/vapid-public-key', (req, res) => {
 
 app.use('/api/auth', authRoutes);
 
-// UPDATED: Alert Posting Endpoint with better logging
+// Alert Posting Endpoint
 app.post('/api/alerts', authMiddleware, async (req, res) => {
   try {
     const { type, location, address, timestamp } = req.body;
@@ -158,9 +149,17 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       console.error('Invalid alert data:', { type, location });
       return res.status(400).json({ error: 'Invalid alert data' });
     }
+    const validTypes = [
+      'Slowdown', 'Crash', 'Construction', 'Police', 'Object on Road',
+      'Lane Closure', 'Manual Report', 'Low Visibility', 'Traffic Camera', 'Manual Traffic Camera'
+    ];
+    if (!validTypes.includes(type)) {
+      console.error('Invalid alert type:', type);
+      return res.status(400).json({ error: 'Invalid alert type' });
+    }
     const lng = parseFloat(location.coordinates[0]);
     const lat = parseFloat(location.coordinates[1]);
-    if (isNaN(lng) || isNaN(lat)) {
+    if (isNaN(lng) || isNaN(lat) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       console.error('Invalid coordinates:', location.coordinates);
       return res.status(400).json({ error: 'Invalid coordinates' });
     }
@@ -183,7 +182,7 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Check for duplicate alert (same type, location within ~10m, within 30 seconds)
+    // Check for duplicate alert (within ~10m, 30 seconds)
     const existingIndex = user.alerts.findIndex(a =>
       a.type === type &&
       Math.abs(a.location.coordinates[0] - lng) < 0.0001 &&
@@ -218,18 +217,16 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       address: address || 'Unknown',
       timestamp: timestampDate,
       votes: { up: 0, down: 0, upVoters: [], downVoters: [] },
-      expiry: new Date(Date.now() + 3600000) // 1 hour expiry
+      expiry: new Date(Date.now() + (type === 'Traffic Camera' ? 24 * 3600000 : 3600000)) // 24h for traffic cameras, 1h for others
     };
 
     // Add alert to user and update stats
     user.alerts.push(alert);
     user.totalAlerts = (user.totalAlerts || 0) + 1;
     user.activeAlerts = (user.activeAlerts || 0) + 1;
-    user.points = (user.points || 0) + 10;
+    user.points = (user.points || 0) + (type === 'Traffic Camera' ? 20 : 10); // Bonus for traffic cameras
 
     console.log('Saving alert to MongoDB:', { alertId: alert._id, type, userId: user._id });
-    
-    // UPDATED: Better error handling for save
     try {
       await user.save();
       console.log('✅ Alert successfully saved:', { alertId: alert._id });
@@ -258,7 +255,23 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
     // Emit Socket.IO events
     req.io.emit('alert', populatedAlert);
     if (user.familyMembers?.length > 0) {
-      req.io.emit('familyAlert', { alert: populatedAlert, user: { email: user.email, username: user.username } });
+      user.familyMembers.forEach(member => {
+        req.io.to(member.userId).emit('familyAlert', { alert: populatedAlert, user: { email: user.email, username: user.username } });
+      });
+      console.log('Family alert emitted to:', user.familyMembers.map(m => m.email));
+    }
+
+    // Send push notification
+    if (user.subscriptions?.length > 0) {
+      const payload = JSON.stringify({
+        title: `New ${type} Alert`,
+        body: `Alert posted at ${address || 'unknown location'}`
+      });
+      user.subscriptions.forEach(sub => {
+        webpush.sendNotification(sub, payload).catch(err => {
+          console.error('Error sending push notification:', err);
+        });
+      });
     }
 
     res.status(201).json({ alert: populatedAlert });
@@ -307,51 +320,6 @@ app.get('/api/markers', authMiddleware, async (req, res) => {
   }
 });
 
-// Fetch Hazards Near Route
-app.post('/api/hazards-near-route', authMiddleware, async (req, res) => {
-  try {
-    const { polyline, maxDistance = 50 } = req.body;
-    if (!polyline || !Array.isArray(polyline) || polyline.length === 0) {
-      console.error('Invalid polyline data:', polyline);
-      return res.status(400).json({ error: 'Invalid polyline data' });
-    }
-    console.log('Fetching hazards for polyline:', { points: polyline.length, maxDistance });
-    const lineString = {
-      type: 'LineString',
-      coordinates: polyline.map(pt => [pt.lng, pt.lat])
-    };
-    const users = await User.find({
-      'alerts.location': {
-        $geoWithin: {
-          $geometry: lineString,
-          $maxDistance: parseFloat(maxDistance)
-        }
-      },
-      'alerts.expiry': { $gt: new Date() },
-      'alerts.type': { $ne: 'Traffic Camera' }
-    });
-    const hazards = users.flatMap(user =>
-      user.alerts
-        .filter(alert => alert.expiry > new Date() && alert.type !== 'Traffic Camera')
-        .map(alert => ({
-          _id: alert._id,
-          type: alert.type,
-          location: alert.location,
-          address: alert.address,
-          timestamp: alert.timestamp,
-          votes: alert.votes,
-          expiry: alert.expiry,
-          userId: { _id: user._id, username: user.username }
-        }))
-    );
-    console.log('Returning hazards:', hazards.length);
-    res.json(hazards);
-  } catch (error) {
-    console.error('Error fetching hazards near route:', error.message, error.stack);
-    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch hazards', details: error.message });
-  }
-});
-
 // Vote on Alert
 app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
   try {
@@ -383,7 +351,6 @@ app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
     alert.votes[voteType] = (alert.votes[voteType] || 0) + 1;
     let deleted = false;
     if (alert.votes.down > alert.votes.up * 2) {
-      // UPDATED: Use pull() instead of deleteOne()
       user.alerts.pull({ _id: req.params.id });
       user.activeAlerts = Math.max(0, (user.activeAlerts || 0) - 1);
       deleted = true;
@@ -416,7 +383,7 @@ app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
   }
 });
 
-// UPDATED: Delete Alert
+// Delete Alert
 app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -429,7 +396,6 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
       console.error('Alert not found for any user:', req.params.id);
       return res.status(404).json({ error: 'Alert not found' });
     }
-    console.log('Alert owner found:', owner._id);
     const alert = owner.alerts.id(req.params.id);
     if (!alert) {
       console.error('Alert not found in owner document:', req.params.id);
@@ -437,12 +403,10 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     }
     const isOwner = owner._id.toString() === req.user._id.toString();
     const isAuthorized = isOwner || req.user.isAdmin;
-    console.log('Delete authorization:', { isOwner, isAdmin: req.user.isAdmin, authorized: isAuthorized });
     if (!isAuthorized) {
       console.error('Unauthorized delete attempt:', { requesterId: req.user._id, ownerId: owner._id, isAdmin: req.user.isAdmin });
       return res.status(403).json({ error: 'Unauthorized' });
     }
-    // UPDATED: Use pull() instead of deleteOne()
     owner.alerts.pull({ _id: req.params.id });
     owner.activeAlerts = Math.max(0, (owner.activeAlerts || 0) - 1);
     await owner.save();
@@ -463,17 +427,26 @@ app.post('/api/location', authMiddleware, async (req, res) => {
       console.error('Invalid location data:', location);
       return res.status(400).json({ error: 'Invalid location data' });
     }
+    const lng = parseFloat(location.coordinates[0]);
+    const lat = parseFloat(location.coordinates[1]);
+    if (isNaN(lng) || isNaN(lat) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      console.error('Invalid coordinates:', location.coordinates);
+      return res.status(400).json({ error: 'Invalid coordinates' });
+    }
     console.log('Updating location for user:', { userId: req.user._id, location });
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { lastLocation: location, lastActive: new Date() },
+      { 
+        lastLocation: { type: 'Point', coordinates: [lng, lat] }, 
+        lastActive: new Date() 
+      },
       { new: true }
     );
     if (!user) {
       console.error('User not found for location update:', req.user._id);
       return res.status(404).json({ error: 'User not found' });
     }
-    req.io.emit('locationUpdate', { userId: req.user._id, location });
+    req.io.emit('locationUpdate', { userId: req.user._id, location: { lat, lng } });
     res.json({ message: 'Location updated' });
   } catch (error) {
     console.error('Error updating location:', error.message, error.stack);
@@ -496,6 +469,118 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
   }
 });
 
+// Manage Family Members
+app.post('/api/family', authMiddleware, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || typeof email !== 'string') {
+      console.error('Invalid family member email:', email);
+      return res.status(400).json({ error: 'Invalid email' });
+    }
+    console.log('Adding family member:', { email, userId: req.user._id });
+    const targetUser = await User.findOne({ email });
+    if (!targetUser) {
+      console.error('Family member not found:', email);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      console.error('User not found:', req.user._id);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (user.familyMembers.length >= 5) {
+      console.error('Family member limit reached:', req.user._id);
+      return res.status(400).json({ error: 'Maximum 5 family members' });
+    }
+    if (user.familyMembers.some(m => m.email === email)) {
+      console.error('Family member already added:', email);
+      return res.status(400).json({ error: 'Family member already added' });
+    }
+    user.familyMembers.push({ email, userId: targetUser._id });
+    await user.save();
+    console.log('Family member added:', { email, userId: req.user._id });
+    res.json({ message: 'Family member added' });
+  } catch (error) {
+    console.error('Error adding family member:', error.message, error.stack);
+    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to add family member', details: error.message });
+  }
+});
+
+app.delete('/api/family/:email', authMiddleware, async (req, res) => {
+  try {
+    const { email } = req.params;
+    if (!email) {
+      console.error('Missing email parameter');
+      return res.status(400).json({ error: 'Email required' });
+    }
+    console.log('Removing family member:', { email, userId: req.user._id });
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      console.error('User not found:', req.user._id);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    user.familyMembers = user.familyMembers.filter(m => m.email !== email);
+    await user.save();
+    console.log('Family member removed:', { email, userId: req.user._id });
+    res.json({ message: 'Family member removed' });
+  } catch (error) {
+    console.error('Error removing family member:', error.message, error.stack);
+    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to remove family member', details: error.message });
+  }
+});
+
+// Manage Offline Regions
+app.post('/api/offline-regions', authMiddleware, async (req, res) => {
+  try {
+    const { bounds, name } = req.body;
+    if (!bounds || !name || !bounds.north || !bounds.south || !bounds.east || !bounds.west) {
+      console.error('Invalid offline region data:', { bounds, name });
+      return res.status(400).json({ error: 'Invalid region data' });
+    }
+    console.log('Saving offline region:', { name, userId: req.user._id });
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      console.error('User not found:', req.user._id);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    user.offlineRegions = user.offlineRegions || [];
+    if (user.offlineRegions.length >= 10) {
+      console.error('Offline region limit reached:', req.user._id);
+      return res.status(400).json({ error: 'Maximum 10 offline regions' });
+    }
+    user.offlineRegions.push({ bounds, name, timestamp: new Date() });
+    await user.save();
+    console.log('Offline region saved:', { name, userId: req.user._id });
+    res.json({ message: 'Offline region saved' });
+  } catch (error) {
+    console.error('Error saving offline region:', error.message, error.stack);
+    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to save offline region', details: error.message });
+  }
+});
+
+app.delete('/api/offline-regions/:name', authMiddleware, async (req, res) => {
+  try {
+    const { name } = req.params;
+    if (!name) {
+      console.error('Missing region name');
+      return res.status(400).json({ error: 'Region name required' });
+    }
+    console.log('Removing offline region:', { name, userId: req.user._id });
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      console.error('User not found:', req.user._id);
+      return res.status(404).json({ error: 'User not found' });
+    }
+    user.offlineRegions = user.offlineRegions.filter(r => r.name !== name);
+    await user.save();
+    console.log('Offline region removed:', { name, userId: req.user._id });
+    res.json({ message: 'Offline region removed' });
+  } catch (error) {
+    console.error('Error removing offline region:', error.message, error.stack);
+    res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to remove offline region', details: error.message });
+  }
+});
+
 // Admin Routes
 app.get('/api/users', authMiddleware, async (req, res) => {
   try {
@@ -503,7 +588,7 @@ app.get('/api/users', authMiddleware, async (req, res) => {
       console.error('Non-admin attempted /api/users:', req.user._id);
       return res.status(403).json({ error: 'Unauthorized' });
     }
-    const users = await User.find().select('username email joinDate points isAdmin lastLocation lastActive');
+    const users = await User.find().select('username email joinDate points isAdmin lastLocation lastActive totalAlerts activeAlerts familyMembers offlineRegions');
     console.log('Users fetched:', users.length);
     res.json(users);
   } catch (error) {
@@ -528,7 +613,7 @@ app.get('/api/users/search', authMiddleware, async (req, res) => {
         { username: { $regex: query, $options: 'i' } },
         { email: { $regex: query, $options: 'i' } }
       ]
-    }).select('username email joinDate points isAdmin lastLocation lastActive');
+    }).select('username email joinDate points isAdmin lastLocation lastActive totalAlerts activeAlerts familyMembers offlineRegions');
     console.log('Users search result:', users.length);
     res.json(users);
   } catch (error) {
@@ -673,19 +758,6 @@ app.delete('/api/users/:id', authMiddleware, async (req, res) => {
   }
 });
 
-function getDistance(point1, point2) {
-  const R = 6371e3; // Earth's radius in meters
-  const φ1 = point1.lat * Math.PI / 180;
-  const φ2 = point2.lat * Math.PI / 180;
-  const Δφ = (point2.lat - point1.lat) * Math.PI / 180;
-  const Δλ = (point2.lng - point1.lng) * Math.PI / 180;
-  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-            Math.cos(φ1) * Math.cos(φ2) *
-            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
 // Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message, err.stack);
@@ -696,6 +768,10 @@ app.use((err, req, res, next) => {
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
   socket.on('join', (userId) => {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      console.error('Invalid userId for socket join:', userId);
+      return;
+    }
     socket.join(userId);
     console.log(`User ${userId} joined room`);
   });
@@ -707,6 +783,8 @@ io.on('connection', (socket) => {
       if (user && !user.isBanned) {
         io.to(decoded.id).emit('locationUpdate', { userId: decoded.id, location });
         console.log('Location update emitted:', { userId: decoded.id, location });
+      } else {
+        console.error('User not found or banned for location update:', decoded.id);
       }
     } catch (error) {
       console.error('Error in locationUpdate:', error.message);
