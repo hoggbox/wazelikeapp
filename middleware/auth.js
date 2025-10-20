@@ -1,5 +1,6 @@
 // middleware/auth.js
 const jwt = require('jsonwebtoken');
+const mongoose = require('mongoose'); // Added mongoose import to fix ReferenceError
 const User = require('../models/User');
 
 module.exports = async (req, res, next) => {
@@ -38,6 +39,18 @@ module.exports = async (req, res, next) => {
         return res.status(401).json({ error: 'Invalid token payload', details: 'Token missing user ID' });
       }
       throw new Error('Invalid token payload');
+    }
+
+    // Check MongoDB connection before querying
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', {
+        readyState: mongoose.connection.readyState,
+        path: req.path || req.handshake?.url
+      });
+      if (res) {
+        return res.status(503).json({ error: 'Database unavailable', details: 'MongoDB connection not established' });
+      }
+      throw new Error('Database unavailable');
     }
 
     // Fetch user with necessary fields
