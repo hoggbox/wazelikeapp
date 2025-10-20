@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v16';  // Bumped to v16 for enhanced offline image caching & fresh load optimizations
+const CACHE_NAME = 'gps-app-cache-v17';  // Bumped to v16 for enhanced offline image caching & fresh load optimizations
 
 const urlsToCache = [
   '/',
