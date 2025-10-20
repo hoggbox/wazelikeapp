@@ -61,10 +61,12 @@ async function connectDB() {
       console.log('MongoDB URI exists:', !!process.env.MONGODB_URI);
       console.log('Retry attempts remaining:', retries);
 
+      // Updated: Explicit MongoDB connection with options for reliability
       await mongoose.connect(process.env.MONGODB_URI || 
-        'mongodb+srv://imhoggbox:snake1988@cluster0.xoo6m.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0', 
+        'mongodb+srv://imhoggbox:snake1988@cluster0.xoo6m.mongodb.net/pinmap?retryWrites=true&w=majority', 
         {
-          dbName: 'pinmap',
+          useNewUrlParser: true,
+          useUnifiedTopology: true,
           serverSelectionTimeoutMS: 5000,
           connectTimeoutMS: 10000,
           socketTimeoutMS: 45000,
@@ -122,7 +124,7 @@ connectDB();
 // VAPID Keys
 const vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY || 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs',
-  privateKey: process.env.VAPID_PRIVATE_KEY || 'your_private_vapid_key' // Replace with actual VAPID private key
+  privateKey: process.env.VAPID_PRIVATE_KEY || 'your_private_vapid_key' // Ensure this is set in .env
 };
 webpush.setVapidDetails(
   'mailto:admin@example.com',
