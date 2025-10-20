@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-
 const alertSchema = new mongoose.Schema({
   _id: { type: mongoose.Schema.Types.ObjectId, default: () => new mongoose.Types.ObjectId() },
   type: {
@@ -51,7 +50,6 @@ const alertSchema = new mongoose.Schema({
     }
   }
 });
-
 const offlineRegionSchema = new mongoose.Schema({
   bounds: {
     north: { type: Number, required: true, min: -90, max: 90 },
@@ -62,19 +60,17 @@ const offlineRegionSchema = new mongoose.Schema({
   name: { type: String, required: true },
   timestamp: { type: Date, default: Date.now }
 });
-
 const familyMemberSchema = new mongoose.Schema({
   email: { type: String, required: true },
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }
 });
-
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true, trim: true },
-  email: { 
-    type: String, 
-    required: true, 
-    unique: true, 
-    trim: true, 
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true,
     lowercase: true,
     match: [/^\S+@\S+\.\S+$/, 'Invalid email format']
   },
@@ -129,13 +125,31 @@ const userSchema = new mongoose.Schema({
       },
       message: 'Maximum 10 offline regions allowed'
     }
+  },
+  // Add these fields to the User schema
+  trialEndsAt: {
+    type: Date,
+    default: function() {
+      return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+    }
+  },
+  subscriptionStatus: {
+    type: String,
+    enum: ['trial', 'active', 'past_due', 'cancelled', 'inactive'],
+    default: 'trial'
+  },
+  stripeCustomerId: String,
+  stripeSubscriptionId: String,
+  premiumActivatedAt: Date,
+  lastReminderSent: Date,
+  reminderCount: {
+    type: Number,
+    default: 0
   }
 });
-
 // Indexes
 userSchema.index({ email: 1 }, { unique: true }); // Unique index for email
 userSchema.index({ 'alerts.location': '2dsphere' }); // Geospatial index for alerts
 userSchema.index({ lastLocation: '2dsphere' }, { sparse: true }); // Sparse index for lastLocation
 userSchema.index({ 'alerts.expiry': 1 }, { expireAfterSeconds: 0 }); // TTL index for alerts
-
 module.exports = mongoose.model('User', userSchema);

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v17';  // Bumped to v16 for enhanced offline image caching & fresh load optimizations
+const CACHE_NAME = 'gps-app-cache-v18';  // Bumped to v18 for subscription modal offline resilience & payment callback handling
 
 const urlsToCache = [
   '/',
@@ -20,7 +20,7 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('Caching assets for v16 (offline images & fresh load optimizations):', urlsToCache);
+        console.log('Caching assets for v18 (subscription modal offline & payment callback):', urlsToCache);
         return cache.addAll(urlsToCache);
       })
       .catch(error => {
@@ -50,17 +50,18 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   
-  // Skip cache for dynamic API & real-time (includes auth endpoints like /auth/refresh)
+  // Skip cache for dynamic API & real-time (includes auth & subscription endpoints like /api/subscription/verify-payment)
   if (url.pathname.startsWith('/api/') || url.pathname.includes('socket.io')) {
     event.respondWith(
       fetch(event.request).catch(error => {
-        console.error('API fetch failed (check auth/token):', error, 'URL:', event.request.url);
-        // Enhanced: Provide a more specific offline message for auth-related paths
+        console.error('API fetch failed (check auth/token/subscription):', error, 'URL:', event.request.url);
+        // Enhanced: Provide a more specific offline message for subscription-related paths
+        const isSubscriptionPath = url.pathname.startsWith('/api/subscription');
         const isAuthPath = url.pathname.startsWith('/api/auth');
         return new Response(JSON.stringify({ 
           error: 'Network unavailable', 
           offline: true, 
-          suggest: isAuthPath ? 'Reconnect and refresh token' : 'Check connection' 
+          suggest: isSubscriptionPath ? 'Reconnect to verify subscription' : isAuthPath ? 'Reconnect and refresh token' : 'Check connection' 
         }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
@@ -71,6 +72,7 @@ self.addEventListener('fetch', event => {
   }
 
   // Handle document requests (e.g., index.html) with network-first, cache fallback
+  // Enhanced: Ensure subscription modal & payment callback params are handled in offline (serve cached HTML)
   if (event.request.destination === 'document' || url.pathname === '/' || url.pathname.includes('index.html')) {
     event.respondWith(
       fetch(event.request)
@@ -86,17 +88,34 @@ self.addEventListener('fetch', event => {
           return networkResponse;
         })
         .catch(() => {
-          console.log('Serving cached index.html for offline:', url.pathname);
-          return caches.match('/index.html') || new Response(`
-            <!DOCTYPE html>
-            <html><head><title>Offline</title></head><body>
-              <h1>You're offline</h1>
-              <p>Reconnect to access the app. Cached content available.</p>
-              <script>if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(() => location.reload());</script>
-            </body></html>
-          `, { 
-            status: 503,
-            headers: { 'Content-Type': 'text/html' }
+          console.log('Serving cached index.html for offline (subscription modal intact):', url.pathname);
+          return caches.match('/index.html').then(cachedResponse => {
+            if (cachedResponse) {
+              // Enhanced: For payment callback URLs, append a note in offline mode
+              const isPaymentCallback = url.searchParams.get('payment') || url.searchParams.get('session_id');
+              if (isPaymentCallback) {
+                return new Response(cachedResponse.clone().text().then(html => {
+                  return html.replace(
+                    '</body>',
+                    `<script>if (window.location.search.includes('payment=success')) { alert('Payment success! (Offline mode - reconnect to verify)'); } else if (window.location.search.includes('payment=cancelled')) { alert('Payment cancelled.'); }</script></body>`
+                  );
+                }), {
+                  headers: cachedResponse.headers
+                });
+              }
+              return cachedResponse;
+            }
+            return new Response(`
+              <!DOCTYPE html>
+              <html><head><title>Offline</title></head><body>
+                <h1>You're offline</h1>
+                <p>Reconnect to access the app & verify subscription. Cached content available.</p>
+                <script>if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(() => location.reload());</script>
+              </body></html>
+            `, { 
+              status: 503,
+              headers: { 'Content-Type': 'text/html' }
+            });
           });
         })
     );

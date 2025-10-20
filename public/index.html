@@ -491,6 +491,192 @@
     #user-activity-list li { padding: 0.5rem; background: rgba(255,255,255,0.05); margin-bottom: 0.5rem; border-radius: 0.3rem; border-left: 3px solid #4CAF50; }
     #user-activity-list li strong { color: #4CAF50; }
     .no-activity { text-align: center; color: #ccc; font-style: italic; }
+#subscription-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 10001;
+  display: none;
+  justify-content: center;
+  align-items: center;
+  animation: fadeIn 0.3s ease;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+#subscription-modal.show {
+  opacity: 1;
+}
+
+#subscription-content {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 1rem;
+  padding: 2rem;
+  max-width: 500px;
+  width: 90%;
+  color: white;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.4s ease;
+  transform: translateY(20px);
+  opacity: 0;
+  transition: all 0.3s ease;
+}
+
+#subscription-modal.show #subscription-content {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes slideUp {
+  from { transform: translateY(50px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+#subscription-content h2 {
+  margin: 0 0 1rem 0;
+  font-size: 1.8rem;
+  text-align: center;
+}
+#subscription-content p {
+  margin: 0.5rem 0;
+  font-size: 1rem;
+  line-height: 1.6;
+}
+.premium-features {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.premium-features ul {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+.premium-features li {
+  padding: 0.5rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+}
+.premium-features li:before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: #4CAF50;
+  font-weight: bold;
+  font-size: 1.2rem;
+}
+.pricing {
+  text-align: center;
+  font-size: 2rem;
+  font-weight: bold;
+  margin: 1rem 0;
+  color: #FFD700;
+}
+.trial-info {
+  background: rgba(255, 165, 0, 0.2);
+  border-left: 4px solid #FFA500;
+  padding: 1rem;
+  margin: 1rem 0;
+  border-radius: 0.3rem;
+}
+.button-group {
+  display: flex;
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+#upgrade-button, #maybe-later-button {
+  flex: 1;
+  padding: 1rem;
+  border: none;
+  border-radius: 0.5rem;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+#upgrade-button {
+  background: #4CAF50;
+  color: white;
+}
+#upgrade-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+}
+#maybe-later-button {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+#maybe-later-button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+.locked-feature {
+  opacity: 0.5;
+  pointer-events: all; /* Change from none to allow click */
+  position: relative;
+  cursor: pointer; /* Add cursor pointer */
+}
+
+.locked-feature::after {
+  content: '🔒 Premium';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.9); /* Darker for better visibility */
+  color: #FFD700;
+  padding: 0.5rem 1rem; /* Larger for better touch targets */
+  border-radius: 0.3rem;
+  font-size: 0.9rem; /* Slightly larger */
+  font-weight: bold;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Add depth */
+}
+
+.locked-feature:hover::after {
+  background: rgba(0, 0, 0, 1);
+  transform: translate(-50%, -50%) scale(1.05); /* Slight scale on hover */
+  transition: all 0.2s ease;
+}
+#trial-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  background: linear-gradient(90deg, #FFA500, #FF8C00);
+  color: white;
+  padding: 0.5rem;
+  text-align: center;
+  z-index: 9999;
+  font-weight: bold;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+#trial-banner:hover {
+  background: linear-gradient(90deg, #FF8C00, #FFA500);
+}
+#subscription-loading {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10002;
+  color: white;
+  font-size: 1.2rem;
+}
   </style>
 </head>
 <body>
@@ -864,6 +1050,49 @@
     </form>
     <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
   </div>
+  <!-- Trial Banner -->
+<div id="trial-banner" style="display: none;">
+  <span id="trial-banner-text">🎉 Free Trial Active - <span id="trial-days-remaining">7</span> days remaining</span>
+</div>
+<!-- Subscription Modal -->
+<div id="subscription-modal">
+  <div id="subscription-content">
+    <h2 id="modal-title">🚀 Unlock Premium Features</h2>
+    <p id="modal-message">Your 7-day free trial has ended. Upgrade to Premium to continue enjoying all features!</p>
+  
+    <div class="premium-features">
+      <strong>Premium Features Include:</strong>
+      <ul>
+        <li>Advanced Alert Types (Traffic Cameras, Construction)</li>
+        <li>Multi-Stop Route Planning</li>
+        <li>Traffic Forecast & AI Predictions</li>
+        <li>Offline Maps Download</li>
+        <li>Family Sharing (Up to 5 Members)</li>
+        <li>EV Charging Station Integration</li>
+        <li>Custom Route Presets</li>
+        <li>Priority Rerouting</li>
+        <li>Ad-Free Experience</li>
+        <li>Leaderboard Access</li>
+      </ul>
+    </div>
+  
+    <div class="pricing">$4.99<span style="font-size: 1rem;">/month</span></div>
+  
+    <div class="trial-info" id="trial-info-box" style="display: none;">
+      <strong>⏰ Trial Info:</strong>
+      <p id="trial-status-text"></p>
+    </div>
+  
+    <div class="button-group">
+      <button id="upgrade-button">Upgrade Now</button>
+      <button id="maybe-later-button">Maybe Later</button>
+    </div>
+  </div>
+</div>
+  <!-- Add before closing </body> -->
+<div id="subscription-loading" style="display: none;">
+  <div>Checking subscription status...</div>
+</div>
   <script>
     const CONFIG = Object.freeze({
       REROUTE_CHECK_INTERVAL: 2000,
@@ -1449,17 +1678,13 @@
      */
     function findClosestRoutePoint(currentPos, path, heading, speed) {
       if (!path || path.length < 2) return { point: currentPos, index: 0 };
-  
       const currentLatLng = new google.maps.LatLng(currentPos);
       let bestPoint = currentPos;
       let bestScore = -Infinity;
       let closestIndex = 0;
-  
       if (!routeSpatialIndex) routeSpatialIndex = buildRouteIndex(path);
-  
       const gridSize = 0.001;
       const candidates = [];
-  
       // Collect candidates from nearby grid cells
       for (let dx = -1; dx <= 1; dx++) {
         for (let dy = -1; dy <= 1; dy++) {
@@ -1469,34 +1694,32 @@
           }
         }
       }
-  
       // Search candidates with early exit for very close matches
       for (const { point, idx } of candidates) {
         const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
-    
+ 
         if (distance <= CONFIG.SNAP_BUFFER) {
           const nextPoint = idx < path.length - 1 ? path[idx + 1] : point;
           const pointHeading = getCachedHeading(point, nextPoint);
           const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
-      
+   
           const proximityScore = (CONFIG.SNAP_BUFFER - distance) / CONFIG.SNAP_BUFFER * 0.6;
           const headingScore = (1 - headingDiff / 180) * 0.3;
           const speedScore = speed > 20 ? 0.1 : speed < 10 ? 0.05 : 0;
           const contextScore = idx < path.length - 1 ? 0.1 : 0.05;
-      
+   
           const totalScore = proximityScore + headingScore + speedScore + contextScore;
-      
+   
           if (totalScore > bestScore) {
             bestScore = totalScore;
             bestPoint = { lat: point.lat(), lng: point.lng() };
             closestIndex = idx;
           }
-      
+   
           // Early exit for very close matches
           if (distance < 20) break;
         }
       }
-  
       console.log('Map-matching score:', { point: bestPoint, score: bestScore, closestIndex });
       return { point: bestPoint, index: closestIndex };
     }
@@ -1921,7 +2144,7 @@
           console.error('Camera tween timeout, force cleanup');
         }
       }, 5000);
-     
+  
       ProgrammaticUpdateManager.start();
       new TWEEN.Tween({
         lat: map.getCenter().lat(),
@@ -2992,7 +3215,6 @@
         try {
           const response = await fetch(url, options);
           if (response.ok) return response;
-   
           if (response.status === 401) {
             const refreshed = await refreshToken();
             if (refreshed) {
@@ -3001,11 +3223,9 @@
               return await fetch(url, options);
             }
           }
-   
           throw new Error(`HTTP ${response.status}`);
         } catch (error) {
           if (i === retries - 1) throw error;
-   
           // Exponential backoff with jitter
           const jitter = Math.random() * 500;
           const delay = backoff * Math.pow(2, i) + jitter;
@@ -3817,7 +4037,6 @@
           const { point, index } = findClosestRoutePoint(pos, path, heading || navState.currentHeading, speed);
           navState.lastSnapIndex = index;
           const distanceToRoute = google.maps.geometry.spherical.computeDistanceBetween(new google.maps.LatLng(pos), new google.maps.LatLng(point));
-  
           if (distanceToRoute < CONFIG.SNAP_BUFFER) {
             pos = point; // Snapped to route, don't smooth
             snapped = true;
@@ -5435,7 +5654,303 @@
       }
       console.log('App initialization complete');
     }
-    initApp();
+// Subscription & Trial Management
+const PREMIUM_FEATURES = [
+  'traffic-camera-toggle',
+  'multi-stop-toggle',
+  'traffic-forecast-toggle',
+  'ev-charging-toggle',
+  'offline-download-btn',
+  'add-family-btn',
+  'route-preset',
+  'leaderboard-button'
+];
+let subscriptionStatus = {
+  isPremium: false,
+  isTrialActive: false,
+  trialDaysRemaining: 0,
+  trialEndsAt: null
+};
+async function checkSubscriptionStatus() {
+  const loadingDiv = document.getElementById('subscription-loading');
+  const isFirstCheck = !subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive;
+  
+  if (isFirstCheck) {
+    loadingDiv.style.display = 'flex';
+  }
+  
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    if (!token) return;
+
+    const response = await fetchWithRetry('/api/subscription/status', {
+      headers: { 'Authorization': `Bearer ${token.trim()}` }
+    });
+
+    if (!response.ok) throw new Error('Failed to check subscription');
+
+    subscriptionStatus = await response.json();
+    updateUIForSubscription();
+    
+    // Check if trial ended and should show upgrade modal
+    if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
+      const lastShown = localStorage.getItem('lastUpgradePrompt');
+      const now = Date.now();
+      
+      if (!lastShown || now - parseInt(lastShown) > 2 * 24 * 60 * 60 * 1000) {
+        showUpgradeModal('trial_ended');
+        localStorage.setItem('lastUpgradePrompt', now.toString());
+      }
+    }
+    
+    console.log('Subscription status:', subscriptionStatus);
+  } catch (error) {
+    console.error('Error checking subscription:', error);
+  } finally {
+    loadingDiv.style.display = 'none';
+  }
+}
+function updateUIForSubscription() {
+  const hasAccess = subscriptionStatus.isPremium || subscriptionStatus.isTrialActive;
+  // Update trial banner
+  const trialBanner = document.getElementById('trial-banner');
+  const trialDaysSpan = document.getElementById('trial-days-remaining');
+  if (subscriptionStatus.isTrialActive && !subscriptionStatus.isPremium) {
+    trialBanner.style.display = 'block';
+    trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
+  
+    // Add click handler to banner
+    trialBanner.onclick = () => showUpgradeModal('banner_click');
+  } else if (subscriptionStatus.isPremium) {
+    trialBanner.style.display = 'none';
+  } else {
+    trialBanner.style.display = 'none';
+  }
+  // Lock/unlock premium features
+  PREMIUM_FEATURES.forEach(featureId => {
+    const element = document.getElementById(featureId);
+    if (!element) return;
+  
+    if (hasAccess) {
+      element.classList.remove('locked-feature');
+      element.disabled = false;
+    } else {
+      element.classList.add('locked-feature');
+      element.disabled = true;
+    
+      // Add click handler to show upgrade modal
+      element.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showUpgradeModal('feature_click');
+      };
+    }
+  });
+  // Special handling for report button types
+  if (!hasAccess) {
+    document.querySelectorAll('.report-button').forEach(btn => {
+      const alertType = btn.getAttribute('data-alert-type');
+      if (['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(alertType)) {
+        btn.classList.add('locked-feature');
+        btn.onclick = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          showUpgradeModal('feature_click');
+          return false;
+        };
+      }
+    });
+  }
+  console.log('UI updated for subscription:', { hasAccess, isPremium: subscriptionStatus.isPremium, isTrialActive: subscriptionStatus.isTrialActive });
+}
+function showUpgradeModal(source) {
+  const modal = document.getElementById('subscription-modal');
+  const title = document.getElementById('modal-title');
+  const message = document.getElementById('modal-message');
+  const trialInfo = document.getElementById('trial-info-box');
+  const trialText = document.getElementById('trial-status-text');
+  
+  if (subscriptionStatus.isTrialActive) {
+    title.textContent = '⏰ Trial Ending Soon';
+    message.textContent = `You have ${subscriptionStatus.trialDaysRemaining} days left in your free trial. Upgrade now to ensure uninterrupted access to all premium features!`;
+    trialInfo.style.display = 'block';
+    trialText.textContent = `Trial ends on ${new Date(subscriptionStatus.trialEndsAt).toLocaleDateString()}`;
+  } else {
+    title.textContent = '🚀 Unlock Premium Features';
+    message.textContent = 'Your 7-day free trial has ended. Upgrade to Premium to continue enjoying all features!';
+    trialInfo.style.display = 'none';
+  }
+  
+  modal.style.display = 'flex';
+  // Trigger animation
+  requestAnimationFrame(() => {
+    modal.classList.add('show');
+  });
+  
+  console.log('Upgrade modal shown, source:', source);
+}
+document.getElementById('upgrade-button').addEventListener('click', async () => {
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    if (!token) {
+      showToast('Please log in to upgrade');
+      return;
+    }
+  
+    showToast('Redirecting to payment...');
+  
+    const response = await fetchWithRetry('/api/subscription/create-checkout', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token.trim()}`,
+        'Content-Type': 'application/json'
+      }
+    });
+  
+    if (!response.ok) throw new Error('Failed to create checkout session');
+  
+    const { url } = await response.json();
+    window.location.href = url; // Redirect to Stripe Checkout
+  
+  } catch (error) {
+    console.error('Error creating checkout:', error);
+    showToast('Failed to start checkout process. Please try again.');
+  }
+});
+document.getElementById('maybe-later-button').addEventListener('click', () => {
+  const modal = document.getElementById('subscription-modal');
+  modal.classList.remove('show');
+  
+  setTimeout(() => {
+    modal.style.display = 'none';
+  }, 300); // Match transition duration
+  
+  if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
+    showToast('Reminder: You can upgrade anytime from Settings');
+  }
+  
+  console.log('Upgrade modal dismissed');
+});
+// Handle payment success callback
+async function handlePaymentCallback() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const sessionId = urlParams.get('session_id');
+  const paymentStatus = urlParams.get('payment');
+  if (sessionId && paymentStatus === 'success') {
+    try {
+      const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+      const response = await fetchWithRetry('/api/subscription/verify-payment', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ sessionId })
+      });
+    
+      if (!response.ok) throw new Error('Payment verification failed');
+    
+      const data = await response.json();
+    
+      if (data.success) {
+        showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
+        subscriptionStatus.isPremium = true;
+        updateUIForSubscription();
+        
+        // Add confetti effect (optional - requires canvas-confetti library)
+        // Or create a simple celebration animation
+        createCelebration();
+        
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    } catch (error) {
+      console.error('Error verifying payment:', error);
+      showToast('Payment verification failed. Please contact support.');
+    }
+  } else if (paymentStatus === 'cancelled') {
+    showToast('Payment cancelled. You can upgrade anytime from Settings.');
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}
+// Simple celebration function (no external library needed)
+function createCelebration() {
+  const celebration = document.createElement('div');
+  celebration.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 5rem;
+    z-index: 10003;
+    animation: celebrate 2s ease-out forwards;
+    pointer-events: none;
+  `;
+  celebration.textContent = '🎉';
+  
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes celebrate {
+      0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
+      50% { transform: translate(-50%, -50%) scale(1.5); opacity: 1; }
+      100% { transform: translate(-50%, -50%) scale(1) translateY(-100px); opacity: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+  document.body.appendChild(celebration);
+  
+  setTimeout(() => {
+    celebration.remove();
+    style.remove();
+  }, 2000);
+}
+// Add upgrade button to settings
+document.getElementById('edit-profile-button').insertAdjacentHTML('afterend', `
+  <button id="manage-subscription-button" style="margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem; cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #FFD700;">
+    Manage Subscription
+  </button>
+`);
+document.getElementById('manage-subscription-button').addEventListener('click', () => {
+  if (subscriptionStatus.isPremium) {
+    // Show manage options
+    if (confirm('Do you want to cancel your premium subscription?')) {
+      cancelSubscription();
+    }
+  } else {
+    showUpgradeModal('settings');
+  }
+});
+async function cancelSubscription() {
+  try {
+    const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+    const response = await fetchWithRetry('/api/subscription/cancel', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token.trim()}` }
+    });
+  
+    if (!response.ok) throw new Error('Failed to cancel subscription');
+  
+    showToast('Subscription cancelled. You\'ll have access until the end of your billing period.');
+    await checkSubscriptionStatus();
+  
+  } catch (error) {
+    console.error('Error cancelling subscription:', error);
+    showToast('Failed to cancel subscription. Please try again.');
+  }
+}
+// Initialize subscription check on app load
+function initSubscription() {
+  checkSubscriptionStatus();
+  handlePaymentCallback();
+  // Check subscription status periodically (every hour)
+  setInterval(checkSubscriptionStatus, 60 * 60 * 1000);
+}
+// Call after successful authentication
+const originalInitApp = initApp;
+initApp = function() {
+  originalInitApp();
+  initSubscription();
+};
   </script>
 </body>
 </html>
