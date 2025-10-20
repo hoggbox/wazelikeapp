@@ -506,9 +506,11 @@
   opacity: 0;
   transition: opacity 0.3s ease;
 }
+
 #subscription-modal.show {
   opacity: 1;
 }
+
 #subscription-content {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   border-radius: 1rem;
@@ -522,10 +524,12 @@
   opacity: 0;
   transition: all 0.3s ease;
 }
+
 #subscription-modal.show #subscription-content {
   transform: translateY(0);
   opacity: 1;
 }
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -619,6 +623,7 @@
   position: relative;
   cursor: pointer; /* Add cursor pointer */
 }
+
 .locked-feature::after {
   content: '🔒 Premium';
   position: absolute;
@@ -635,6 +640,7 @@
   pointer-events: none;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Add depth */
 }
+
 .locked-feature:hover::after {
   background: rgba(0, 0, 0, 1);
   transform: translate(-50%, -50%) scale(1.05); /* Slight scale on hover */
@@ -1053,7 +1059,7 @@
   <div id="subscription-content">
     <h2 id="modal-title">🚀 Unlock Premium Features</h2>
     <p id="modal-message">Your 7-day free trial has ended. Upgrade to Premium to continue enjoying all features!</p>
- 
+  
     <div class="premium-features">
       <strong>Premium Features Include:</strong>
       <ul>
@@ -1069,14 +1075,14 @@
         <li>Leaderboard Access</li>
       </ul>
     </div>
- 
+  
     <div class="pricing">$4.99<span style="font-size: 1rem;">/month</span></div>
- 
+  
     <div class="trial-info" id="trial-info-box" style="display: none;">
       <strong>⏰ Trial Info:</strong>
       <p id="trial-status-text"></p>
     </div>
- 
+  
     <div class="button-group">
       <button id="upgrade-button">Upgrade Now</button>
       <button id="maybe-later-button">Maybe Later</button>
@@ -1691,24 +1697,25 @@
       // Search candidates with early exit for very close matches
       for (const { point, idx } of candidates) {
         const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
+ 
         if (distance <= CONFIG.SNAP_BUFFER) {
           const nextPoint = idx < path.length - 1 ? path[idx + 1] : point;
           const pointHeading = getCachedHeading(point, nextPoint);
           const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
-  
+   
           const proximityScore = (CONFIG.SNAP_BUFFER - distance) / CONFIG.SNAP_BUFFER * 0.6;
           const headingScore = (1 - headingDiff / 180) * 0.3;
           const speedScore = speed > 20 ? 0.1 : speed < 10 ? 0.05 : 0;
           const contextScore = idx < path.length - 1 ? 0.1 : 0.05;
-  
+   
           const totalScore = proximityScore + headingScore + speedScore + contextScore;
-  
+   
           if (totalScore > bestScore) {
             bestScore = totalScore;
             bestPoint = { lat: point.lat(), lng: point.lng() };
             closestIndex = idx;
           }
-  
+   
           // Early exit for very close matches
           if (distance < 20) break;
         }
@@ -1999,7 +2006,7 @@
             destMarkerElement.style.backgroundColor = 'green';
             destMarkerElement.style.borderRadius = '50%';
             destMarkerElement.style.border = '2px solid white';
-            destMarker= new google.maps.marker.AdvancedMarkerElement({
+            destMarker = new google.maps.marker.AdvancedMarkerElement({
               map: map,
               position: navState.destination,
               content: destMarkerElement,
@@ -2137,7 +2144,7 @@
           console.error('Camera tween timeout, force cleanup');
         }
       }, 5000);
- 
+  
       ProgrammaticUpdateManager.start();
       new TWEEN.Tween({
         lat: map.getCenter().lat(),
@@ -5645,8 +5652,6 @@
           console.error('Service Worker registration failed:', err);
         });
       }
-      // Initialize subscription features
-      initSubscription();
       console.log('App initialization complete');
     }
 // Subscription & Trial Management
@@ -5666,49 +5671,41 @@ let subscriptionStatus = {
   trialDaysRemaining: 0,
   trialEndsAt: null
 };
-let subscriptionCache = null;
-let cacheExpiry = 0;
 async function checkSubscriptionStatus() {
-  const now = Date.now();
-  if (subscriptionCache && now < cacheExpiry) {
-    return subscriptionCache;
-  }
- 
   const loadingDiv = document.getElementById('subscription-loading');
- 
+  const isFirstCheck = !subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive;
+  
+  if (isFirstCheck) {
+    loadingDiv.style.display = 'flex';
+  }
+  
   try {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
     if (!token) return;
+
     const response = await fetchWithRetry('/api/subscription/status', {
       headers: { 'Authorization': `Bearer ${token.trim()}` }
     });
+
     if (!response.ok) throw new Error('Failed to check subscription');
+
     subscriptionStatus = await response.json();
     updateUIForSubscription();
-   
+    
     // Check if trial ended and should show upgrade modal
     if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
       const lastShown = localStorage.getItem('lastUpgradePrompt');
       const now = Date.now();
-     
+      
       if (!lastShown || now - parseInt(lastShown) > 2 * 24 * 60 * 60 * 1000) {
         showUpgradeModal('trial_ended');
         localStorage.setItem('lastUpgradePrompt', now.toString());
       }
     }
-   
+    
     console.log('Subscription status:', subscriptionStatus);
-    subscriptionCache = subscriptionStatus;
-    cacheExpiry = now + (5 * 60 * 1000); // 5 min cache
   } catch (error) {
     console.error('Error checking subscription:', error);
-    // IMPORTANT: Assume free tier on error, don't block
-    subscriptionStatus = {
-      isPremium: false,
-      isTrialActive: false,
-      trialDaysRemaining: 0
-    };
-    updateUIForSubscription();
   } finally {
     loadingDiv.style.display = 'none';
   }
@@ -5721,7 +5718,7 @@ function updateUIForSubscription() {
   if (subscriptionStatus.isTrialActive && !subscriptionStatus.isPremium) {
     trialBanner.style.display = 'block';
     trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
- 
+  
     // Add click handler to banner
     trialBanner.onclick = () => showUpgradeModal('banner_click');
   } else if (subscriptionStatus.isPremium) {
@@ -5733,18 +5730,14 @@ function updateUIForSubscription() {
   PREMIUM_FEATURES.forEach(featureId => {
     const element = document.getElementById(featureId);
     if (!element) return;
- 
+  
     if (hasAccess) {
       element.classList.remove('locked-feature');
       element.disabled = false;
-      element.setAttribute('aria-disabled', 'false');
     } else {
       element.classList.add('locked-feature');
       element.disabled = true;
-      element.setAttribute('aria-disabled', 'true');
-      const label = element.getAttribute('aria-label') || element.textContent || element.innerText;
-      element.setAttribute('aria-label', `${label} - Premium Feature`);
-   
+    
       // Add click handler to show upgrade modal
       element.onclick = (e) => {
         e.preventDefault();
@@ -5759,10 +5752,6 @@ function updateUIForSubscription() {
       const alertType = btn.getAttribute('data-alert-type');
       if (['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(alertType)) {
         btn.classList.add('locked-feature');
-        btn.disabled = true;
-        btn.setAttribute('aria-disabled', 'true');
-        const label = btn.getAttribute('aria-label') || btn.textContent || btn.innerText;
-        btn.setAttribute('aria-label', `${label} - Premium Feature`);
         btn.onclick = (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -5775,47 +5764,41 @@ function updateUIForSubscription() {
   console.log('UI updated for subscription:', { hasAccess, isPremium: subscriptionStatus.isPremium, isTrialActive: subscriptionStatus.isTrialActive });
 }
 function showUpgradeModal(source) {
-  if (!sessionStorage.getItem('upgradePromptShown')) {
-    const modal = document.getElementById('subscription-modal');
-    const title = document.getElementById('modal-title');
-    const message = document.getElementById('modal-message');
-    const trialInfo = document.getElementById('trial-info-box');
-    const trialText = document.getElementById('trial-status-text');
- 
-    if (subscriptionStatus.isTrialActive) {
-      title.textContent = '⏰ Trial Ending Soon';
-      message.textContent = `You have ${subscriptionStatus.trialDaysRemaining} days left in your free trial. Upgrade now to ensure uninterrupted access to all premium features!`;
-      trialInfo.style.display = 'block';
-      trialText.textContent = `Trial ends on ${new Date(subscriptionStatus.trialEndsAt).toLocaleDateString()}`;
-    } else {
-      title.textContent = '🚀 Unlock Premium Features';
-      message.textContent = 'Your 7-day free trial has ended. Upgrade to Premium to continue enjoying all features!';
-      trialInfo.style.display = 'none';
-    }
- 
-    modal.style.display = 'flex';
-    // Trigger animation
-    requestAnimationFrame(() => {
-      modal.classList.add('show');
-    });
- 
-    sessionStorage.setItem('upgradePromptShown', 'true');
-    console.log('Upgrade modal shown, source:', source);
+  const modal = document.getElementById('subscription-modal');
+  const title = document.getElementById('modal-title');
+  const message = document.getElementById('modal-message');
+  const trialInfo = document.getElementById('trial-info-box');
+  const trialText = document.getElementById('trial-status-text');
+  
+  if (subscriptionStatus.isTrialActive) {
+    title.textContent = '⏰ Trial Ending Soon';
+    message.textContent = `You have ${subscriptionStatus.trialDaysRemaining} days left in your free trial. Upgrade now to ensure uninterrupted access to all premium features!`;
+    trialInfo.style.display = 'block';
+    trialText.textContent = `Trial ends on ${new Date(subscriptionStatus.trialEndsAt).toLocaleDateString()}`;
+  } else {
+    title.textContent = '🚀 Unlock Premium Features';
+    message.textContent = 'Your 7-day free trial has ended. Upgrade to Premium to continue enjoying all features!';
+    trialInfo.style.display = 'none';
   }
+  
+  modal.style.display = 'flex';
+  // Trigger animation
+  requestAnimationFrame(() => {
+    modal.classList.add('show');
+  });
+  
+  console.log('Upgrade modal shown, source:', source);
 }
 document.getElementById('upgrade-button').addEventListener('click', async () => {
-  const button = document.getElementById('upgrade-button');
-  button.disabled = true;
-  button.textContent = 'Processing...';
   try {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
     if (!token) {
       showToast('Please log in to upgrade');
       return;
     }
- 
+  
     showToast('Redirecting to payment...');
- 
+  
     const response = await fetchWithRetry('/api/subscription/create-checkout', {
       method: 'POST',
       headers: {
@@ -5823,32 +5806,29 @@ document.getElementById('upgrade-button').addEventListener('click', async () => 
         'Content-Type': 'application/json'
       }
     });
- 
+  
     if (!response.ok) throw new Error('Failed to create checkout session');
- 
+  
     const { url } = await response.json();
     window.location.href = url; // Redirect to Stripe Checkout
- 
+  
   } catch (error) {
     console.error('Error creating checkout:', error);
     showToast('Failed to start checkout process. Please try again.');
-  } finally {
-    button.disabled = false;
-    button.textContent = 'Upgrade Now';
   }
 });
 document.getElementById('maybe-later-button').addEventListener('click', () => {
   const modal = document.getElementById('subscription-modal');
   modal.classList.remove('show');
- 
+  
   setTimeout(() => {
     modal.style.display = 'none';
   }, 300); // Match transition duration
- 
+  
   if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
     showToast('Reminder: You can upgrade anytime from Settings');
   }
- 
+  
   console.log('Upgrade modal dismissed');
 });
 // Handle payment success callback
@@ -5867,20 +5847,20 @@ async function handlePaymentCallback() {
         },
         body: JSON.stringify({ sessionId })
       });
-   
+    
       if (!response.ok) throw new Error('Payment verification failed');
-   
+    
       const data = await response.json();
-   
+    
       if (data.success) {
         showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
         subscriptionStatus.isPremium = true;
         updateUIForSubscription();
-       
+        
         // Add confetti effect (optional - requires canvas-confetti library)
         // Or create a simple celebration animation
         createCelebration();
-       
+        
         // Clean URL
         window.history.replaceState({}, document.title, window.location.pathname);
       }
@@ -5907,7 +5887,7 @@ function createCelebration() {
     pointer-events: none;
   `;
   celebration.textContent = '🎉';
- 
+  
   const style = document.createElement('style');
   style.textContent = `
     @keyframes celebrate {
@@ -5918,7 +5898,7 @@ function createCelebration() {
   `;
   document.head.appendChild(style);
   document.body.appendChild(celebration);
- 
+  
   setTimeout(() => {
     celebration.remove();
     style.remove();
@@ -5932,20 +5912,14 @@ document.getElementById('edit-profile-button').insertAdjacentHTML('afterend', `
 `);
 document.getElementById('manage-subscription-button').addEventListener('click', () => {
   if (subscriptionStatus.isPremium) {
-    openCustomerPortal();
+    // Show manage options
+    if (confirm('Do you want to cancel your premium subscription?')) {
+      cancelSubscription();
+    }
   } else {
     showUpgradeModal('settings');
   }
 });
-async function openCustomerPortal() {
-  const token = localStorage.getItem('token');
-  const response = await fetch('/api/subscription/portal', {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${token}` }
-  });
-  const { url } = await response.json();
-  window.location.href = url;
-}
 async function cancelSubscription() {
   try {
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
@@ -5953,12 +5927,12 @@ async function cancelSubscription() {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token.trim()}` }
     });
- 
+  
     if (!response.ok) throw new Error('Failed to cancel subscription');
- 
+  
     showToast('Subscription cancelled. You\'ll have access until the end of your billing period.');
     await checkSubscriptionStatus();
- 
+  
   } catch (error) {
     console.error('Error cancelling subscription:', error);
     showToast('Failed to cancel subscription. Please try again.');
@@ -5971,6 +5945,12 @@ function initSubscription() {
   // Check subscription status periodically (every hour)
   setInterval(checkSubscriptionStatus, 60 * 60 * 1000);
 }
+// Call after successful authentication
+const originalInitApp = initApp;
+initApp = function() {
+  originalInitApp();
+  initSubscription();
+};
   </script>
 </body>
 </html>

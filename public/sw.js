@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-app-cache-v18';  // Bumped to v18 for subscription modal offline resilience & payment callback handling
+const CACHE_NAME = 'gps-app-cache-v19';  // Bumped to v18 for subscription modal offline resilience & payment callback handling
 
 const urlsToCache = [
   '/',
