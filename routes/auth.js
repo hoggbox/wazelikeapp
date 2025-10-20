@@ -24,8 +24,14 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
 
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', { readyState: mongoose.connection.readyState });
+      return res.status(503).json({ error: 'Database unavailable' });
+    }
+
     // Check for existing user
-    const existingUser = await User.findOne({ $or: [{ email: email.toLowerCase() }, { username }] });
+    const existingUser = await User.findOne({ $or: [{ email: email.toLowerCase() }, { username: username.trim() }] });
     if (existingUser) {
       console.error('Duplicate user:', { email, username, existing: existingUser.email });
       return res.status(400).json({ error: 'Username or email already exists' });
@@ -40,7 +46,7 @@ router.post('/register', async (req, res) => {
       firstName: firstName?.trim(),
       lastName: lastName?.trim(),
       birthdate: birthdate ? new Date(birthdate) : undefined,
-      sex,
+      sex: sex && ['Male', 'Female', 'Other'].includes(sex) ? sex : undefined,
       location: location?.trim(),
       joinDate: new Date(),
       isAdmin: email.toLowerCase() === 'imhoggbox@gmail.com',
@@ -49,7 +55,8 @@ router.post('/register', async (req, res) => {
       subscriptions: [],
       totalAlerts: 0,
       activeAlerts: 0,
-      points: 0
+      points: 0,
+      achievements: []
     });
 
     await user.save();
@@ -69,11 +76,21 @@ router.post('/register', async (req, res) => {
         points: user.points,
         joinDate: user.joinDate,
         familyMembers: user.familyMembers,
-        offlineRegions: user.offlineRegions
+        offlineRegions: user.offlineRegions,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        birthdate: user.birthdate,
+        sex: user.sex,
+        location: user.location,
+        achievements: user.achievements
       }
     });
   } catch (error) {
-    console.error('Registration error:', error.message, error.stack);
+    console.error('Registration error:', {
+      message: error.message,
+      stack: error.stack,
+      body: req.body
+    });
     if (error.code === 11000) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
@@ -93,9 +110,15 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', { readyState: mongoose.connection.readyState });
+      return res.status(503).json({ error: 'Database unavailable' });
+    }
+
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() }).select(
-      '_id username email password isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions'
+      '_id username email password isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions firstName lastName birthdate sex location achievements'
     );
     if (!user || user.isBanned) {
       console.error('Login failed:', { email, reason: !user ? 'User not found' : 'User banned' });
@@ -124,11 +147,21 @@ router.post('/login', async (req, res) => {
         points: user.points,
         joinDate: user.joinDate,
         familyMembers: user.familyMembers,
-        offlineRegions: user.offlineRegions
+        offlineRegions: user.offlineRegions,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        birthdate: user.birthdate,
+        sex: user.sex,
+        location: user.location,
+        achievements: user.achievements
       }
     });
   } catch (error) {
-    console.error('Login error:', error.message, error.stack);
+    console.error('Login error:', {
+      message: error.message,
+      stack: error.stack,
+      email: req.body.email
+    });
     res.status(500).json({ error: 'Login failed', details: error.message });
   }
 });
@@ -142,6 +175,12 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ error: 'No token provided', details: 'Authentication required' });
     }
 
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', { readyState: mongoose.connection.readyState });
+      return res.status(503).json({ error: 'Database unavailable' });
+    }
+
     // Verify token (ignoring expiration for refresh)
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret', { ignoreExpiration: true });
     if (!decoded.id || !mongoose.Types.ObjectId.isValid(decoded.id)) {
@@ -151,7 +190,7 @@ router.post('/refresh', async (req, res) => {
 
     // Find user
     const user = await User.findById(decoded.id).select(
-      '_id username email isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions'
+      '_id username email isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions firstName lastName birthdate sex location achievements'
     );
     if (!user || user.isBanned) {
       console.error('Refresh failed:', { id: decoded.id, reason: !user ? 'User not found' : 'User banned' });
@@ -173,11 +212,20 @@ router.post('/refresh', async (req, res) => {
         points: user.points,
         joinDate: user.joinDate,
         familyMembers: user.familyMembers,
-        offlineRegions: user.offlineRegions
+        offlineRegions: user.offlineRegions,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        birthdate: user.birthdate,
+        sex: user.sex,
+        location: user.location,
+        achievements: user.achievements
       }
     });
   } catch (error) {
-    console.error('Token refresh error:', error.message, error.stack);
+    console.error('Token refresh error:', {
+      message: error.message,
+      stack: error.stack
+    });
     res.status(error.name === 'JsonWebTokenError' ? 401 : 500).json({
       error: 'Token refresh failed',
       details: error.name === 'JsonWebTokenError' ? 'Invalid token' : error.message
@@ -192,6 +240,12 @@ router.get('/profile/:id', async (req, res) => {
     if (!token || token === 'undefined' || !token.includes('.')) {
       console.error('No valid token provided for profile fetch:', { id: req.params.id });
       return res.status(401).json({ error: 'No token provided', details: 'Authentication required' });
+    }
+
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', { readyState: mongoose.connection.readyState });
+      return res.status(503).json({ error: 'Database unavailable' });
     }
 
     // Verify token
@@ -232,16 +286,20 @@ router.get('/profile/:id', async (req, res) => {
       sex: targetUser.sex,
       location: targetUser.location,
       joinDate: targetUser.joinDate,
-      totalAlerts: targetUser.totalAlerts,
-      activeAlerts: targetUser.activeAlerts,
-      points: targetUser.points,
-      achievements: targetUser.achievements,
+      totalAlerts: targetUser.totalAlerts || 0,
+      activeAlerts: targetUser.activeAlerts || 0,
+      points: targetUser.points || 0,
+      achievements: targetUser.achievements || [],
       isAdmin: targetUser.isAdmin,
-      familyMembers: targetUser.familyMembers,
-      offlineRegions: targetUser.offlineRegions
+      familyMembers: targetUser.familyMembers || [],
+      offlineRegions: targetUser.offlineRegions || []
     });
   } catch (error) {
-    console.error('Profile fetch error:', error.message, error.stack);
+    console.error('Profile fetch error:', {
+      message: error.message,
+      stack: error.stack,
+      targetId: req.params.id
+    });
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({
       error: 'Failed to fetch profile',
       details: error.name === 'TokenExpiredError' ? 'Token expired' : error.message
@@ -256,6 +314,12 @@ router.put('/profile', async (req, res) => {
     if (!token || token === 'undefined' || !token.includes('.')) {
       console.error('No valid token provided for profile update');
       return res.status(401).json({ error: 'No token provided', details: 'Authentication required' });
+    }
+
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', { readyState: mongoose.connection.readyState });
+      return res.status(503).json({ error: 'Database unavailable' });
     }
 
     // Verify token
@@ -326,16 +390,20 @@ router.put('/profile', async (req, res) => {
       sex: user.sex,
       location: user.location,
       joinDate: user.joinDate,
-      totalAlerts: user.totalAlerts,
-      activeAlerts: user.activeAlerts,
-      points: user.points,
-      achievements: user.achievements,
+      totalAlerts: user.totalAlerts || 0,
+      activeAlerts: user.activeAlerts || 0,
+      points: user.points || 0,
+      achievements: user.achievements || [],
       isAdmin: user.isAdmin,
-      familyMembers: user.familyMembers,
-      offlineRegions: user.offlineRegions
+      familyMembers: user.familyMembers || [],
+      offlineRegions: user.offlineRegions || []
     });
   } catch (error) {
-    console.error('Profile update error:', error.message, error.stack);
+    console.error('Profile update error:', {
+      message: error.message,
+      stack: error.stack,
+      userId: decoded?.id
+    });
     if (error.code === 11000) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
@@ -353,6 +421,12 @@ router.post('/subscribe', async (req, res) => {
     if (!token || token === 'undefined' || !token.includes('.')) {
       console.error('No valid token provided for subscription');
       return res.status(401).json({ error: 'No token provided', details: 'Authentication required' });
+    }
+
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', { readyState: mongoose.connection.readyState });
+      return res.status(503).json({ error: 'Database unavailable' });
     }
 
     // Verify token
@@ -393,7 +467,11 @@ router.post('/subscribe', async (req, res) => {
 
     res.json({ message: 'Subscribed to notifications' });
   } catch (error) {
-    console.error('Subscription error:', error.message, error.stack);
+    console.error('Subscription error:', {
+      message: error.message,
+      stack: error.stack,
+      userId: decoded?.id
+    });
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({
       error: 'Failed to subscribe',
       details: error.name === 'TokenExpiredError' ? 'Token expired' : error.message
@@ -408,6 +486,12 @@ router.post('/unsubscribe', async (req, res) => {
     if (!token || token === 'undefined' || !token.includes('.')) {
       console.error('No valid token provided for unsubscription');
       return res.status(401).json({ error: 'No token provided', details: 'Authentication required' });
+    }
+
+    // Check MongoDB connection
+    if (mongoose.connection.readyState !== 1) {
+      console.error('MongoDB not connected:', { readyState: mongoose.connection.readyState });
+      return res.status(503).json({ error: 'Database unavailable' });
     }
 
     // Verify token
@@ -446,7 +530,11 @@ router.post('/unsubscribe', async (req, res) => {
 
     res.json({ message: 'Unsubscribed from notifications' });
   } catch (error) {
-    console.error('Unsubscription error:', error.message, error.stack);
+    console.error('Unsubscription error:', {
+      message: error.message,
+      stack: error.stack,
+      userId: decoded?.id
+    });
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({
       error: 'Failed to unsubscribe',
       details: error.name === 'TokenExpiredError' ? 'Token expired' : error.message
