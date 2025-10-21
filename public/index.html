@@ -13,7 +13,7 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
   <script src="https://browser.sentry-cdn.com/7.x.x/bundle.min.js"></script>
   <script>
-    if (window.location.hostname !== 'localhost') {
+    if (window.Sentry && window.location.hostname !== 'localhost') {
       Sentry.init({
         dsn: 'YOUR_SENTRY_DSN',
         environment: 'production',
@@ -1243,15 +1243,16 @@
     let lastBoundsCheck = 0;
     const BOUNDS_CHECK_INTERVAL = 1000;
     let lastHeadingUpdate = 0;
+    let googleMapsScriptLoaded = false;
     const ProgrammaticUpdateManager = {
   _isUpdating: false,
   _callbacks: [],
   _timeoutId: null, // ✅ Add timeout tracking
-  
+ 
   start() {
     this._isUpdating = true;
     this._callbacks = []; // ✅ Clear old callbacks
-    
+   
     // ✅ Safety timeout
     if (this._timeoutId) clearTimeout(this._timeoutId);
     this._timeoutId = setTimeout(() => {
@@ -1261,18 +1262,18 @@
       }
     }, 3000);
   },
-  
+ 
   end(callback = null) {
     if (callback) {
       this._callbacks.push(callback);
     }
-    
+   
     // Clear timeout
     if (this._timeoutId) {
       clearTimeout(this._timeoutId);
       this._timeoutId = null;
     }
-    
+   
     requestAnimationFrame(() => {
       this._isUpdating = false;
       const callbacks = [...this._callbacks]; // ✅ Copy array
@@ -1286,7 +1287,7 @@
       });
     });
   },
-  
+ 
   forceEnd() {
     this._isUpdating = false;
     this._callbacks = [];
@@ -1295,7 +1296,7 @@
       this._timeoutId = null;
     }
   },
-  
+ 
   get isActive() {
     return this._isUpdating;
   }
@@ -1434,7 +1435,7 @@
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-     
+    
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1449,11 +1450,11 @@
               level: 'error'
             });
           }
-     
+    
           if (fallback) {
             return fallback(error);
           }
-     
+    
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -1941,12 +1942,10 @@
           lng < -180 || lng > 180) {
         throw new Error('Invalid coordinates');
       }
- 
       const token = TokenManager.get();
       if (!TokenManager.isValid()) {
         throw new Error('Invalid token');
       }
- 
       const response = await fetchWithRetry('/api/geocode', {
         method: 'POST',
         headers: {
@@ -1958,14 +1957,18 @@
           lng: parseFloat(lng.toFixed(6))
         })
       });
- 
       if (!response.ok) {
         throw new Error('Geocoding failed');
       }
       return response.json();
     }
     function loadGoogleMaps() {
+      if (googleMapsScriptLoaded) {
+        console.log('Google Maps script already loaded, skipping');
+        return;
+      }
       console.log('Loading Google Maps API...');
+      googleMapsScriptLoaded = true;
       const script = document.createElement('script');
       script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
       script.async = true;
@@ -1973,7 +1976,7 @@
       script.onerror = () => {
         console.error('Failed to load Google Maps script');
         showToast('Failed to load map. Check network or API key.');
-        setTimeout(loadGoogleMaps, 2000);
+        setTimeout(() => { googleMapsScriptLoaded = false; loadGoogleMaps(); }, 2000);
       };
       script.onload = () => {
         console.log('Google Maps script loaded successfully');
@@ -1991,7 +1994,7 @@
           Geometry: !!google.maps?.geometry
         });
         showToast('Failed to load map libraries. Retrying...');
-        setTimeout(loadGoogleMaps, 2000);
+        setTimeout(() => { googleMapsScriptLoaded = false; loadGoogleMaps(); }, 2000);
         return;
       }
       console.log('Google Maps API loaded successfully');
@@ -2299,19 +2302,19 @@
   if (!shouldUpdateCameraView(actualPos, heading, Date.now() - navState.lastCameraUpdateTime)) {
     return;
   }
-  
+ 
   const { zoom, tilt, turnHeading } = getDynamicZoom(actualPos, speed);
   const finalHeading = navState.mapOrientation === 'north-up' ? 0 : (turnHeading || heading);
   const lookaheadPoint = new google.maps.LatLng(predictedPos);
-  
+ 
   // ✅ Cancel any existing tween first
   if (currentHeadingTween) {
     currentHeadingTween.stop();
     currentHeadingTween = null;
   }
-  
+ 
   ProgrammaticUpdateManager.start();
-  
+ 
   const tween = new TWEEN.Tween({
     lat: map.getCenter().lat(),
     lng: map.getCenter().lng(),
@@ -2342,10 +2345,10 @@
     ProgrammaticUpdateManager.end();
     currentHeadingTween = null;
   });
-  
+ 
   currentHeadingTween = tween;
   tween.start();
-  
+ 
   lastCameraPosition = actualPos;
   lastHeading = finalHeading;
   navState.lastCameraUpdateTime = Date.now();
@@ -3031,11 +3034,9 @@
       },
       async process() {
         if (!navigator.onLine || this.queue.length === 0) return;
- 
         const pending = [...this.queue];
         this.queue = [];
         this.save();
- 
         for (const action of pending) {
           try {
             await this.executeAction(action);
@@ -3044,7 +3045,6 @@
             this.queue.push(action); // Re-queue
           }
         }
- 
         this.save();
       },
       async executeAction(action) {
@@ -3066,23 +3066,19 @@
       check() {
         const now = Date.now();
         const issues = [];
- 
         // Check GPS
         if (navState.isNavigating && now - this.lastGPSUpdate > 10000) {
           issues.push('GPS signal lost');
         }
- 
         // Check Socket
         if (socket && !socket.connected) {
           issues.push('Server connection lost');
         }
- 
         // Check token expiration
         if (!TokenManager.isValid()) {
           issues.push('Session expired');
           this.handleSessionExpired();
         }
- 
         // Check memory usage (if available)
         if (performance.memory) {
           const usedMB = performance.memory.usedJSHeapSize / 1048576;
@@ -3091,12 +3087,10 @@
             console.warn('Memory usage:', usedMB.toFixed(2), 'MB');
           }
         }
- 
         if (issues.length > 0) {
           console.warn('Health check issues:', issues);
           this.reportIssues(issues);
         }
- 
         return issues.length === 0;
       },
       handleSessionExpired() {
@@ -3504,7 +3498,7 @@
             options.headers['Authorization'] = `Bearer ${token}`;
           }
           const response = await fetch(url, options);
-     
+    
           // Check for rate limiting
           if (response.status === 429) {
             const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
@@ -3513,7 +3507,7 @@
             await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
             continue;
           }
-     
+    
           if (response.ok) return response;
           if (response.status === 401) {
             const refreshed = await refreshToken();
@@ -3665,13 +3659,13 @@
     return;
   }
   isPostingAlert = true;
-  
+ 
   // ✅ Reduce timeout to 5s
   postingTimeout = setTimeout(() => {
     console.warn('postAlert timeout, releasing lock');
     isPostingAlert = false;
   }, 5000);
-  
+ 
   // ... rest of function
       if (!navState.tempAlertData || !navState.tempMarker) {
         console.error('No alert data or marker to post');
@@ -3880,7 +3874,7 @@
     }
     async function deleteAlert(id, item) {
   console.log('deleteAlert called:', id);
-  
+ 
   // Optimistic UI update
   item?.remove();
   const marker = markers.get(id);
@@ -3888,14 +3882,14 @@
     releaseMarker(marker);
     markers.delete(id);
   }
-  
+ 
   // Remove from currentAlerts immediately
   const alertIndex = currentAlerts.findIndex(a => a._id === id);
   if (alertIndex !== -1) {
     currentAlerts.splice(alertIndex, 1);
     displayAlertsInHud(currentAlerts); // ✅ Update HUD immediately
   }
-  
+ 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -3904,31 +3898,31 @@
       document.getElementById('auth-container').style.display = 'flex';
       return;
     }
-    
+   
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    
+   
     if (!response.ok) {
       throw new Error(`Failed to delete: ${response.statusText}`);
     }
-    
+   
     // ✅ FIX: Always emit socket event AND poll as backup
     if (socket && socket.connected) {
       socket.emit('alertDeleted', id);
       console.log('Emitted alertDeleted event:', id);
     }
-    
+   
     // ✅ FIX: Poll regardless of socket status for redundancy
     setTimeout(() => pollAlerts(), 1000);
-    
+   
     showToast('Alert deleted successfully.');
-    
+   
     // Refresh profile if own alert
     const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
     fetchProfile(ownId, true).then(populateAccountProfile);
-    
+   
   } catch (error) {
     console.error('Error deleting alert:', error);
     // ✅ FIX: Force sync on error
@@ -5766,10 +5760,9 @@ function initSocket(token, userId) {
   pollAlerts();
   fetchAndDisplayMarkers(map, navState.userLocation);
 }, 2000);
-
 socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
-  
+ 
   // ✅ ENHANCED: More robust type checking
   if (!alert || typeof alert !== 'object' ||
       !alert._id || typeof alert._id !== 'string' ||
@@ -5781,34 +5774,34 @@ socket.on('alert', (alert) => {
     console.error('Invalid alert structure:', alert);
     return;
   }
-  
+ 
   // ✅ Validate timestamp
   if (!alert.timestamp || new Date(alert.timestamp) > new Date()) {
     console.error('Invalid alert timestamp:', alert.timestamp);
     return;
   }
-  
+ 
   // ✅ Ensure userId exists
   if (!alert.userId || typeof alert.userId !== 'object') {
     console.warn('Alert missing userId, using fallback');
     alert.userId = { username: 'Anonymous', _id: null };
   }
-  
+ 
   const alertId = alert._id;
   const isTrafficCamera = alert.type === 'Traffic Camera';
-  
+ 
   // Skip if filtered out
   if (isTrafficCamera && !showTrafficCameras) {
     console.log('Skipping traffic camera alert: disabled in settings');
     return;
   }
-  
+ 
   const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
   if (navState.alertFilters[filterKey] === false) {
     console.log('Skipping filtered alert:', filterKey);
     return;
   }
-  
+ 
   if (!isDuplicateAlert(alert)) {
     // ✅ Dedupe in currentAlerts
     if (!currentAlerts.some(a => a._id === alertId)) {
@@ -5818,7 +5811,7 @@ socket.on('alert', (alert) => {
     } else {
       console.log('Alert already in currentAlerts, skipping push:', alertId);
     }
-    
+   
     // ✅ Dedupe marker creation
     if (!markers.has(alertId)) {
       const marker = getMarker({
@@ -5832,7 +5825,7 @@ socket.on('alert', (alert) => {
     } else {
       console.log('Marker already exists for socket alert, skipping creation:', alertId);
     }
-    
+   
     if (isTrafficCamera) {
       cameraPositions.push({
         lat: alert.location.coordinates[1],
@@ -5841,40 +5834,39 @@ socket.on('alert', (alert) => {
     } else if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
     }
-    
+   
     showToast(`New ${alert.type} alert received.`);
   } else {
     console.log('Duplicate alert ignored via cache:', alertId);
   }
-  
+ 
   debouncedFullSync();
 });
-
 socket.on('alertDeleted', (alertId) => {
   // ✅ Enhanced validation
   if (!alertId || typeof alertId !== 'string' || alertId.length !== 24) {
     console.error('Invalid alertDeleted event:', alertId);
     return;
   }
-  
+ 
   console.log('Alert deleted via Socket.IO:', alertId);
-  
+ 
   // Remove marker
   const marker = markers.get(alertId);
   if (marker) {
     releaseMarker(marker);
     markers.delete(alertId);
   }
-  
+ 
   // Remove from currentAlerts
   const prevLength = currentAlerts.length;
   currentAlerts = currentAlerts.filter(a => a._id !== alertId);
-  
+ 
   // ✅ FIX: Always update HUD if alert was removed
   if (currentAlerts.length !== prevLength) {
     displayAlertsInHud(currentAlerts);
   }
-  
+ 
   // Handle active hazard reroute
   if (alertId === navState.currentHazard?._id) {
     navState.currentHazard = null;
@@ -5887,12 +5879,12 @@ socket.on('alertDeleted', (alertId) => {
       lockNavigation();
     }
   }
-  
+ 
   // ✅ FIX: Update verification HUD if active
   if (currentVerificationAlertId === alertId) {
     dismissVerificationHud();
   }
-  
+ 
   showToast('Alert removed.');
   debouncedFullSync(); // ✅ Add this
 });
@@ -5940,6 +5932,36 @@ socket.on('alertDeleted', (alertId) => {
         }
       });
 }
+    function updateTrackedUserLocation(data) {
+      if (!data || !data.location || !data.userId) return;
+      const { location, userId } = data;
+      const pos = { lat: location.coordinates[1], lng: location.coordinates[0] };
+      // Find or create marker for this user
+      let marker = trackedMarkers.get(userId);
+      if (!marker) {
+        // Create new marker, perhaps with different icon for family
+        const content = document.createElement('div');
+        content.style.width = '20px';
+        content.style.height = '20px';
+        content.style.backgroundColor = 'blue'; // or something to distinguish
+        content.style.borderRadius = '50%';
+        content.style.border = '2px solid white';
+        marker = new google.maps.marker.AdvancedMarkerElement({
+          map: map,
+          position: pos,
+          content: content,
+          title: `Family: ${userId}` // or get username
+        });
+        trackedMarkers.set(userId, marker);
+        // Add to trackingUsers if not there
+        if (!trackingUsers.includes(userId)) {
+          trackingUsers.push(userId);
+        }
+      } else {
+        marker.position = pos;
+      }
+      console.log('Updated tracked user location:', userId, pos);
+    }
     function initApp() {
       console.log('Initializing app...');
       const token = TokenManager.get();
