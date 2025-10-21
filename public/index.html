@@ -1143,7 +1143,7 @@
       NAV_STATE_SAVE_INTERVAL: 10000,
       NAV_STATE_EXPIRY: 300000
     });
-    const VAPID_PUBLIC_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+    const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
     const mapId = '2666b5bd496d9c6026f43f82';
     const mapSkins = {
       default: [],
@@ -1916,7 +1916,7 @@
     function loadGoogleMaps() {
       console.log('Loading Google Maps API...');
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
       script.async = true;
       script.defer = true;
       script.onerror = () => {
