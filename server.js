@@ -1,3 +1,4 @@
+// server.js (Updated)
 require('dotenv').config(); // Load environment variables
 const express = require('express');
 const mongoose = require('mongoose');
@@ -8,10 +9,10 @@ const rateLimit = require('express-rate-limit');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const User = require('./models/User');
 const authRoutes = require('./routes/auth');
 const authMiddleware = require('./middleware/auth');
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -21,22 +22,20 @@ const io = new Server(server, {
     credentials: true
   }
 });
-
 // Enable trust proxy for hosting platforms
 app.set('trust proxy', 1);
-
 // Middleware
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:3000',
   credentials: true
 }));
 app.use(express.json());
+app.use(express.raw({type: 'application/json'})); // For Stripe webhook
 app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => {
   req.io = io;
   next();
 });
-
 // Rate Limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -45,13 +44,11 @@ const limiter = rateLimit({
   legacyHeaders: false
 });
 app.use(limiter);
-
 // Serve index.html for root route
 app.get('/', (req, res) => {
   console.log('Serving index.html for root route');
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-
 // MongoDB Connection with Retry
 async function connectDB() {
   let retries = 5;
@@ -60,10 +57,9 @@ async function connectDB() {
       console.log('=== Attempting MongoDB Connection ===');
       console.log('MongoDB URI exists:', !!process.env.MONGODB_URI);
       console.log('Retry attempts remaining:', retries);
-
       // Updated: Explicit MongoDB connection with options for reliability
-      await mongoose.connect(process.env.MONGODB_URI || 
-        'mongodb+srv://imhoggbox:snake1988@cluster0.xoo6m.mongodb.net/pinmap?retryWrites=true&w=majority', 
+      await mongoose.connect(process.env.MONGODB_URI ||
+        'mongodb+srv://imhoggbox:snake1988@cluster0.xoo6m.mongodb.net/pinmap?retryWrites=true&w=majority',
         {
           useNewUrlParser: true,
           useUnifiedTopology: true,
@@ -73,15 +69,12 @@ async function connectDB() {
           maxPoolSize: 10
         }
       );
-
       console.log('✅ MongoDB connected to Atlas');
       console.log('Database name:', mongoose.connection.db.databaseName);
       console.log('Connection state:', mongoose.connection.readyState);
-
       // Ensure indexes
       const existingIndexes = await User.collection.indexes();
       const indexNames = existingIndexes.map(index => index.name);
-
       if (!indexNames.includes('alerts.location_2dsphere')) {
         await User.collection.createIndex({ 'alerts.location': '2dsphere' });
         console.log('Created 2dsphere index on alerts.location');
@@ -98,7 +91,6 @@ async function connectDB() {
         await User.collection.createIndex({ email: 1 }, { unique: true });
         console.log('Created unique index on email');
       }
-
       console.log('=== MongoDB Connection Complete ===');
       return;
     } catch (error) {
@@ -120,7 +112,6 @@ async function connectDB() {
   }
 }
 connectDB();
-
 // VAPID Keys
 const vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY || 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs',
@@ -131,21 +122,85 @@ webpush.setVapidDetails(
   vapidKeys.publicKey,
   vapidKeys.privateKey
 );
-
 // Routes
 app.get('/api/vapid-public-key', (req, res) => {
   console.log('Serving VAPID public key');
   res.json({ publicKey: vapidKeys.publicKey });
 });
-
 app.use('/api/auth', authRoutes);
-
+// Geocode Proxy Endpoint
+app.post('/api/geocode', authMiddleware, async (req, res) => {
+  const { lat, lng } = req.body;
+  const response = await fetch(
+    `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${process.env.GOOGLE_MAPS_API_KEY}`
+  );
+  const data = await response.json();
+  res.json(data);
+});
+// Stripe Webhook Handler
+app.post('/api/webhooks/stripe', express.raw({type: 'application/json'}), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+ 
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err) {
+    console.error('Webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+ 
+  // Handle the event
+  switch (event.type) {
+    case 'checkout.session.completed':
+      const session = event.data.object;
+      await handleSuccessfulPayment(session);
+      break;
+   
+    case 'customer.subscription.deleted':
+      const subscription = event.data.object;
+      await handleCancellation(subscription);
+      break;
+   
+    case 'invoice.payment_failed':
+      await handleFailedPayment(event.data.object);
+      break;
+  }
+ 
+  res.json({received: true});
+});
+async function handleSuccessfulPayment(session) {
+  const userId = session.client_reference_id;
+  await User.findByIdAndUpdate(userId, {
+    isPremium: true,
+    subscriptionId: session.subscription,
+    trialEndsAt: null,
+    subscriptionStartedAt: new Date()
+  });
+}
+async function handleCancellation(subscription) {
+  const userId = subscription.client_reference_id; // Assuming stored during creation
+  await User.findByIdAndUpdate(userId, {
+    isPremium: false,
+    subscriptionId: null,
+    trialEndsAt: null
+  });
+}
+async function handleFailedPayment(invoice) {
+  const userId = invoice.subscription.client_reference_id; // Assuming stored
+  await User.findByIdAndUpdate(userId, {
+    isPremium: false,
+    subscriptionId: null
+  });
+}
 // Alert Posting Endpoint
 app.post('/api/alerts', authMiddleware, async (req, res) => {
   try {
     const { type, location, address, timestamp } = req.body;
     console.log('Received alert post request:', { type, location, address, timestamp, userId: req.user._id });
-
     // Validate input
     if (!type || !location || !location.coordinates || location.coordinates.length !== 2) {
       console.error('Invalid alert data:', { type, location });
@@ -170,20 +225,17 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       console.error('Invalid timestamp:', timestamp);
       return res.status(400).json({ error: 'Invalid timestamp' });
     }
-
     // Check MongoDB connection
     if (mongoose.connection.readyState !== 1) {
       console.error('MongoDB not connected! State:', mongoose.connection.readyState);
       return res.status(503).json({ error: 'Database connection unavailable' });
     }
-
     // Find user
     const user = await User.findById(req.user._id);
     if (!user) {
       console.error('User not found:', req.user._id);
       return res.status(404).json({ error: 'User not found' });
     }
-
     // Check for duplicate alert (within ~10m, 30 seconds)
     const existingIndex = user.alerts.findIndex(a =>
       a.type === type &&
@@ -207,7 +259,6 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       };
       return res.status(409).json({ alert: populatedAlert, message: 'Duplicate alert ignored' });
     }
-
     // Create new alert
     const alert = {
       _id: new mongoose.Types.ObjectId(),
@@ -221,13 +272,11 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       votes: { up: 0, down: 0, upVoters: [], downVoters: [] },
       expiry: new Date(Date.now() + (type === 'Traffic Camera' ? 24 * 3600000 : 3600000)) // 24h for traffic cameras, 1h for others
     };
-
     // Add alert to user and update stats
     user.alerts.push(alert);
     user.totalAlerts = (user.totalAlerts || 0) + 1;
     user.activeAlerts = (user.activeAlerts || 0) + 1;
     user.points = (user.points || 0) + (type === 'Traffic Camera' ? 20 : 10); // Bonus for traffic cameras
-
     console.log('Saving alert to MongoDB:', { alertId: alert._id, type, userId: user._id });
     try {
       await user.save();
@@ -241,7 +290,6 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       });
       throw saveError;
     }
-
     // Prepare response
     const populatedAlert = {
       _id: alert._id,
@@ -253,7 +301,6 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       expiry: alert.expiry,
       userId: { _id: user._id, username: user.username }
     };
-
     // Emit Socket.IO events
     req.io.emit('alert', populatedAlert);
     if (user.familyMembers?.length > 0) {
@@ -262,7 +309,6 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
       });
       console.log('Family alert emitted to:', user.familyMembers.map(m => m.email));
     }
-
     // Send push notification
     if (user.subscriptions?.length > 0) {
       const payload = JSON.stringify({
@@ -275,14 +321,12 @@ app.post('/api/alerts', authMiddleware, async (req, res) => {
         });
       });
     }
-
     res.status(201).json({ alert: populatedAlert });
   } catch (error) {
     console.error('Error posting alert:', error.message, error.stack);
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to post alert', details: error.message });
   }
 });
-
 // Fetch Nearby Alerts
 app.get('/api/markers', authMiddleware, async (req, res) => {
   try {
@@ -321,7 +365,6 @@ app.get('/api/markers', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch markers', details: error.message });
   }
 });
-
 // Vote on Alert
 app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
   try {
@@ -384,7 +427,6 @@ app.post('/api/alerts/:id/vote', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to vote', details: error.message });
   }
 });
-
 // Delete Alert
 app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
   try {
@@ -420,7 +462,6 @@ app.delete('/api/alerts/:id', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to delete alert', details: error.message });
   }
 });
-
 // Update User Location
 app.post('/api/location', authMiddleware, async (req, res) => {
   try {
@@ -438,9 +479,9 @@ app.post('/api/location', authMiddleware, async (req, res) => {
     console.log('Updating location for user:', { userId: req.user._id, location });
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { 
-        lastLocation: { type: 'Point', coordinates: [lng, lat] }, 
-        lastActive: new Date() 
+      {
+        lastLocation: { type: 'Point', coordinates: [lng, lat] },
+        lastActive: new Date()
       },
       { new: true }
     );
@@ -455,7 +496,6 @@ app.post('/api/location', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to update location', details: error.message });
   }
 });
-
 // Fetch Leaderboard
 app.get('/api/leaderboard', authMiddleware, async (req, res) => {
   try {
@@ -470,7 +510,6 @@ app.get('/api/leaderboard', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch leaderboard', details: error.message });
   }
 });
-
 // Manage Family Members
 app.post('/api/family', authMiddleware, async (req, res) => {
   try {
@@ -507,7 +546,6 @@ app.post('/api/family', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to add family member', details: error.message });
   }
 });
-
 app.delete('/api/family/:email', authMiddleware, async (req, res) => {
   try {
     const { email } = req.params;
@@ -530,7 +568,6 @@ app.delete('/api/family/:email', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to remove family member', details: error.message });
   }
 });
-
 // Manage Offline Regions
 app.post('/api/offline-regions', authMiddleware, async (req, res) => {
   try {
@@ -559,7 +596,6 @@ app.post('/api/offline-regions', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to save offline region', details: error.message });
   }
 });
-
 app.delete('/api/offline-regions/:name', authMiddleware, async (req, res) => {
   try {
     const { name } = req.params;
@@ -582,7 +618,6 @@ app.delete('/api/offline-regions/:name', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to remove offline region', details: error.message });
   }
 });
-
 // Admin Routes
 app.get('/api/users', authMiddleware, async (req, res) => {
   try {
@@ -598,7 +633,6 @@ app.get('/api/users', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch users', details: error.message });
   }
 });
-
 app.get('/api/users/search', authMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) {
@@ -623,7 +657,6 @@ app.get('/api/users/search', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to search users', details: error.message });
   }
 });
-
 app.get('/api/users/:id/activity', authMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) {
@@ -652,7 +685,6 @@ app.get('/api/users/:id/activity', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to fetch user activity', details: error.message });
   }
 });
-
 app.post('/api/users/:id/promote', authMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) {
@@ -673,7 +705,6 @@ app.post('/api/users/:id/promote', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to promote user', details: error.message });
   }
 });
-
 app.post('/api/users/:id/demote', authMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) {
@@ -694,7 +725,6 @@ app.post('/api/users/:id/demote', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to demote user', details: error.message });
   }
 });
-
 app.post('/api/users/:id/ban', authMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) {
@@ -716,7 +746,6 @@ app.post('/api/users/:id/ban', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to ban user', details: error.message });
   }
 });
-
 app.post('/api/users/:id/ipban', authMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) {
@@ -739,7 +768,6 @@ app.post('/api/users/:id/ipban', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to IP ban user', details: error.message });
   }
 });
-
 app.delete('/api/users/:id', authMiddleware, async (req, res) => {
   try {
     if (!req.user.isAdmin) {
@@ -759,13 +787,11 @@ app.delete('/api/users/:id', authMiddleware, async (req, res) => {
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to delete user', details: error.message });
   }
 });
-
 // Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err.message, err.stack);
   res.status(500).json({ error: 'Internal server error', details: err.message });
 });
-
 // Socket.IO Events
 io.on('connection', (socket) => {
   console.log('Socket connected:', socket.id);
@@ -796,7 +822,6 @@ io.on('connection', (socket) => {
     console.log('Socket disconnected:', socket.id);
   });
 });
-
 // Start Server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
