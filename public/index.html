@@ -5762,56 +5762,26 @@ function initSocket(token, userId) {
 }, 2000);
 socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
- 
-  // ✅ ENHANCED: More robust type checking
-  if (!alert || typeof alert !== 'object' ||
-      !alert._id || typeof alert._id !== 'string' ||
-      !alert.location?.coordinates ||
-      !Array.isArray(alert.location.coordinates) ||
-      alert.location.coordinates.length !== 2 ||
-      !alert.location.coordinates.every(c => typeof c === 'number' && !isNaN(c)) ||
-      !alert.type || typeof alert.type !== 'string') {
+
+  // ✅ Validate structure
+  if (!alert || !alert._id || !alert.location?.coordinates || !alert.type) {
     console.error('Invalid alert structure:', alert);
     return;
   }
- 
-  // ✅ Validate timestamp
-  if (!alert.timestamp || new Date(alert.timestamp) > new Date()) {
-    console.error('Invalid alert timestamp:', alert.timestamp);
-    return;
-  }
- 
-  // ✅ Ensure userId exists
-  if (!alert.userId || typeof alert.userId !== 'object') {
-    console.warn('Alert missing userId, using fallback');
-    alert.userId = { username: 'Anonymous', _id: null };
-  }
- 
+
   const alertId = alert._id;
   const isTrafficCamera = alert.type === 'Traffic Camera';
- 
-  // Skip if filtered out
-  if (isTrafficCamera && !showTrafficCameras) {
-    console.log('Skipping traffic camera alert: disabled in settings');
-    return;
-  }
- 
-  const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
-  if (navState.alertFilters[filterKey] === false) {
-    console.log('Skipping filtered alert:', filterKey);
-    return;
-  }
- 
+
+  // Skip if filtered
+  if (isTrafficCamera && !showTrafficCameras) return;
+
   if (!isDuplicateAlert(alert)) {
     // ✅ Dedupe in currentAlerts
     if (!currentAlerts.some(a => a._id === alertId)) {
       currentAlerts.push(alert);
       displayAlertsInHud(currentAlerts);
-      console.log('Added alert to currentAlerts via socket:', alertId);
-    } else {
-      console.log('Alert already in currentAlerts, skipping push:', alertId);
     }
-   
+
     // ✅ Dedupe marker creation
     if (!markers.has(alertId)) {
       const marker = getMarker({
@@ -5821,11 +5791,8 @@ socket.on('alert', (alert) => {
         title: `${alert.type} Alert`
       });
       markers.set(alertId, marker);
-      console.log('Created marker for socket alert:', alertId);
-    } else {
-      console.log('Marker already exists for socket alert, skipping creation:', alertId);
     }
-   
+
     if (isTrafficCamera) {
       cameraPositions.push({
         lat: alert.location.coordinates[1],
@@ -5834,39 +5801,37 @@ socket.on('alert', (alert) => {
     } else if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
     }
-   
+
     showToast(`New ${alert.type} alert received.`);
-  } else {
-    console.log('Duplicate alert ignored via cache:', alertId);
   }
- 
-  debouncedFullSync();
+
+  // ✅ Force sync as backup
+  setTimeout(() => pollAlerts(), 1000);
 });
 socket.on('alertDeleted', (alertId) => {
-  // ✅ Enhanced validation
   if (!alertId || typeof alertId !== 'string' || alertId.length !== 24) {
     console.error('Invalid alertDeleted event:', alertId);
     return;
   }
- 
+
   console.log('Alert deleted via Socket.IO:', alertId);
- 
+
   // Remove marker
   const marker = markers.get(alertId);
   if (marker) {
     releaseMarker(marker);
     markers.delete(alertId);
   }
- 
+
   // Remove from currentAlerts
   const prevLength = currentAlerts.length;
   currentAlerts = currentAlerts.filter(a => a._id !== alertId);
- 
+
   // ✅ FIX: Always update HUD if alert was removed
   if (currentAlerts.length !== prevLength) {
     displayAlertsInHud(currentAlerts);
   }
- 
+
   // Handle active hazard reroute
   if (alertId === navState.currentHazard?._id) {
     navState.currentHazard = null;
@@ -5879,14 +5844,16 @@ socket.on('alertDeleted', (alertId) => {
       lockNavigation();
     }
   }
- 
+
   // ✅ FIX: Update verification HUD if active
   if (currentVerificationAlertId === alertId) {
     dismissVerificationHud();
   }
- 
+
   showToast('Alert removed.');
-  debouncedFullSync(); // ✅ Add this
+  
+  // ✅ FIX: Force full sync as backup
+  setTimeout(() => pollAlerts(), 1000);
 });
       const debouncedLocationUpdate = debounce((data) => {
     // Handle location update
