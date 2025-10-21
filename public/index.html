@@ -1244,27 +1244,62 @@
     const BOUNDS_CHECK_INTERVAL = 1000;
     let lastHeadingUpdate = 0;
     const ProgrammaticUpdateManager = {
-      _isUpdating: false,
-      _callbacks: [],
-      start() {
-        this._isUpdating = true;
-        this._callbacks = [];
-      },
-      end(callback = null) {
-        if (callback) {
-          this._callbacks.push(callback);
-        }
-        // Use requestAnimationFrame for next frame callback instead of setTimeout
-        requestAnimationFrame(() => {
-          this._isUpdating = false;
-          this._callbacks.forEach(cb => cb());
-          this._callbacks = [];
-        });
-      },
-      get isActive() {
-        return this._isUpdating;
+  _isUpdating: false,
+  _callbacks: [],
+  _timeoutId: null, // ✅ Add timeout tracking
+  
+  start() {
+    this._isUpdating = true;
+    this._callbacks = []; // ✅ Clear old callbacks
+    
+    // ✅ Safety timeout
+    if (this._timeoutId) clearTimeout(this._timeoutId);
+    this._timeoutId = setTimeout(() => {
+      if (this._isUpdating) {
+        console.warn('ProgrammaticUpdateManager timeout, force ending');
+        this.forceEnd();
       }
-    };
+    }, 3000);
+  },
+  
+  end(callback = null) {
+    if (callback) {
+      this._callbacks.push(callback);
+    }
+    
+    // Clear timeout
+    if (this._timeoutId) {
+      clearTimeout(this._timeoutId);
+      this._timeoutId = null;
+    }
+    
+    requestAnimationFrame(() => {
+      this._isUpdating = false;
+      const callbacks = [...this._callbacks]; // ✅ Copy array
+      this._callbacks = [];
+      callbacks.forEach(cb => {
+        try {
+          cb();
+        } catch (e) {
+          console.error('Callback error:', e);
+        }
+      });
+    });
+  },
+  
+  forceEnd() {
+    this._isUpdating = false;
+    this._callbacks = [];
+    if (this._timeoutId) {
+      clearTimeout(this._timeoutId);
+      this._timeoutId = null;
+    }
+  },
+  
+  get isActive() {
+    return this._isUpdating;
+  }
+};
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -2261,52 +2296,60 @@
       return false;
     }
     function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
-      if (!shouldUpdateCameraView(actualPos, heading, Date.now() - navState.lastCameraUpdateTime)) {
-        return;
-      }
-      const { zoom, tilt, turnHeading } = getDynamicZoom(actualPos, speed);
-      const finalHeading = navState.mapOrientation === 'north-up' ? 0 : (turnHeading || heading);
-      const lookaheadPoint = new google.maps.LatLng(predictedPos);
-      // All updates in ONE tween to prevent desync
-      const tweenTimeoutId = setTimeout(() => {
-        if (ProgrammaticUpdateManager.isActive) {
-          currentHeadingTween?.stop();
-          ProgrammaticUpdateManager.end();
-          console.error('Camera tween timeout, force cleanup');
-        }
-      }, 5000);
-      ProgrammaticUpdateManager.start();
-      new TWEEN.Tween({
-        lat: map.getCenter().lat(),
-        lng: map.getCenter().lng(),
-        heading: map.getHeading() || 0,
-        zoom: map.getZoom()
-      })
-      .to({
-        lat: lookaheadPoint.lat(),
-        lng: lookaheadPoint.lng(),
-        heading: finalHeading,
-        zoom: zoom
-      }, 300)
-      .easing(TWEEN.Easing.Quadratic.Out)
-      .onUpdate(obj => {
-        map.setCenter({ lat: obj.lat, lng: obj.lng });
-        map.setHeading(obj.heading);
-        map.setZoom(obj.zoom);
-        // Remove userMarker sync here
-      })
-      .onComplete(() => {
-        clearTimeout(tweenTimeoutId); // ← Add this
-        map.setTilt(tilt);
-        userMarker.position = actualPos; // ← Sync ONCE at end
-        ensureMarkerInView(actualPos);
-        ProgrammaticUpdateManager.end();
-      })
-      .start();
-      lastCameraPosition = actualPos;
-      lastHeading = finalHeading;
-      navState.lastCameraUpdateTime = Date.now();
-    }
+  if (!shouldUpdateCameraView(actualPos, heading, Date.now() - navState.lastCameraUpdateTime)) {
+    return;
+  }
+  
+  const { zoom, tilt, turnHeading } = getDynamicZoom(actualPos, speed);
+  const finalHeading = navState.mapOrientation === 'north-up' ? 0 : (turnHeading || heading);
+  const lookaheadPoint = new google.maps.LatLng(predictedPos);
+  
+  // ✅ Cancel any existing tween first
+  if (currentHeadingTween) {
+    currentHeadingTween.stop();
+    currentHeadingTween = null;
+  }
+  
+  ProgrammaticUpdateManager.start();
+  
+  const tween = new TWEEN.Tween({
+    lat: map.getCenter().lat(),
+    lng: map.getCenter().lng(),
+    heading: map.getHeading() || 0,
+    zoom: map.getZoom()
+  })
+  .to({
+    lat: lookaheadPoint.lat(),
+    lng: lookaheadPoint.lng(),
+    heading: finalHeading,
+    zoom: zoom
+  }, 300)
+  .easing(TWEEN.Easing.Quadratic.Out)
+  .onUpdate(obj => {
+    map.setCenter({ lat: obj.lat, lng: obj.lng });
+    map.setHeading(obj.heading);
+    map.setZoom(obj.zoom);
+  })
+  .onComplete(() => {
+    map.setTilt(tilt);
+    userMarker.position = actualPos;
+    ensureMarkerInView(actualPos);
+    ProgrammaticUpdateManager.end();
+    currentHeadingTween = null; // ✅ Clear reference
+  })
+  .onStop(() => {
+    // ✅ Handle manual stop
+    ProgrammaticUpdateManager.end();
+    currentHeadingTween = null;
+  });
+  
+  currentHeadingTween = tween;
+  tween.start();
+  
+  lastCameraPosition = actualPos;
+  lastHeading = finalHeading;
+  navState.lastCameraUpdateTime = Date.now();
+}
     function getDynamicZoom(currentPos, speed) {
       if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
         return { zoom: navState.navigationZoom, tilt: 45, turnHeading: null };
@@ -3617,16 +3660,19 @@
       console.log(`Confirming ${alertType} alert at`, navState.tempAlertData.location);
     }
     async function postAlert() {
-      if (isPostingAlert) {
-        console.log('postAlert already in progress, skipping');
-        return;
-      }
-      isPostingAlert = true;
-      // Safety timeout - release lock after 10 seconds
-      postingTimeout = setTimeout(() => {
-        console.warn('postAlert timeout, releasing lock');
-        isPostingAlert = false;
-      }, 10000);
+  if (isPostingAlert) {
+    console.log('postAlert already in progress');
+    return;
+  }
+  isPostingAlert = true;
+  
+  // ✅ Reduce timeout to 5s
+  postingTimeout = setTimeout(() => {
+    console.warn('postAlert timeout, releasing lock');
+    isPostingAlert = false;
+  }, 5000);
+  
+  // ... rest of function
       if (!navState.tempAlertData || !navState.tempMarker) {
         console.error('No alert data or marker to post');
         showToast('Failed to post alert: No data available.');
@@ -3833,65 +3879,61 @@
       console.log('Verification HUD dismissed');
     }
     async function deleteAlert(id, item) {
-  // Remove from UI immediately
+  console.log('deleteAlert called:', id);
+  
+  // Optimistic UI update
   item?.remove();
   const marker = markers.get(id);
   if (marker) {
     releaseMarker(marker);
     markers.delete(id);
   }
+  
+  // Remove from currentAlerts immediately
+  const alertIndex = currentAlerts.findIndex(a => a._id === id);
+  if (alertIndex !== -1) {
+    currentAlerts.splice(alertIndex, 1);
+    displayAlertsInHud(currentAlerts); // ✅ Update HUD immediately
+  }
+  
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
-      console.error('Invalid token, showing auth form');
+      console.error('Invalid token');
       TokenManager.clear();
       document.getElementById('auth-container').style.display = 'flex';
       return;
     }
-    console.log('Deleting alert with token:', token.substring(0, 20) + '...');
+    
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
-      mode: 'cors',
-      credentials: 'include',
       headers: { 'Authorization': `Bearer ${token}` }
     });
+    
     if (!response.ok) {
-      throw new Error(`Failed to delete alert: ${response.statusText}`);
+      throw new Error(`Failed to delete: ${response.statusText}`);
     }
-    console.log('Delete alert response:', { status: response.status, ok: response.ok });
-    // Now handle local cleanup on success
-    // Remove from currentAlerts and update HUD
-    const alertIndex = currentAlerts.findIndex(a => a._id === id);
-    if (alertIndex !== -1) {
-      const removedAlert = currentAlerts.splice(alertIndex, 1)[0];
-      if (removedAlert && removedAlert.type === 'Traffic Camera') {
-        cameraPositions = cameraPositions.filter(pos =>
-          pos.lat !== removedAlert.location.coordinates[1] || pos.lng !== removedAlert.location.coordinates[0]
-        );
-        cameraAlertShown.delete(`mongo-${id}`);
-      }
-      displayAlertsInHud(currentAlerts);
-      console.log('Alert removed from currentAlerts:', id);
-    }
-    showToast('Alert deleted successfully.');
-    console.log('Alert deletion complete:', id);
-    // Emit deletion event if socket connected
+    
+    // ✅ FIX: Always emit socket event AND poll as backup
     if (socket && socket.connected) {
       socket.emit('alertDeleted', id);
       console.log('Emitted alertDeleted event:', id);
-    } else {
-      // Fallback to polling if no socket
-      console.warn('Socket not connected, relying on polling for alert deletion:', id);
-      setTimeout(() => pollAlerts(), 1000);
     }
+    
+    // ✅ FIX: Poll regardless of socket status for redundancy
+    setTimeout(() => pollAlerts(), 1000);
+    
+    showToast('Alert deleted successfully.');
+    
     // Refresh profile if own alert
     const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
     fetchProfile(ownId, true).then(populateAccountProfile);
+    
   } catch (error) {
-    // Rollback on error
-    showToast('Failed to delete alert. Refreshing...');
-    setTimeout(() => pollAlerts(), 1000);
     console.error('Error deleting alert:', error);
+    // ✅ FIX: Force sync on error
+    showToast('Failed to delete alert. Refreshing...');
+    setTimeout(() => pollAlerts(), 500);
   }
 }
     async function pollAlerts() {
@@ -5720,14 +5762,15 @@ function initSocket(token, userId) {
     console.error('Socket.IO connection error:', error);
     showToast('Failed to connect to server.');
   });
-  const debouncedAlertSync = debounce(() => pollAlerts(), 500);
-  const debouncedLocationUpdate = debounce((data) => {
-    // Handle location update
-    updateTrackedUserLocation(data);
-  }, 200);
-  socket.on('alert', (alert) => {
+  const debouncedFullSync = debounce(() => {
+  pollAlerts();
+  fetchAndDisplayMarkers(map, navState.userLocation);
+}, 2000);
+
+socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
-  // ENHANCED: More robust type checking
+  
+  // ✅ ENHANCED: More robust type checking
   if (!alert || typeof alert !== 'object' ||
       !alert._id || typeof alert._id !== 'string' ||
       !alert.location?.coordinates ||
@@ -5738,30 +5781,36 @@ function initSocket(token, userId) {
     console.error('Invalid alert structure:', alert);
     return;
   }
-  // Add after structure validation:
+  
+  // ✅ Validate timestamp
   if (!alert.timestamp || new Date(alert.timestamp) > new Date()) {
     console.error('Invalid alert timestamp:', alert.timestamp);
     return;
   }
-  // ... rest of handler
+  
+  // ✅ Ensure userId exists
   if (!alert.userId || typeof alert.userId !== 'object') {
     console.warn('Alert missing userId, using fallback');
     alert.userId = { username: 'Anonymous', _id: null };
   }
+  
   const alertId = alert._id;
   const isTrafficCamera = alert.type === 'Traffic Camera';
+  
   // Skip if filtered out
   if (isTrafficCamera && !showTrafficCameras) {
     console.log('Skipping traffic camera alert: disabled in settings');
     return;
   }
+  
   const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
   if (navState.alertFilters[filterKey] === false) {
     console.log('Skipping filtered alert:', filterKey);
     return;
   }
+  
   if (!isDuplicateAlert(alert)) {
-    // Dedupe in currentAlerts
+    // ✅ Dedupe in currentAlerts
     if (!currentAlerts.some(a => a._id === alertId)) {
       currentAlerts.push(alert);
       displayAlertsInHud(currentAlerts);
@@ -5769,7 +5818,8 @@ function initSocket(token, userId) {
     } else {
       console.log('Alert already in currentAlerts, skipping push:', alertId);
     }
-    // Dedupe marker creation
+    
+    // ✅ Dedupe marker creation
     if (!markers.has(alertId)) {
       const marker = getMarker({
         map,
@@ -5782,6 +5832,7 @@ function initSocket(token, userId) {
     } else {
       console.log('Marker already exists for socket alert, skipping creation:', alertId);
     }
+    
     if (isTrafficCamera) {
       cameraPositions.push({
         lat: alert.location.coordinates[1],
@@ -5790,13 +5841,66 @@ function initSocket(token, userId) {
     } else if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
     }
+    
     showToast(`New ${alert.type} alert received.`);
   } else {
     console.log('Duplicate alert ignored via cache:', alertId);
   }
-  debouncedAlertSync();
+  
+  debouncedFullSync();
 });
-      socket.on('locationUpdate', debouncedLocationUpdate);
+
+socket.on('alertDeleted', (alertId) => {
+  // ✅ Enhanced validation
+  if (!alertId || typeof alertId !== 'string' || alertId.length !== 24) {
+    console.error('Invalid alertDeleted event:', alertId);
+    return;
+  }
+  
+  console.log('Alert deleted via Socket.IO:', alertId);
+  
+  // Remove marker
+  const marker = markers.get(alertId);
+  if (marker) {
+    releaseMarker(marker);
+    markers.delete(alertId);
+  }
+  
+  // Remove from currentAlerts
+  const prevLength = currentAlerts.length;
+  currentAlerts = currentAlerts.filter(a => a._id !== alertId);
+  
+  // ✅ FIX: Always update HUD if alert was removed
+  if (currentAlerts.length !== prevLength) {
+    displayAlertsInHud(currentAlerts);
+  }
+  
+  // Handle active hazard reroute
+  if (alertId === navState.currentHazard?._id) {
+    navState.currentHazard = null;
+    navState.alternativeRoute = null;
+    alternativeRenderer.setMap(null);
+    document.getElementById('reroute-hud-container').classList.remove('active');
+    document.getElementById('reroute-hud').classList.remove('active');
+    navState.alertState = 'IDLE';
+    if (navState.isFollowing) {
+      lockNavigation();
+    }
+  }
+  
+  // ✅ FIX: Update verification HUD if active
+  if (currentVerificationAlertId === alertId) {
+    dismissVerificationHud();
+  }
+  
+  showToast('Alert removed.');
+  debouncedFullSync(); // ✅ Add this
+});
+      const debouncedLocationUpdate = debounce((data) => {
+    // Handle location update
+    updateTrackedUserLocation(data);
+  }, 200);
+  socket.on('locationUpdate', debouncedLocationUpdate);
       // Add heartbeat to detect stale connections
       let heartbeatInterval = setInterval(() => {
         if (socket.connected) {
@@ -5805,35 +5909,6 @@ function initSocket(token, userId) {
       }, 30000);
       socket.on('disconnect', () => {
         clearInterval(heartbeatInterval);
-      });
-      socket.on('alertDeleted', (alertId) => {
-        // FIXED: Validation already present, but ensure it's robust
-        if (!alertId || typeof alertId !== 'string') {
-          console.error('Invalid alertDeleted event:', alertId);
-          return;
-        }
-        console.log('Alert deleted via Socket.IO:', alertId);
-        const marker = markers.get(alertId);
-        if (marker) {
-          releaseMarker(marker);
-          markers.delete(alertId);
-        }
-        currentAlerts = currentAlerts.filter(a => a._id !== alertId);
-        displayAlertsInHud(currentAlerts);
-        if (alertId === navState.currentHazard?._id) {
-          navState.currentHazard = null;
-          navState.alternativeRoute = null;
-          alternativeRenderer.setMap(null);
-          document.getElementById('reroute-hud-container').classList.remove('active');
-          document.getElementById('reroute-hud').classList.remove('active');
-          navState.alertState = 'IDLE';
-          if (navState.isFollowing) {
-            lockNavigation();
-          }
-        }
-        showToast('Alert removed.');
-        // Debounced full sync
-        debouncedAlertSync();
       });
       socket.on('extendAlert', (alertId) => {
         // FIXED: Validation already present, but ensure it's robust
