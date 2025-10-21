@@ -172,29 +172,77 @@ app.post('/api/webhooks/stripe', express.raw({type: 'application/json'}), async 
  
   res.json({received: true});
 });
+
 async function handleSuccessfulPayment(session) {
-  const userId = session.client_reference_id;
-  await User.findByIdAndUpdate(userId, {
-    isPremium: true,
-    subscriptionId: session.subscription,
-    trialEndsAt: null,
-    subscriptionStartedAt: new Date()
-  });
+  try {
+    const userId = session.client_reference_id || session.metadata?.userId;
+    if (!userId) {
+      console.error('No userId in session:', session.id);
+      return;
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      subscriptionStatus: 'active',
+      stripeSubscriptionId: session.subscription,
+      stripeCustomerId: session.customer,
+      premiumActivatedAt: new Date(),
+      trialEndsAt: null
+    });
+    
+    console.log('✅ Payment successful for user:', userId);
+  } catch (error) {
+    console.error('❌ Payment handler error:', error);
+  }
 }
+
 async function handleCancellation(subscription) {
-  const userId = subscription.client_reference_id; // Assuming stored during creation
-  await User.findByIdAndUpdate(userId, {
-    isPremium: false,
-    subscriptionId: null,
-    trialEndsAt: null
-  });
+  try {
+    const userId = subscription.metadata?.userId;
+    if (!userId) {
+      // Fallback: find by Stripe subscription ID
+      const user = await User.findOne({ stripeSubscriptionId: subscription.id });
+      if (!user) {
+        console.error('No user found for cancelled subscription:', subscription.id);
+        return;
+      }
+      userId = user._id;
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      subscriptionStatus: 'cancelled',
+      trialEndsAt: null
+    });
+    
+    console.log('✅ Subscription cancelled for user:', userId);
+  } catch (error) {
+    console.error('❌ Cancellation handler error:', error);
+  }
 }
+
 async function handleFailedPayment(invoice) {
-  const userId = invoice.subscription.client_reference_id; // Assuming stored
-  await User.findByIdAndUpdate(userId, {
-    isPremium: false,
-    subscriptionId: null
-  });
+  try {
+    const subscriptionId = invoice.subscription;
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+    const userId = subscription.metadata?.userId;
+    if (!userId) {
+      // Fallback: find by Stripe subscription ID
+      const user = await User.findOne({ stripeSubscriptionId: subscriptionId });
+      if (!user) {
+        console.error('No user found for failed payment:', subscriptionId);
+        return;
+      }
+      userId = user._id;
+    }
+
+    await User.findByIdAndUpdate(userId, {
+      subscriptionStatus: 'inactive',
+      trialEndsAt: null
+    });
+    
+    console.log('❌ Payment failed for user:', userId);
+  } catch (error) {
+    console.error('❌ Failed payment handler error:', error);
+  }
 }
 // Alert Posting Endpoint
 app.post('/api/alerts', authMiddleware, async (req, res) => {
@@ -785,6 +833,111 @@ app.delete('/api/users/:id', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Error deleting user:', error.message, error.stack);
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to delete user', details: error.message });
+  }
+});
+
+// Stripe Subscription Routes
+app.post('/api/subscription/create-checkout', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Create or retrieve Stripe customer
+    let customerId = user.stripeCustomerId;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { userId: user._id.toString() }
+      });
+      customerId = customer.id;
+      user.stripeCustomerId = customerId;
+      await user.save();
+    }
+
+    // Create checkout session
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      client_reference_id: user._id.toString(),
+      payment_method_types: ['card'],
+      line_items: [{
+        price: process.env.STRIPE_PRICE_ID, // Set in .env
+        quantity: 1
+      }],
+      mode: 'subscription',
+      success_url: `${process.env.CLIENT_URL}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.CLIENT_URL}/?payment=cancelled`,
+      metadata: { userId: user._id.toString() }
+    });
+
+    res.json({ url: session.url });
+  } catch (error) {
+    console.error('Checkout creation error:', error);
+    res.status(500).json({ error: 'Failed to create checkout session' });
+  }
+});
+
+app.post('/api/subscription/verify-payment', authMiddleware, async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    
+    if (session.payment_status === 'paid') {
+      await User.findByIdAndUpdate(req.user._id, {
+        subscriptionStatus: 'active',
+        stripeSubscriptionId: session.subscription,
+        premiumActivatedAt: new Date(),
+        trialEndsAt: null
+      });
+      return res.json({ success: true });
+    }
+    
+    res.status(400).json({ success: false, error: 'Payment not completed' });
+  } catch (error) {
+    console.error('Payment verification error:', error);
+    res.status(500).json({ error: 'Failed to verify payment' });
+  }
+});
+
+app.get('/api/subscription/status', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('subscriptionStatus trialEndsAt premiumActivatedAt');
+    
+    const now = new Date();
+    const isPremium = user.subscriptionStatus === 'active';
+    const isTrialActive = user.trialEndsAt && user.trialEndsAt > now && user.subscriptionStatus === 'trial';
+    const trialDaysRemaining = isTrialActive 
+      ? Math.ceil((user.trialEndsAt - now) / (24 * 60 * 60 * 1000))
+      : 0;
+
+    res.json({
+      isPremium,
+      isTrialActive,
+      trialDaysRemaining,
+      trialEndsAt: user.trialEndsAt,
+      subscriptionStatus: user.subscriptionStatus
+    });
+  } catch (error) {
+    console.error('Subscription status error:', error);
+    res.status(500).json({ error: 'Failed to get subscription status' });
+  }
+});
+
+app.post('/api/subscription/cancel', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user.stripeSubscriptionId) {
+      return res.status(400).json({ error: 'No active subscription' });
+    }
+
+    await stripe.subscriptions.update(user.stripeSubscriptionId, {
+      cancel_at_period_end: true
+    });
+
+    res.json({ message: 'Subscription will cancel at period end' });
+  } catch (error) {
+    console.error('Subscription cancellation error:', error);
+    res.status(500).json({ error: 'Failed to cancel subscription' });
   }
 });
 // Error Handling Middleware

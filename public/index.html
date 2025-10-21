@@ -11,6 +11,28 @@
   <link rel="manifest" href="/manifest.json?v=1.0.3">
   <script src="https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3"></script>
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
+  <script src="https://browser.sentry-cdn.com/7.x.x/bundle.min.js"></script>
+  <script>
+    if (window.location.hostname !== 'localhost') {
+      Sentry.init({
+        dsn: 'YOUR_SENTRY_DSN',
+        environment: 'production',
+        tracesSampleRate: 0.1,
+        beforeSend(event, hint) {
+          // Filter sensitive data
+          if (event.request) {
+            delete event.request.cookies;
+            delete event.request.headers['Authorization'];
+          }
+          // Don't send localStorage/sessionStorage
+          if (event.contexts?.state) {
+            delete event.contexts.state.localStorage;
+          }
+          return event;
+        }
+      });
+    }
+  </script>
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
@@ -615,9 +637,9 @@
 }
 .locked-feature {
   opacity: 0.5;
-  pointer-events: all; /* Change from none to allow click */
+  pointer-events: none;
   position: relative;
-  cursor: pointer; /* Add cursor pointer */
+  cursor: not-allowed;
 }
 .locked-feature::after {
   content: '🔒 Premium';
@@ -1362,11 +1384,18 @@
         } catch (error) {
           console.error(`Error in ${context}:`, error);
         
-          // Log to error tracking service (e.g., Sentry)
-          if (window.Sentry) {
-            window.Sentry.captureException(error, {
-              tags: { context },
-              extra: { args }
+          // Log to Sentry in production
+          if (window.Sentry && window.location.hostname !== 'localhost') {
+            Sentry.captureException(error, {
+              tags: { context, feature: 'navigation' },
+              extra: {
+                args: args.slice(0, 3), // Limit to prevent PII
+                navState: {
+                  isNavigating: navState.isNavigating,
+                  isFollowing: navState.isFollowing
+                }
+              },
+              level: 'error'
             });
           }
         
@@ -1855,18 +1884,30 @@
     }
     // Reverse geocode via backend proxy
     async function reverseGeocode(lat, lng) {
+      // Validate coordinates
+      if (isNaN(lat) || isNaN(lng) ||
+          lat < -90 || lat > 90 ||
+          lng < -180 || lng > 180) {
+        throw new Error('Invalid coordinates');
+      }
+    
       const token = TokenManager.get();
-      if (!token || !TokenManager.isValid()) {
+      if (!TokenManager.isValid()) {
         throw new Error('Invalid token');
       }
+    
       const response = await fetchWithRetry('/api/geocode', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ lat, lng })
+        body: JSON.stringify({
+          lat: parseFloat(lat.toFixed(6)), // Limit precision
+          lng: parseFloat(lng.toFixed(6))
+        })
       });
+    
       if (!response.ok) {
         throw new Error('Geocoding failed');
       }
@@ -2213,6 +2254,7 @@
       // All updates in ONE tween to prevent desync
       const tweenTimeoutId = setTimeout(() => {
         if (ProgrammaticUpdateManager.isActive) {
+          currentHeadingTween?.stop();
           ProgrammaticUpdateManager.end();
           console.error('Camera tween timeout, force cleanup');
         }
@@ -2930,11 +2972,11 @@
       },
       async process() {
         if (!navigator.onLine || this.queue.length === 0) return;
-      
+    
         const pending = [...this.queue];
         this.queue = [];
         this.save();
-      
+    
         for (const action of pending) {
           try {
             await this.executeAction(action);
@@ -2943,7 +2985,7 @@
             this.queue.push(action); // Re-queue
           }
         }
-      
+    
         this.save();
       },
       async executeAction(action) {
@@ -2965,23 +3007,23 @@
       check() {
         const now = Date.now();
         const issues = [];
-      
+    
         // Check GPS
         if (navState.isNavigating && now - this.lastGPSUpdate > 10000) {
           issues.push('GPS signal lost');
         }
-      
+    
         // Check Socket
         if (socket && !socket.connected) {
           issues.push('Server connection lost');
         }
-      
+    
         // Check token expiration
         if (!TokenManager.isValid()) {
           issues.push('Session expired');
           this.handleSessionExpired();
         }
-      
+    
         // Check memory usage (if available)
         if (performance.memory) {
           const usedMB = performance.memory.usedJSHeapSize / 1048576;
@@ -2990,12 +3032,12 @@
             console.warn('Memory usage:', usedMB.toFixed(2), 'MB');
           }
         }
-      
+    
         if (issues.length > 0) {
           console.warn('Health check issues:', issues);
           this.reportIssues(issues);
         }
-      
+    
         return issues.length === 0;
       },
       handleSessionExpired() {
@@ -3403,6 +3445,16 @@
             options.headers['Authorization'] = `Bearer ${token}`;
           }
           const response = await fetch(url, options);
+        
+          // Check for rate limiting
+          if (response.status === 429) {
+            const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
+            console.warn(`Rate limited. Retrying after ${retryAfter}s`);
+            showToast(`Too many requests. Retrying in ${retryAfter} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+            continue;
+          }
+        
           if (response.ok) return response;
           if (response.status === 401) {
             const refreshed = await refreshToken();
@@ -3765,6 +3817,14 @@
       console.log('Verification HUD dismissed');
     }
     async function deleteAlert(id, item) {
+  // Remove from UI immediately
+  item?.remove();
+  const marker = markers.get(id);
+  if (marker) {
+    releaseMarker(marker);
+    markers.delete(id);
+  }
+ 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -3774,7 +3834,6 @@
       return;
     }
     console.log('Deleting alert with token:', token.substring(0, 20) + '...');
-    // Always attempt server deletion first, regardless of local marker
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
       mode: 'cors',
@@ -3786,14 +3845,6 @@
     }
     console.log('Delete alert response:', { status: response.status, ok: response.ok });
     // Now handle local cleanup on success
-    const marker = markers.get(id);
-    if (marker) {
-      releaseMarker(marker);
-      markers.delete(id);
-      console.log('Local marker released:', id);
-    } else {
-      console.warn('Marker not found locally, but server deletion succeeded:', id);
-    }
     // Remove from currentAlerts and update HUD
     const alertIndex = currentAlerts.findIndex(a => a._id === id);
     if (alertIndex !== -1) {
@@ -3807,8 +3858,6 @@
       displayAlertsInHud(currentAlerts);
       console.log('Alert removed from currentAlerts:', id);
     }
-    // Remove UI item if provided
-    item?.remove();
     showToast('Alert deleted successfully.');
     console.log('Alert deletion complete:', id);
     // Emit deletion event if socket connected
@@ -3824,10 +3873,10 @@
     const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
     fetchProfile(ownId, true).then(populateAccountProfile);
   } catch (error) {
-    console.error('Error deleting alert:', error);
-    showToast(`Failed to delete alert: ${error.message}`);
-    // Always poll on error to sync state
+    // Rollback on error
+    showToast('Failed to delete alert. Refreshing...');
     setTimeout(() => pollAlerts(), 1000);
+    console.error('Error deleting alert:', error);
   }
 }
     async function pollAlerts() {
@@ -5670,6 +5719,11 @@ function initSocket(token, userId) {
     console.error('Invalid alert structure:', alert);
     return;
   }
+  // Add after structure validation:
+  if (!alert.timestamp || new Date(alert.timestamp) > new Date()) {
+    console.error('Invalid alert timestamp:', alert.timestamp);
+    return;
+  }
   // ... rest of handler
   if (!alert.userId || typeof alert.userId !== 'object') {
     console.warn('Alert missing userId, using fallback');
@@ -5796,7 +5850,6 @@ function initSocket(token, userId) {
       console.log('Initializing app...');
       const token = TokenManager.get();
       const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-  
       // Initialize map FIRST, regardless of auth status
       if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -5893,7 +5946,6 @@ async function checkSubscriptionStatus() {
     if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
       const lastShown = localStorage.getItem('lastUpgradePrompt');
       const now = Date.now();
-  
       if (!lastShown || now - parseInt(lastShown) > 2 * 24 * 60 * 60 * 1000) {
         showUpgradeModal('trial_ended');
         localStorage.setItem('lastUpgradePrompt', now.toString());
@@ -5980,6 +6032,10 @@ function showUpgradeModal(source) {
   console.log('Upgrade modal shown, source:', source);
 }
 document.getElementById('upgrade-button').addEventListener('click', async () => {
+  const button = document.getElementById('upgrade-button');
+  button.disabled = true;
+  button.textContent = 'Processing...';
+ 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -6000,6 +6056,9 @@ document.getElementById('upgrade-button').addEventListener('click', async () => 
   } catch (error) {
     console.error('Error creating checkout:', error);
     showToast('Failed to start checkout process. Please try again.');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Upgrade Now';
   }
 });
 document.getElementById('maybe-later-button').addEventListener('click', () => {
@@ -6035,11 +6094,11 @@ async function handlePaymentCallback() {
         showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
         subscriptionStatus.isPremium = true;
         updateUIForSubscription();
-    
+  
         // Add confetti effect (optional - requires canvas-confetti library)
         // Or create a simple celebration animation
         createCelebration();
-    
+  
         // Clean URL
         window.history.replaceState({}, document.title, window.location.pathname);
       }
