@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.4'; // Keep version unless other changes warrant a bump
+const CACHE_NAME = 'waze-gps-v1.0.5'; // Keep version unless other changes warrant a bump
 
 // Precache critical assets during install
 self.addEventListener('install', event => {
