@@ -716,9 +716,9 @@
   <div id="search-container">
     <input id="search-input" type="text" placeholder="Enter destination address">
     <div id="multi-stop-inputs" style="display: none;">
-      <input type="text" placeholder="Add stop 1">
-      <input type="text" placeholder="Add stop 2">
-      <input type="text" placeholder="Add stop 3">
+      <input type="text" placeholder="Add stop 1" class="multi-stop-input">
+      <input type="text" placeholder="Add stop 2" class="multi-stop-input">
+      <input type="text" placeholder="Add stop 3" class="multi-stop-input">
     </div>
     <button id="start-button">Start</button>
     <button id="simulate-position-button" style="display: none;">Simulate</button>
@@ -1106,7 +1106,7 @@
         <li>Leaderboard Access</li>
       </ul>
     </div>
-    <div class="pricing">$4.99<span style="font-size: 1rem;">/month</span></div>
+    <div class="pricing">$10.00 Annually<span style="font-size: 1rem;">/month</span></div>
     <div class="trial-info" id="trial-info-box" style="display: none;">
       <strong>⏰ Trial Info:</strong>
       <p id="trial-status-text"></p>
@@ -1244,15 +1244,16 @@
     const BOUNDS_CHECK_INTERVAL = 1000;
     let lastHeadingUpdate = 0;
     let googleMapsScriptLoaded = false;
+    let multiStopAutocompletes = [];
+    let placesService;
     const ProgrammaticUpdateManager = {
   _isUpdating: false,
   _callbacks: [],
   _timeoutId: null, // ✅ Add timeout tracking
- 
   start() {
     this._isUpdating = true;
     this._callbacks = []; // ✅ Clear old callbacks
-   
+ 
     // ✅ Safety timeout
     if (this._timeoutId) clearTimeout(this._timeoutId);
     this._timeoutId = setTimeout(() => {
@@ -1262,18 +1263,17 @@
       }
     }, 3000);
   },
- 
   end(callback = null) {
     if (callback) {
       this._callbacks.push(callback);
     }
-   
+ 
     // Clear timeout
     if (this._timeoutId) {
       clearTimeout(this._timeoutId);
       this._timeoutId = null;
     }
-   
+ 
     requestAnimationFrame(() => {
       this._isUpdating = false;
       const callbacks = [...this._callbacks]; // ✅ Copy array
@@ -1287,7 +1287,6 @@
       });
     });
   },
- 
   forceEnd() {
     this._isUpdating = false;
     this._callbacks = [];
@@ -1296,7 +1295,6 @@
       this._timeoutId = null;
     }
   },
- 
   get isActive() {
     return this._isUpdating;
   }
@@ -1435,7 +1433,7 @@
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-    
+  
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1450,11 +1448,11 @@
               level: 'error'
             });
           }
-    
+  
           if (fallback) {
             return fallback(error);
           }
-    
+  
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -1998,6 +1996,7 @@
         return;
       }
       console.log('Google Maps API loaded successfully');
+      placesService = new google.maps.places.PlacesService(map);
       initializeMap();
     };
     function initializeMap() {
@@ -2171,6 +2170,23 @@
             showToast('Invalid address selected. Please try again.');
           }
         });
+        // Initialize multi-stop autocompletes
+        const multiStopInputs = document.querySelectorAll('.multi-stop-input');
+        multiStopAutocompletes = Array.from(multiStopInputs).map(input => {
+          const ac = new google.maps.places.Autocomplete(input, { fields: ['geometry', 'formatted_address'] });
+          ac.addListener('place_changed', () => {
+            const place = ac.getPlace();
+            if (place && place.geometry && place.geometry.location) {
+              const waypoint = { lat: place.geometry.location.lat(), lng: place.geometry.location.lng() };
+              const index = Array.from(multiStopInputs).indexOf(input);
+              if (!navState.waypoints[index]) navState.waypoints[index] = waypoint;
+              else navState.waypoints[index] = waypoint;
+              console.log('Multi-stop waypoint added:', waypoint, 'at index', index);
+            }
+          });
+          return ac;
+        });
+        console.log('Multi-stop autocompletes initialized:', multiStopAutocompletes.length);
         document.getElementById('traffic-layer-toggle').checked = navState.showTraffic;
         document.getElementById('main-route-color').value = navState.mainRouteColor;
         document.getElementById('alt-route-color').value = navState.altRouteColor;
@@ -2302,19 +2318,15 @@
   if (!shouldUpdateCameraView(actualPos, heading, Date.now() - navState.lastCameraUpdateTime)) {
     return;
   }
- 
   const { zoom, tilt, turnHeading } = getDynamicZoom(actualPos, speed);
   const finalHeading = navState.mapOrientation === 'north-up' ? 0 : (turnHeading || heading);
   const lookaheadPoint = new google.maps.LatLng(predictedPos);
- 
   // ✅ Cancel any existing tween first
   if (currentHeadingTween) {
     currentHeadingTween.stop();
     currentHeadingTween = null;
   }
- 
   ProgrammaticUpdateManager.start();
- 
   const tween = new TWEEN.Tween({
     lat: map.getCenter().lat(),
     lng: map.getCenter().lng(),
@@ -2345,10 +2357,8 @@
     ProgrammaticUpdateManager.end();
     currentHeadingTween = null;
   });
- 
   currentHeadingTween = tween;
   tween.start();
- 
   lastCameraPosition = actualPos;
   lastHeading = finalHeading;
   navState.lastCameraUpdateTime = Date.now();
@@ -2692,20 +2702,55 @@
       document.getElementById('route-preset').addEventListener('change', (e) => {
         navState.routePreset = e.target.value;
         localStorage.setItem('routePreset', navState.routePreset);
-        if (navState.routePreset === 'avoid-toll') navState.avoidTolls = true;
-        if (navState.routePreset === 'scenic') navState.avoidHighways = true;
-        console.log('Route preset set to:', navState.routePreset);
+        switch (navState.routePreset) {
+          case 'avoid-toll':
+            navState.avoidTolls = true;
+            navState.avoidHighways = false;
+            break;
+          case 'scenic':
+            navState.avoidTolls = false;
+            navState.avoidHighways = true;
+            break;
+          case 'family':
+            navState.avoidTolls = true;
+            navState.avoidHighways = false;
+            // Add family-friendly options, e.g., avoid highways more
+            navState.avoidHighways = true;
+            break;
+          default:
+            navState.avoidTolls = false;
+            navState.avoidHighways = false;
+        }
+        console.log('Route preset set to:', navState.routePreset, 'with options:', { avoidTolls: navState.avoidTolls, avoidHighways: navState.avoidHighways });
       });
-      document.getElementById('offline-download-btn').addEventListener('click', () => {
-        if (map) {
+      document.getElementById('offline-download-btn').addEventListener('click', async () => {
+        if (map && navigator.serviceWorker.controller) {
           const bounds = map.getBounds();
-          const region = { bounds: bounds.toJSON(), name: `Region ${navState.offlineRegions.length + 1}`, timestamp: new Date().toISOString() };
-          navState.offlineRegions.push(region);
-          localStorage.setItem('offlineRegions', JSON.stringify(navState.offlineRegions));
-          navigator.serviceWorker.controller?.postMessage({ type: 'CACHE_REGION', region });
-          loadOfflineRegions();
-          showToast('Region downloaded for offline use');
-          console.log('Offline region downloaded:', region);
+          if (bounds) {
+            const region = { 
+              bounds: bounds.toJSON(), 
+              name: `Region ${navState.offlineRegions.length + 1}`, 
+              timestamp: new Date().toISOString(),
+              tiles: [] // Placeholder for actual tiles
+            };
+            // Simulate tile caching by generating URLs for visible tiles
+            const projection = map.getProjection();
+            if (projection) {
+              const ne = projection.fromLatLngToPoint(bounds.getNorthEast());
+              const sw = projection.fromLatLngToPoint(bounds.getSouthWest());
+              // Simple tile URL generation for Google Maps (note: actual caching needs SW)
+              for (let z = map.getZoom(); z <= map.getZoom() + 2; z++) {
+                // Pseudo-code for tile coords - in real impl, compute actual tiles
+                region.tiles.push(`https://mt0.google.com/vt?x=0&y=0&z=${z}&key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4`);
+              }
+            }
+            navState.offlineRegions.push(region);
+            localStorage.setItem('offlineRegions', JSON.stringify(navState.offlineRegions));
+            navigator.serviceWorker.controller.postMessage({ type: 'CACHE_REGION', region });
+            loadOfflineRegions();
+            showToast('Region downloaded for offline use (tiles cached in SW)');
+            console.log('Offline region downloaded with tiles:', region);
+          }
         }
       });
       document.getElementById('add-family-btn').addEventListener('click', () => {
@@ -2730,8 +2775,53 @@
             navigator.clipboard.writeText(shareUrl);
             showToast('Route shared via clipboard');
           }
+          if (socket && socket.connected) {
+            socket.emit('shareRoute', { route: navState.currentRoute, family: navState.familyMembers });
+            console.log('Emitted shareRoute event');
+          }
           console.log('Route shared with family:', shareUrl);
         }
+      });
+      // Profile edit listeners
+      document.getElementById('edit-profile-button').addEventListener('click', () => {
+        const form = document.getElementById('edit-profile-form');
+        form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        console.log('Edit profile toggled');
+      });
+      document.getElementById('save-profile').addEventListener('click', async () => {
+        const username = document.getElementById('edit-username').value.trim();
+        const email = document.getElementById('edit-email').value.trim();
+        const password = document.getElementById('edit-password').value.trim();
+        if (!username || !email) {
+          showToast('Username and email required');
+          return;
+        }
+        try {
+          const token = TokenManager.get();
+          const body = { username, email };
+          if (password) body.password = password;
+          const response = await fetchWithRetry('/api/auth/profile', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(body)
+          });
+          if (response.ok) {
+            showToast('Profile updated');
+            const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+            const data = await fetchProfile(ownId, true);
+            populateAccountProfile(data);
+            document.getElementById('edit-profile-form').style.display = 'none';
+          } else {
+            showToast('Failed to update profile');
+          }
+        } catch (error) {
+          console.error('Profile update error:', error);
+          showToast('Error updating profile');
+        }
+      });
+      document.getElementById('cancel-edit').addEventListener('click', () => {
+        document.getElementById('edit-profile-form').style.display = 'none';
+        console.log('Edit profile cancelled');
       });
       document.querySelectorAll('.report-button').forEach(button => {
         button.addEventListener('click', async () => {
@@ -3015,6 +3105,7 @@
         // Switch to offline map tiles if available
         if (navState.offlineRegions.length > 0) {
           showToast('Switching to offline maps');
+          // Simulate offline mode by using cached tiles (in real, SW handles)
         }
       });
     }
@@ -3426,18 +3517,21 @@
         console.log('Leaderboard fetch response:', { status: response.status, ok: response.ok });
         if (!response.ok) throw new Error(`Leaderboard fetch failed: ${response.statusText}`);
         const users = await response.json();
+        // Sort by points descending for proper leaderboard
+        users.sort((a, b) => (b.points || 0) - (a.points || 0));
         const content = document.getElementById('leaderboard-content');
         content.innerHTML = '';
-        users.forEach((user, index) => {
+        users.slice(0, 50).forEach((user, index) => { // Top 50
           const item = document.createElement('div');
           item.className = 'alert-item';
           item.innerHTML = `
-            <div class="alert-field"><strong>#${index + 1} ${user.username}</strong> - Points: ${user.points}</div>
+            <div class="alert-field"><strong>#${index + 1} ${user.username}</strong> - Points: ${user.points || 0}</div>
+            <div class="alert-field">Alerts Posted: ${user.totalAlerts || 0} | Active: ${user.activeAlerts || 0}</div>
             <div class="alert-field">Achievements: ${Array.isArray(user.achievements) ? user.achievements.join(', ') : 'None'}</div>
           `;
           content.appendChild(item);
         });
-        console.log('Leaderboard fetched:', users.length);
+        console.log('Leaderboard fetched and sorted:', users.length);
       } catch (err) {
         console.error('Failed to fetch leaderboard:', err);
         showToast('Failed to load leaderboard.');
@@ -3498,7 +3592,7 @@
             options.headers['Authorization'] = `Bearer ${token}`;
           }
           const response = await fetch(url, options);
-    
+  
           // Check for rate limiting
           if (response.status === 429) {
             const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
@@ -3507,7 +3601,7 @@
             await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
             continue;
           }
-    
+  
           if (response.ok) return response;
           if (response.status === 401) {
             const refreshed = await refreshToken();
@@ -3659,13 +3753,11 @@
     return;
   }
   isPostingAlert = true;
- 
   // ✅ Reduce timeout to 5s
   postingTimeout = setTimeout(() => {
     console.warn('postAlert timeout, releasing lock');
     isPostingAlert = false;
   }, 5000);
- 
   // ... rest of function
       if (!navState.tempAlertData || !navState.tempMarker) {
         console.error('No alert data or marker to post');
@@ -3874,7 +3966,6 @@
     }
     async function deleteAlert(id, item) {
   console.log('deleteAlert called:', id);
- 
   // Optimistic UI update
   item?.remove();
   const marker = markers.get(id);
@@ -3882,14 +3973,12 @@
     releaseMarker(marker);
     markers.delete(id);
   }
- 
   // Remove from currentAlerts immediately
   const alertIndex = currentAlerts.findIndex(a => a._id === id);
   if (alertIndex !== -1) {
     currentAlerts.splice(alertIndex, 1);
     displayAlertsInHud(currentAlerts); // ✅ Update HUD immediately
   }
- 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -3898,31 +3987,31 @@
       document.getElementById('auth-container').style.display = 'flex';
       return;
     }
-   
+ 
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${token}` }
     });
-   
+ 
     if (!response.ok) {
       throw new Error(`Failed to delete: ${response.statusText}`);
     }
-   
+ 
     // ✅ FIX: Always emit socket event AND poll as backup
     if (socket && socket.connected) {
       socket.emit('alertDeleted', id);
       console.log('Emitted alertDeleted event:', id);
     }
-   
+ 
     // ✅ FIX: Poll regardless of socket status for redundancy
     setTimeout(() => pollAlerts(), 1000);
-   
+ 
     showToast('Alert deleted successfully.');
-   
+ 
     // Refresh profile if own alert
     const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
     fetchProfile(ownId, true).then(populateAccountProfile);
-   
+ 
   } catch (error) {
     console.error('Error deleting alert:', error);
     // ✅ FIX: Force sync on error
@@ -4795,6 +4884,8 @@
       // Release all markers
       markers.forEach(marker => releaseMarker(marker));
       markers.clear();
+      trackedMarkers.forEach(marker => releaseMarker(marker));
+      trackedMarkers.clear();
       // Clear all caches
       alertCache.clear();
       headingCache.clear();
@@ -4886,89 +4977,109 @@
     hudTurn.textContent = 'Follow the road';
   }
 }
-    function calculateAndDisplayRoute(origin, dest, callback) {
+    async function calculateAndDisplayRoute(origin, dest, callback) {
   if (!origin || !dest) {
     console.error('Invalid origin or destination:', origin, dest);
     showToast('Invalid route. Please select a destination.');
     return;
   }
-  const waypoints = navState.waypoints.map(w => ({ location: w, stopover: true }));
-  const request = {
-    origin: origin,
-    destination: dest,
-    travelMode: google.maps.TravelMode.DRIVING,
-    provideRouteAlternatives: true,
-    waypoints: waypoints,
-    avoidTolls: navState.avoidTolls,
-    avoidHighways: navState.avoidHighways
-  };
-  if (navState.evCharging) {
-    request.waypoints.unshift({ location: 'EV charging station near origin', stopover: true });
+  let waypoints = navState.waypoints.filter(w => w.lat && w.lng).map(w => ({ location: new google.maps.LatLng(w), stopover: true }));
+  if (navState.evCharging && placesService) {
+    // Find nearest EV station
+    const request = {
+      location: origin,
+      radius: '5000',
+      keyword: 'EV charging station'
+    };
+    placesService.nearbySearch(request, (results, status) => {
+      if (status === google.maps.places.PlacesServiceStatus.OK && results[0]) {
+        const station = results[0].geometry.location;
+        waypoints.unshift({ location: station, stopover: true });
+        console.log('EV station added as waypoint:', station);
+      } else {
+        console.warn('No EV station found, proceeding without');
+      }
+      // Proceed with route calculation
+      proceedWithRoute();
+    });
+  } else {
+    proceedWithRoute();
   }
-  directionsService.route(request, (response, status) => {
-    if (status === 'OK') {
-      navState.currentRoute = response;
-      navState.routePolyline = response.routes[0].overview_path;
-      navState.detailedPath = [];
-      const legs = response.routes[0].legs;
-      for (const leg of legs) {
-        for (const step of leg.steps) {
-          step.path.forEach(point => navState.detailedPath.push(point));
+  function proceedWithRoute() {
+    const request = {
+      origin: origin,
+      destination: dest,
+      travelMode: google.maps.TravelMode.DRIVING,
+      provideRouteAlternatives: true,
+      waypoints: waypoints,
+      avoidTolls: navState.avoidTolls,
+      avoidHighways: navState.avoidHighways
+    };
+    directionsService.route(request, (response, status) => {
+      if (status === 'OK') {
+        navState.currentRoute = response;
+        navState.routePolyline = response.routes[0].overview_path;
+        navState.detailedPath = [];
+        const legs = response.routes[0].legs;
+        for (const leg of legs) {
+          for (const step of leg.steps) {
+            step.path.forEach(point => navState.detailedPath.push(point));
+          }
+        }
+        navState.detailedPath = navState.detailedPath.filter((point, index, self) =>
+          index === self.findIndex(p => Math.abs(p.lat() - point.lat()) < 1e-6 && Math.abs(p.lng() - point.lng()) < 1e-6)
+        );
+        console.log('Detailed path computed for route:', navState.detailedPath.length, 'points');
+        directionsRenderer.setMap(map);
+        directionsRenderer.setDirections(response);
+        updateRouteAhead(navState.userLocation);
+        updateOffRoadPolyline(rawUserLocation || navState.userLocation, response.routes[0].overview_path[0]);
+        updateHUD(response, navState.userLocation);
+        updateBottomHUD(response);
+        routeSpatialIndex = null;
+        if (callback) callback();
+        // Show simulation button
+        document.getElementById('simulate-position-button').style.display = 'block';
+        if (navState.isFollowing && navState.isNavigating) {
+          const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+          navState.navigationZoom = zoom;
+          const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+          const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+          ProgrammaticUpdateManager.start();
+          requestAnimationFrame(() => {
+            if (isMobile && typeof TWEEN !== 'undefined') {
+              new TWEEN.Tween(map.getCenter())
+                .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
+                .easing(TWEEN.Easing.Quadratic.Out)
+                .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+                .start();
+              updateMapHeading(heading);
+            } else {
+              map.panTo(lookaheadPoint);
+              map.setHeading(heading);
+            }
+            lastProgrammaticZoom = zoom;
+            map.setZoom(zoom);
+            map.setTilt(tilt);
+            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+            console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
+            ProgrammaticUpdateManager.end();
+          });
+        }
+        console.log('Route calculated:', {
+          pathLength: navState.routePolyline.length,
+          endPoint: navState.routePolyline[navState.routePolyline.length - 1],
+          destination: dest
+        });
+      } else {
+        console.error('Directions request failed:', status);
+        showToast('Directions request failed: ' + status);
+        if (status === 'REQUEST_DENIED') {
+          showToast('API key invalid or restricted. Check Google Cloud Console.');
         }
       }
-      navState.detailedPath = navState.detailedPath.filter((point, index, self) =>
-        index === self.findIndex(p => Math.abs(p.lat() - point.lat()) < 1e-6 && Math.abs(p.lng() - point.lng()) < 1e-6)
-      );
-      console.log('Detailed path computed for route:', navState.detailedPath.length, 'points');
-      directionsRenderer.setMap(map);
-      directionsRenderer.setDirections(response);
-      updateRouteAhead(navState.userLocation);
-      updateOffRoadPolyline(rawUserLocation || navState.userLocation, response.routes[0].overview_path[0]);
-      updateHUD(response, navState.userLocation);
-      updateBottomHUD(response);
-      routeSpatialIndex = null;
-      if (callback) callback();
-      // Show simulation button
-      document.getElementById('simulate-position-button').style.display = 'block';
-      if (navState.isFollowing && navState.isNavigating) {
-        const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
-        navState.navigationZoom = zoom;
-        const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-        const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
-        ProgrammaticUpdateManager.start();
-        requestAnimationFrame(() => {
-          if (isMobile && typeof TWEEN !== 'undefined') {
-            new TWEEN.Tween(map.getCenter())
-              .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
-              .easing(TWEEN.Easing.Quadratic.Out)
-              .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
-              .start();
-            updateMapHeading(heading);
-          } else {
-            map.panTo(lookaheadPoint);
-            map.setHeading(heading);
-          }
-          lastProgrammaticZoom = zoom;
-          map.setZoom(zoom);
-          map.setTilt(tilt);
-          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-          console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
-          ProgrammaticUpdateManager.end();
-        });
-      }
-      console.log('Route calculated:', {
-        pathLength: navState.routePolyline.length,
-        endPoint: navState.routePolyline[navState.routePolyline.length - 1],
-        destination: dest
-      });
-    } else {
-      console.error('Directions request failed:', status);
-      showToast('Directions request failed: ' + status);
-      if (status === 'REQUEST_DENIED') {
-        showToast('API key invalid or restricted. Check Google Cloud Console.');
-      }
-    }
-  });
+    });
+  }
 }
     function updateBottomHUD(route) {
       const hudTime = document.getElementById('bottom-hud-time');
@@ -5762,26 +5873,21 @@ function initSocket(token, userId) {
 }, 2000);
 socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
-
   // ✅ Validate structure
   if (!alert || !alert._id || !alert.location?.coordinates || !alert.type) {
     console.error('Invalid alert structure:', alert);
     return;
   }
-
   const alertId = alert._id;
   const isTrafficCamera = alert.type === 'Traffic Camera';
-
   // Skip if filtered
   if (isTrafficCamera && !showTrafficCameras) return;
-
   if (!isDuplicateAlert(alert)) {
     // ✅ Dedupe in currentAlerts
     if (!currentAlerts.some(a => a._id === alertId)) {
       currentAlerts.push(alert);
       displayAlertsInHud(currentAlerts);
     }
-
     // ✅ Dedupe marker creation
     if (!markers.has(alertId)) {
       const marker = getMarker({
@@ -5792,7 +5898,6 @@ socket.on('alert', (alert) => {
       });
       markers.set(alertId, marker);
     }
-
     if (isTrafficCamera) {
       cameraPositions.push({
         lat: alert.location.coordinates[1],
@@ -5801,10 +5906,8 @@ socket.on('alert', (alert) => {
     } else if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
     }
-
     showToast(`New ${alert.type} alert received.`);
   }
-
   // ✅ Force sync as backup
   setTimeout(() => pollAlerts(), 1000);
 });
@@ -5813,25 +5916,20 @@ socket.on('alertDeleted', (alertId) => {
     console.error('Invalid alertDeleted event:', alertId);
     return;
   }
-
   console.log('Alert deleted via Socket.IO:', alertId);
-
   // Remove marker
   const marker = markers.get(alertId);
   if (marker) {
     releaseMarker(marker);
     markers.delete(alertId);
   }
-
   // Remove from currentAlerts
   const prevLength = currentAlerts.length;
   currentAlerts = currentAlerts.filter(a => a._id !== alertId);
-
   // ✅ FIX: Always update HUD if alert was removed
   if (currentAlerts.length !== prevLength) {
     displayAlertsInHud(currentAlerts);
   }
-
   // Handle active hazard reroute
   if (alertId === navState.currentHazard?._id) {
     navState.currentHazard = null;
@@ -5844,14 +5942,11 @@ socket.on('alertDeleted', (alertId) => {
       lockNavigation();
     }
   }
-
   // ✅ FIX: Update verification HUD if active
   if (currentVerificationAlertId === alertId) {
     dismissVerificationHud();
   }
-
   showToast('Alert removed.');
-  
   // ✅ FIX: Force full sync as backup
   setTimeout(() => pollAlerts(), 1000);
 });
@@ -5860,6 +5955,21 @@ socket.on('alertDeleted', (alertId) => {
     updateTrackedUserLocation(data);
   }, 200);
   socket.on('locationUpdate', debouncedLocationUpdate);
+  socket.on('familyLocation', (data) => {
+    console.log('Received family location update:', data.userId);
+    updateTrackedUserLocation(data);
+  });
+  socket.on('shareRoute', (data) => {
+    console.log('Received shared route from family:', data.userId);
+    if (navState.familyMembers.some(m => m.email === data.email)) {
+      showToast(`Route shared by family member: ${data.email}`);
+      // Optionally load the shared route
+      if (data.route) {
+        navState.currentRoute = data.route;
+        directionsRenderer.setDirections(data.route);
+      }
+    }
+  });
       // Add heartbeat to detect stale connections
       let heartbeatInterval = setInterval(() => {
         if (socket.connected) {

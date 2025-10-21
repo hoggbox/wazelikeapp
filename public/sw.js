@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.6'; // Bumped version for new assets
+const CACHE_NAME = 'waze-gps-v1.0.7'; // Bumped version for updates
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -11,11 +11,10 @@ const PRECACHE_ASSETS = [
   'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
 ];
 
-// Maximum number of cached map tiles to prevent storage bloat
 const MAX_CACHED_TILES = 500;
 
-// Track cached regions to avoid duplicates
-let cachedRegions = new Set();
+// Track cached regions and their metadata
+let cachedRegions = new Map(); // Changed to Map to store metadata
 
 // Precache critical assets during install
 self.addEventListener('install', event => {
@@ -38,7 +37,7 @@ self.addEventListener('fetch', event => {
   // Skip cache for dynamic API & real-time (includes auth & subscription endpoints)
   if (url.pathname.startsWith('/api/') || url.pathname.includes('socket.io')) {
     event.respondWith(
-      fetch(event.request).catch(error => {
+      fetch(event.request).catch(async error => {
         console.error('API/Socket fetch failed:', error, 'URL:', event.request.url);
         if (self.Sentry) {
           self.Sentry.captureException(error, {
@@ -47,10 +46,23 @@ self.addEventListener('fetch', event => {
         }
         const isSubscriptionPath = url.pathname.startsWith('/api/subscription');
         const isAuthPath = url.pathname.startsWith('/api/auth');
+        let errorMessage = 'Network unavailable';
+        let suggest = isSubscriptionPath ? 'Reconnect to verify subscription' : isAuthPath ? 'Reconnect and refresh token' : 'Check connection';
+        
+        // NEW: Enhanced offline handling for subscription endpoints
+        if (isSubscriptionPath && url.pathname.includes('/status')) {
+          const cachedStatus = await caches.match('/subscription-status');
+          if (cachedStatus) {
+            return cachedStatus;
+          }
+          errorMessage = 'Offline: Cannot verify subscription';
+          suggest = 'Reconnect to check subscription status';
+        }
+
         return new Response(JSON.stringify({ 
-          error: 'Network unavailable', 
+          error: errorMessage, 
           offline: true, 
-          suggest: isSubscriptionPath ? 'Reconnect to verify subscription' : isAuthPath ? 'Reconnect and refresh token' : 'Check connection' 
+          suggest 
         }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
@@ -61,14 +73,15 @@ self.addEventListener('fetch', event => {
   }
 
   // Handle map tile requests with region-aware caching
-  if (url.pathname.includes('maps.googleapis.com/maps/api')) {
+  if (url.pathname.includes('maps.googleapis.com') || url.pathname.includes('mt0.google.com/vt')) {
     event.respondWith(
       caches.match(event.request).then(cachedResponse => {
         const fetchPromise = fetch(event.request).then(networkResponse => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then(cache => {
+              // NEW: Store tile with timestamp metadata
               cache.put(event.request, networkResponse.clone());
-              // Clean up old tiles if exceeding limit
+              cache.put(`${event.request.url}-meta`, new Response(JSON.stringify({ cachedAt: Date.now() })));
               cleanupMapTileCache(cache);
             });
           }
@@ -144,11 +157,12 @@ self.addEventListener('fetch', event => {
               headers: cachedResponse.headers
             });
           }
+          // NEW: Fallback offline page if index.html not cached
           const offlineHTML = `
             <!DOCTYPE html>
             <html><head><title>Offline</title><style>body{font-family:Arial;text-align:center;padding:2rem;background:#f0f0f0;color:#333;}button{background:#4CAF50;color:white;border:none;padding:1rem;border-radius:0.5rem;cursor:pointer;font-size:1rem;}</style></head><body>
               <h1>You're offline</h1>
-              <p>Reconnect to access the app & verify subscription. Cached content available.</p>
+              <p>Reconnect to access the app & verify subscription. Cached content unavailable.</p>
               ${isPaymentSuccess ? '<p>🎉 Payment success detected! Reconnecting to unlock Premium...</p>' : ''}
               ${isPaymentCancelled ? '<p>Payment cancelled.</p>' : ''}
               <button onclick="location.reload()">Reconnect & Refresh</button>
@@ -233,6 +247,7 @@ self.addEventListener('message', async event => {
           const response = await fetch(url);
           if (response && response.status === 200) {
             await cache.put(url, response);
+            await cache.put(`${url}-meta`, new Response(JSON.stringify({ cachedAt: Date.now() })));
             console.log('Cached map tile:', url);
           }
         } catch (error) {
@@ -242,9 +257,8 @@ self.addEventListener('message', async event => {
           }
         }
       }
-      cachedRegions.add(name);
+      cachedRegions.set(name, { bounds, cachedAt: Date.now() });
       console.log('Cached map tiles for region:', name, bounds);
-      // Notify main script of successful caching
       self.clients.matchAll().then(clients => {
         clients.forEach(client => {
           client.postMessage({ type: 'REGION_CACHED', region: name });
@@ -267,9 +281,9 @@ self.addEventListener('message', async event => {
       })
     );
   } else if (event.data.type === 'UPDATE_CACHED_REGIONS') {
-    // Update cached regions based on main script's offlineRegions
-    cachedRegions = new Set(event.data.regions.map(r => r.name));
-    console.log('Updated cached regions:', cachedRegions);
+    // NEW: Sync cachedRegions with main script's offlineRegions
+    cachedRegions = new Map(event.data.regions.map(r => [r.name, { bounds: r.bounds, cachedAt: new Date(r.timestamp).getTime() }]));
+    console.log('Updated cached regions:', Array.from(cachedRegions.keys()));
     await cleanupMapTileCache();
   }
 });
@@ -323,7 +337,7 @@ self.addEventListener('notificationclick', event => {
 // Generate tile URLs for a given bounds (aligned with Google Maps API)
 function generateTileUrls(bounds) {
   const urls = [];
-  const zoomLevels = [16, 17, 18, 19]; // Match CONFIG.MIN_ZOOM and CONFIG.MAX_ZOOM
+  const zoomLevels = [16, 17, 18, 19];
   const tileSize = 256;
   const { north, south, east, west } = bounds;
 
@@ -334,13 +348,13 @@ function generateTileUrls(bounds) {
 
     for (let x = topLeft.x; x <= bottomRight.x; x++) {
       for (let y = topLeft.y; y <= bottomRight.y; y++) {
-        // Use actual Google Maps tile URL format
-        const url = `https://maps.googleapis.com/maps/api/tiles/${zoom}/${x}/${y}?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_id=2666b5bd496d9c6026f43f82`;
+        // NEW: Use correct Google Maps tile URL format
+        const url = `https://mt0.google.com/vt?x=${x}&y=${y}&z=${zoom}&key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_id=2666b5bd496d9c6026f43f82`;
         urls.push(url);
       }
     }
   }
-  return urls.slice(0, MAX_CACHED_TILES); // Limit total tiles
+  return urls.slice(0, MAX_CACHED_TILES);
 }
 
 // Convert lat/lng to tile coordinates
@@ -368,17 +382,26 @@ function project(latLng) {
 async function cleanupMapTileCache(cache) {
   const cacheInstance = cache || await caches.open(CACHE_NAME);
   const requests = await cacheInstance.keys();
-  const tileRequests = requests.filter(req => req.url.includes('maps.googleapis.com/maps/api/tiles'));
+  const tileRequests = requests.filter(req => req.url.includes('mt0.google.com/vt'));
   
   if (tileRequests.length > MAX_CACHED_TILES) {
-    const sortedTiles = tileRequests.sort((a, b) => {
-      // Sort by URL to approximate age (assumes newer tiles have higher x/y values)
-      return a.url.localeCompare(b.url);
-    });
-    const tilesToDelete = sortedTiles.slice(0, tileRequests.length - MAX_CACHED_TILES);
-    for (const req of tilesToDelete) {
-      await cacheInstance.delete(req);
-      console.log('Deleted old map tile:', req.url);
+    // NEW: Sort by cachedAt timestamp
+    const tilesWithMetadata = [];
+    for (const req of tileRequests) {
+      const metaResponse = await cacheInstance.match(`${req.url}-meta`);
+      let cachedAt = 0;
+      if (metaResponse) {
+        const meta = await metaResponse.json();
+        cachedAt = meta.cachedAt || 0;
+      }
+      tilesWithMetadata.push({ request: req, cachedAt });
+    }
+    tilesWithMetadata.sort((a, b) => a.cachedAt - b.cachedAt); // Oldest first
+    const tilesToDelete = tilesWithMetadata.slice(0, tileRequests.length - MAX_CACHED_TILES);
+    for (const { request } of tilesToDelete) {
+      await cacheInstance.delete(request);
+      await cacheInstance.delete(`${request.url}-meta`);
+      console.log('Deleted old map tile:', request.url);
     }
   }
 }
