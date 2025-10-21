@@ -1,8 +1,30 @@
-const CACHE_NAME = 'waze-gps-v1.0.4'; // Bump version on updates to invalidate cache
+const CACHE_NAME = 'waze-gps-v1.0.3'; // Keep version unless other changes warrant a bump
+
+// Precache critical assets during install
+self.addEventListener('install', event => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(cache => {
+      return cache.addAll([
+        '/',
+        '/index.html',
+        '/manifest.json',
+        'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css',
+        'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js',
+        'https://cdn.socket.io/4.7.5/socket.io.min.js',
+        'https://browser.sentry-cdn.com/7.x.x/bundle.min.js',
+        'https://i.postimg.cc/YS0h0m7R/compass.png',
+        'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png' // Traffic camera icon
+      ]).catch(error => {
+        console.error('Precache failed:', error);
+      });
+    })
+  );
+  self.skipWaiting();
+});
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  
+
   // Skip cache for dynamic API & real-time (includes auth & subscription endpoints)
   if (url.pathname.startsWith('/api/') || url.pathname.includes('socket.io')) {
     event.respondWith(
@@ -18,6 +40,24 @@ self.addEventListener('fetch', event => {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
         });
+      })
+    );
+    return;
+  }
+
+  // Handle map tile requests
+  if (url.pathname.includes('maps.googleapis.com/maps/api')) {
+    event.respondWith(
+      caches.match(event.request).then(cachedResponse => {
+        const fetchPromise = fetch(event.request).then(networkResponse => {
+          if (networkResponse && networkResponse.status === 200) {
+            caches.open(CACHE_NAME).then(cache => {
+              cache.put(event.request, networkResponse.clone());
+            });
+          }
+          return networkResponse;
+        }).catch(() => cachedResponse || new Response('Map tile unavailable', { status: 503 }));
+        return cachedResponse || fetchPromise;
       })
     );
     return;
@@ -40,7 +80,6 @@ self.addEventListener('fetch', event => {
         })
         .catch(() => {
           console.log('Serving cached/offline for document:', url.pathname);
-          // Check for payment callback params
           const isPaymentSuccess = url.searchParams.get('payment') === 'success' || url.searchParams.get('session_id');
           const isPaymentCancelled = url.searchParams.get('payment') === 'cancelled';
           
@@ -48,12 +87,10 @@ self.addEventListener('fetch', event => {
             if (cachedResponse) {
               let enhancedHTML = cachedResponse.clone().text();
               if (isPaymentSuccess) {
-                // Inject celebration and force subscription check/reload on online
                 enhancedHTML = enhancedHTML.then(html => html.replace(
                   '</body>',
                   `
                   <script>
-                    // Mini celebration (mimic app)
                     const celeb = document.createElement('div');
                     celeb.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;z-index:10003;animation:celebrate 2s ease-out forwards;pointer-events:none';
                     celeb.textContent = '🎉 Premium Unlocked!';
@@ -62,11 +99,8 @@ self.addEventListener('fetch', event => {
                     style.textContent = '@keyframes celebrate {0%{transform:translate(-50%,-50%) scale(0);opacity:0}50%{transform:translate(-50%,-50%) scale(1.5);opacity:1}100%{transform:translate(-50%,-50%) scale(1) translateY(-100px);opacity:0}}';
                     document.head.appendChild(style);
                     setTimeout(() => {celeb.remove(); style.remove();}, 2000);
-                    
-                    // Force subscription check and reload on reconnect
                     if ('serviceWorker' in navigator) {
                       navigator.serviceWorker.ready.then(() => {
-                        // Poll for online and reload
                         const checkOnline = () => {
                           if (navigator.onLine) {
                             location.reload();
@@ -90,7 +124,6 @@ self.addEventListener('fetch', event => {
                 headers: cachedResponse.headers
               });
             }
-            // Enhanced offline HTML with reconnect logic and payment awareness
             const offlineHTML = `
               <!DOCTYPE html>
               <html><head><title>Offline</title><style>body{font-family:Arial;text-align:center;padding:2rem;background:#f0f0f0;color:#333;}button{background:#4CAF50;color:white;border:none;padding:1rem;border-radius:0.5rem;cursor:pointer;font-size:1rem;}</style></head><body>
@@ -100,12 +133,11 @@ self.addEventListener('fetch', event => {
                 ${isPaymentCancelled ? '<p>Payment cancelled.</p>' : ''}
                 <button onclick="location.reload()">Reconnect & Refresh</button>
                 <script>
-                  // Auto-poll and reload on online
                   const checkOnline = () => {
                     if (navigator.onLine) {
                       location.reload();
                     } else {
-                      setTimeout(checkOnline, 5000); // Poll every 5s
+                      setTimeout(checkOnline, 5000);
                     }
                   };
                   if ('serviceWorker' in navigator) {
@@ -113,7 +145,6 @@ self.addEventListener('fetch', event => {
                   } else {
                     checkOnline();
                   }
-                  // Listen globally
                   window.addEventListener('online', () => location.reload());
                 </script>
               </body></html>
@@ -150,7 +181,6 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// On update, clean old caches (add to activate event if not present)
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
@@ -164,8 +194,84 @@ self.addEventListener('activate', event => {
       );
     })
   );
-  // Force clients to reload for fresh content after SW update
   event.waitUntil(clients.claim());
 });
 
-// Tip: On your server, add Cache-Control: no-cache to /index.html to encourage fresh fetches
+// Handle offline map region caching
+self.addEventListener('message', async event => {
+  if (event.data.type === 'CACHE_REGION' && event.data.region) {
+    const { bounds } = event.data.region;
+    try {
+      const cache = await caches.open(CACHE_NAME);
+      // Generate tile URLs for the region (simplified example)
+      const tileUrls = generateTileUrls(bounds);
+      for (const url of tileUrls) {
+        try {
+          const response = await fetch(url);
+          if (response && response.status === 200) {
+            await cache.put(url, response);
+            console.log('Cached map tile:', url);
+          }
+        } catch (error) {
+          console.error('Failed to cache map tile:', url, error);
+        }
+      }
+      console.log('Cached map tiles for region:', bounds);
+    } catch (error) {
+      console.error('Error caching region:', error);
+    }
+  } else if (event.data.type === 'CLEAR_OLD_CACHE') {
+    const cacheNames = await caches.keys();
+    await Promise.all(
+      cacheNames.map(cacheName => {
+        if (cacheName !== CACHE_NAME) {
+          console.log('Clearing old cache on message:', cacheName);
+          return caches.delete(cacheName);
+        }
+      })
+    );
+  }
+});
+
+// Generate tile URLs for a given bounds (simplified)
+function generateTileUrls(bounds) {
+  const urls = [];
+  const zoomLevels = [15, 16, 17, 18, 19]; // Adjust based on app's zoom config
+  const tileSize = 256;
+  const { north, south, east, west } = bounds;
+
+  for (const zoom of zoomLevels) {
+    const scale = 1 << zoom;
+    const topLeft = latLngToTile({ lat: north, lng: west }, zoom);
+    const bottomRight = latLngToTile({ lat: south, lng: east }, zoom);
+
+    for (let x = topLeft.x; x <= bottomRight.x; x++) {
+      for (let y = topLeft.y; y <= bottomRight.y; y++) {
+        const url = `https://maps.googleapis.com/maps/api/staticmap?center=${(north + south) / 2},${(east + west) / 2}&zoom=${zoom}&size=${tileSize}x${tileSize}&maptype=roadmap&key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4`;
+        urls.push(url);
+      }
+    }
+  }
+  return urls;
+}
+
+// Convert lat/lng to tile coordinates
+function latLngToTile(latLng, zoom) {
+  const scale = 1 << zoom;
+  const worldCoordinate = project(latLng);
+  const tileCoordinate = {
+    x: Math.floor(worldCoordinate.x * scale / 256),
+    y: Math.floor(worldCoordinate.y * scale / 256)
+  };
+  return tileCoordinate;
+}
+
+// Project lat/lng to world coordinates
+function project(latLng) {
+  const siny = Math.sin((latLng.lat * Math.PI) / 180);
+  const y = 0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI);
+  return {
+    x: (latLng.lng + 180) / 360,
+    y: y
+  };
+}
