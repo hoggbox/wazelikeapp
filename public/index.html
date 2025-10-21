@@ -664,7 +664,7 @@
 }
 #trial-banner {
   position: fixed;
-  bottom: 4vh;
+  bottom: 20vh;
   left: 50%;
   transform: translateX(-50%);
   width: 80%;
@@ -1399,7 +1399,7 @@
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-       
+     
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1414,11 +1414,11 @@
               level: 'error'
             });
           }
-       
+     
           if (fallback) {
             return fallback(error);
           }
-       
+     
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -1906,12 +1906,12 @@
           lng < -180 || lng > 180) {
         throw new Error('Invalid coordinates');
       }
-   
+ 
       const token = TokenManager.get();
       if (!TokenManager.isValid()) {
         throw new Error('Invalid token');
       }
-   
+ 
       const response = await fetchWithRetry('/api/geocode', {
         method: 'POST',
         headers: {
@@ -1923,7 +1923,7 @@
           lng: parseFloat(lng.toFixed(6))
         })
       });
-   
+ 
       if (!response.ok) {
         throw new Error('Geocoding failed');
       }
@@ -2988,11 +2988,11 @@
       },
       async process() {
         if (!navigator.onLine || this.queue.length === 0) return;
-   
+ 
         const pending = [...this.queue];
         this.queue = [];
         this.save();
-   
+ 
         for (const action of pending) {
           try {
             await this.executeAction(action);
@@ -3001,7 +3001,7 @@
             this.queue.push(action); // Re-queue
           }
         }
-   
+ 
         this.save();
       },
       async executeAction(action) {
@@ -3023,23 +3023,23 @@
       check() {
         const now = Date.now();
         const issues = [];
-   
+ 
         // Check GPS
         if (navState.isNavigating && now - this.lastGPSUpdate > 10000) {
           issues.push('GPS signal lost');
         }
-   
+ 
         // Check Socket
         if (socket && !socket.connected) {
           issues.push('Server connection lost');
         }
-   
+ 
         // Check token expiration
         if (!TokenManager.isValid()) {
           issues.push('Session expired');
           this.handleSessionExpired();
         }
-   
+ 
         // Check memory usage (if available)
         if (performance.memory) {
           const usedMB = performance.memory.usedJSHeapSize / 1048576;
@@ -3048,12 +3048,12 @@
             console.warn('Memory usage:', usedMB.toFixed(2), 'MB');
           }
         }
-   
+ 
         if (issues.length > 0) {
           console.warn('Health check issues:', issues);
           this.reportIssues(issues);
         }
-   
+ 
         return issues.length === 0;
       },
       handleSessionExpired() {
@@ -3461,7 +3461,7 @@
             options.headers['Authorization'] = `Bearer ${token}`;
           }
           const response = await fetch(url, options);
-       
+     
           // Check for rate limiting
           if (response.status === 429) {
             const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
@@ -3470,7 +3470,7 @@
             await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
             continue;
           }
-       
+     
           if (response.ok) return response;
           if (response.status === 401) {
             const refreshed = await refreshToken();
@@ -5286,6 +5286,8 @@
       if (navState.isFollowing) {
         lockNavigation();
       }
+      // FIXED: Restore navigation view after accept
+      restoreNavigationView();
       showToast('Reroute accepted.');
       console.log('Reroute accepted, navigation updated');
     }
@@ -5305,6 +5307,8 @@
       if (navState.isFollowing) {
         lockNavigation();
       }
+      // FIXED: Restore navigation view after reject
+      restoreNavigationView();
       showToast('Reroute rejected.');
       console.log('Reroute rejected, continuing on original route');
     }
@@ -6113,11 +6117,9 @@ async function handlePaymentCallback() {
         showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
         subscriptionStatus.isPremium = true;
         updateUIForSubscription();
- 
         // Add confetti effect (optional - requires canvas-confetti library)
         // Or create a simple celebration animation
         createCelebration();
- 
         // Clear caches and hard reload to ensure fresh content
         if ('caches' in window) {
           caches.keys().then((names) => {

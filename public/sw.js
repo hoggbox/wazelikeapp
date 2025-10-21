@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.3'; // Bump version on updates to invalidate cache
+const CACHE_NAME = 'waze-gps-v1.0.4'; // Bump version on updates to invalidate cache
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
