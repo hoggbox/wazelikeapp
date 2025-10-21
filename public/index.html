@@ -664,20 +664,35 @@
 }
 #trial-banner {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
+  bottom: 4vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80%;
+  max-width: 300px;
   background: linear-gradient(90deg, #FFA500, #FF8C00);
   color: white;
   padding: 0.5rem;
   text-align: center;
   z-index: 9999;
-  font-weight: bold;
+  font-weight: normal;
+  font-size: 0.9rem;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
   cursor: pointer;
+  border-radius: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 #trial-banner:hover {
   background: linear-gradient(90deg, #FF8C00, #FFA500);
+}
+#trial-banner-close {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 0.5rem;
 }
 #subscription-loading {
   position: fixed;
@@ -1069,6 +1084,7 @@
   <!-- Trial Banner -->
 <div id="trial-banner" style="display: none;">
   <span id="trial-banner-text">🎉 Free Trial Active - <span id="trial-days-remaining">7</span> days remaining</span>
+  <button id="trial-banner-close" title="Hide Banner">×</button>
 </div>
 <!-- Subscription Modal -->
 <div id="subscription-modal">
@@ -1383,7 +1399,7 @@
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-        
+       
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1398,11 +1414,11 @@
               level: 'error'
             });
           }
-        
+       
           if (fallback) {
             return fallback(error);
           }
-        
+       
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -1890,12 +1906,12 @@
           lng < -180 || lng > 180) {
         throw new Error('Invalid coordinates');
       }
-    
+   
       const token = TokenManager.get();
       if (!TokenManager.isValid()) {
         throw new Error('Invalid token');
       }
-    
+   
       const response = await fetchWithRetry('/api/geocode', {
         method: 'POST',
         headers: {
@@ -1907,7 +1923,7 @@
           lng: parseFloat(lng.toFixed(6))
         })
       });
-    
+   
       if (!response.ok) {
         throw new Error('Geocoding failed');
       }
@@ -2972,11 +2988,11 @@
       },
       async process() {
         if (!navigator.onLine || this.queue.length === 0) return;
-    
+   
         const pending = [...this.queue];
         this.queue = [];
         this.save();
-    
+   
         for (const action of pending) {
           try {
             await this.executeAction(action);
@@ -2985,7 +3001,7 @@
             this.queue.push(action); // Re-queue
           }
         }
-    
+   
         this.save();
       },
       async executeAction(action) {
@@ -3007,23 +3023,23 @@
       check() {
         const now = Date.now();
         const issues = [];
-    
+   
         // Check GPS
         if (navState.isNavigating && now - this.lastGPSUpdate > 10000) {
           issues.push('GPS signal lost');
         }
-    
+   
         // Check Socket
         if (socket && !socket.connected) {
           issues.push('Server connection lost');
         }
-    
+   
         // Check token expiration
         if (!TokenManager.isValid()) {
           issues.push('Session expired');
           this.handleSessionExpired();
         }
-    
+   
         // Check memory usage (if available)
         if (performance.memory) {
           const usedMB = performance.memory.usedJSHeapSize / 1048576;
@@ -3032,12 +3048,12 @@
             console.warn('Memory usage:', usedMB.toFixed(2), 'MB');
           }
         }
-    
+   
         if (issues.length > 0) {
           console.warn('Health check issues:', issues);
           this.reportIssues(issues);
         }
-    
+   
         return issues.length === 0;
       },
       handleSessionExpired() {
@@ -3445,7 +3461,7 @@
             options.headers['Authorization'] = `Bearer ${token}`;
           }
           const response = await fetch(url, options);
-        
+       
           // Check for rate limiting
           if (response.status === 429) {
             const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
@@ -3454,7 +3470,7 @@
             await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
             continue;
           }
-        
+       
           if (response.ok) return response;
           if (response.status === 401) {
             const refreshed = await refreshToken();
@@ -3824,7 +3840,6 @@
     releaseMarker(marker);
     markers.delete(id);
   }
- 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -5963,13 +5978,18 @@ function updateUIForSubscription() {
   // Update trial banner
   const trialBanner = document.getElementById('trial-banner');
   const trialDaysSpan = document.getElementById('trial-days-remaining');
-  if (subscriptionStatus.isTrialActive && !subscriptionStatus.isPremium) {
-    trialBanner.style.display = 'block';
+  const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
+  const now = Date.now();
+  const shouldShowBanner = subscriptionStatus.isTrialActive && !subscriptionStatus.isPremium && (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000);
+  if (shouldShowBanner) {
+    trialBanner.style.display = 'flex';
     trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
     // Add click handler to banner
-    trialBanner.onclick = () => showUpgradeModal('banner_click');
-  } else if (subscriptionStatus.isPremium) {
-    trialBanner.style.display = 'none';
+    trialBanner.onclick = (e) => {
+      if (e.target.id !== 'trial-banner-close') {
+        showUpgradeModal('banner_click');
+      }
+    };
   } else {
     trialBanner.style.display = 'none';
   }
@@ -6035,7 +6055,6 @@ document.getElementById('upgrade-button').addEventListener('click', async () => 
   const button = document.getElementById('upgrade-button');
   button.disabled = true;
   button.textContent = 'Processing...';
- 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -6094,13 +6113,22 @@ async function handlePaymentCallback() {
         showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
         subscriptionStatus.isPremium = true;
         updateUIForSubscription();
-  
+ 
         // Add confetti effect (optional - requires canvas-confetti library)
         // Or create a simple celebration animation
         createCelebration();
-  
-        // Clean URL
+ 
+        // Clear caches and hard reload to ensure fresh content
+        if ('caches' in window) {
+          caches.keys().then((names) => {
+            names.forEach((name) => {
+              caches.delete(name);
+            });
+          });
+        }
+        // Clean URL and reload
         window.history.replaceState({}, document.title, window.location.pathname);
+        window.location.reload();
       }
     } catch (error) {
       console.error('Error verifying payment:', error);
@@ -6178,6 +6206,13 @@ function initSubscription() {
   // Check subscription status periodically (every hour)
   setInterval(checkSubscriptionStatus, 60 * 60 * 1000);
 }
+// Trial banner close handler
+document.getElementById('trial-banner-close').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('trial-banner').style.display = 'none';
+  localStorage.setItem('trialBannerHiddenAt', Date.now().toString());
+  console.log('Trial banner hidden');
+});
   </script>
 </body>
 </html>

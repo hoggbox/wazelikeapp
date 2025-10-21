@@ -1,3 +1,5 @@
+const CACHE_NAME = 'waze-gps-v1.0.3'; // Bump version on updates to invalidate cache
+
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   
@@ -37,30 +39,86 @@ self.addEventListener('fetch', event => {
           return networkResponse;
         })
         .catch(() => {
-          console.log('Serving cached index.html for offline (subscription modal intact):', url.pathname);
+          console.log('Serving cached/offline for document:', url.pathname);
+          // Check for payment callback params
+          const isPaymentSuccess = url.searchParams.get('payment') === 'success' || url.searchParams.get('session_id');
+          const isPaymentCancelled = url.searchParams.get('payment') === 'cancelled';
+          
           return caches.match('/index.html').then(cachedResponse => {
             if (cachedResponse) {
-              const isPaymentCallback = url.searchParams.get('payment') || url.searchParams.get('session_id');
-              if (isPaymentCallback) {
-                return new Response(cachedResponse.clone().text().then(html => {
-                  return html.replace(
-                    '</body>',
-                    `<script>if (window.location.search.includes('payment=success')) { alert('Payment success! (Offline mode - reconnect to verify)'); } else if (window.location.search.includes('payment=cancelled')) { alert('Payment cancelled.'); }</script></body>`
-                  );
-                }), {
-                  headers: cachedResponse.headers
-                });
+              let enhancedHTML = cachedResponse.clone().text();
+              if (isPaymentSuccess) {
+                // Inject celebration and force subscription check/reload on online
+                enhancedHTML = enhancedHTML.then(html => html.replace(
+                  '</body>',
+                  `
+                  <script>
+                    // Mini celebration (mimic app)
+                    const celeb = document.createElement('div');
+                    celeb.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;z-index:10003;animation:celebrate 2s ease-out forwards;pointer-events:none';
+                    celeb.textContent = '🎉 Premium Unlocked!';
+                    document.body.appendChild(celeb);
+                    const style = document.createElement('style');
+                    style.textContent = '@keyframes celebrate {0%{transform:translate(-50%,-50%) scale(0);opacity:0}50%{transform:translate(-50%,-50%) scale(1.5);opacity:1}100%{transform:translate(-50%,-50%) scale(1) translateY(-100px);opacity:0}}';
+                    document.head.appendChild(style);
+                    setTimeout(() => {celeb.remove(); style.remove();}, 2000);
+                    
+                    // Force subscription check and reload on reconnect
+                    if ('serviceWorker' in navigator) {
+                      navigator.serviceWorker.ready.then(() => {
+                        // Poll for online and reload
+                        const checkOnline = () => {
+                          if (navigator.onLine) {
+                            location.reload();
+                          } else {
+                            setTimeout(checkOnline, 2000);
+                          }
+                        };
+                        checkOnline();
+                      });
+                    }
+                  </script>
+                  </body>`
+                ));
+              } else if (isPaymentCancelled) {
+                enhancedHTML = enhancedHTML.then(html => html.replace(
+                  '</body>',
+                  `<script>alert('Payment cancelled. You can upgrade anytime from Settings.');</script></body>`
+                ));
               }
-              return cachedResponse;
+              return new Response(enhancedHTML, {
+                headers: cachedResponse.headers
+              });
             }
-            return new Response(`
+            // Enhanced offline HTML with reconnect logic and payment awareness
+            const offlineHTML = `
               <!DOCTYPE html>
-              <html><head><title>Offline</title></head><body>
+              <html><head><title>Offline</title><style>body{font-family:Arial;text-align:center;padding:2rem;background:#f0f0f0;color:#333;}button{background:#4CAF50;color:white;border:none;padding:1rem;border-radius:0.5rem;cursor:pointer;font-size:1rem;}</style></head><body>
                 <h1>You're offline</h1>
                 <p>Reconnect to access the app & verify subscription. Cached content available.</p>
-                <script>if ('serviceWorker' in navigator) navigator.serviceWorker.ready.then(() => location.reload());</script>
+                ${isPaymentSuccess ? '<p>🎉 Payment success detected! Reconnecting to unlock Premium...</p>' : ''}
+                ${isPaymentCancelled ? '<p>Payment cancelled.</p>' : ''}
+                <button onclick="location.reload()">Reconnect & Refresh</button>
+                <script>
+                  // Auto-poll and reload on online
+                  const checkOnline = () => {
+                    if (navigator.onLine) {
+                      location.reload();
+                    } else {
+                      setTimeout(checkOnline, 5000); // Poll every 5s
+                    }
+                  };
+                  if ('serviceWorker' in navigator) {
+                    navigator.serviceWorker.ready.then(() => checkOnline());
+                  } else {
+                    checkOnline();
+                  }
+                  // Listen globally
+                  window.addEventListener('online', () => location.reload());
+                </script>
               </body></html>
-            `, { 
+            `;
+            return new Response(offlineHTML, { 
               status: 503,
               headers: { 'Content-Type': 'text/html' }
             });
@@ -70,7 +128,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Default: Cache-first with network update
+  // Default: Cache-first with network update (stale-while-revalidate)
   event.respondWith(
     caches.open(CACHE_NAME).then(cache => {
       return cache.match(event.request).then(cachedResponse => {
@@ -91,3 +149,23 @@ self.addEventListener('fetch', event => {
     })
   );
 });
+
+// On update, clean old caches (add to activate event if not present)
+self.addEventListener('activate', event => {
+  event.waitUntil(
+    caches.keys().then(cacheNames => {
+      return Promise.all(
+        cacheNames.map(cacheName => {
+          if (cacheName !== CACHE_NAME) {
+            console.log('Deleting old cache:', cacheName);
+            return caches.delete(cacheName);
+          }
+        })
+      );
+    })
+  );
+  // Force clients to reload for fresh content after SW update
+  event.waitUntil(clients.claim());
+});
+
+// Tip: On your server, add Cache-Control: no-cache to /index.html to encourage fresh fetches
