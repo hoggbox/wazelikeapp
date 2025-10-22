@@ -446,6 +446,7 @@
       .settings-option .slider-value { font-size: clamp(9px, 1.8vmin, 13px); }
       .vote-btn { font-size: clamp(9px, 1.8vmin, 13px); }
       #users-list th, #users-list td { padding: 0.3rem; font-size: 0.8rem; }
+      #report-box, #settings-hud-container { max-width: 280px; margin-left: -10px; }
     }
     @media (min-width: 415px) and (max-width: 768px) {
       #button-container { right: 2.5vw; gap: 1.2vh; padding: 1.5vmin; }
@@ -1249,6 +1250,7 @@
     let showTooltips = localStorage.getItem('showTooltips') !== 'false';
     let isInitialized = false;
     let toastTimeout = null;
+    let toastQueue = []; // Queue for toasts
     let lastHeading = 0;
     let lastCameraPosition = null;
     let lastStableHeading = 0;
@@ -1285,6 +1287,10 @@
     let lastVoiceError = null;
     let voiceErrorCount = 0;
     const MAX_CACHE_SIZE = 500;
+    let isCalculatingRoute = false; // Flag for race condition
+    let tokenRefreshRetries = 0; // Counter for refreshToken
+    const MAX_TOKEN_REFRESH_RETRIES = 3;
+    let deletedAlertsBackup = new Map(); // For rollback in deleteAlert
     // Replace existing ProgrammaticUpdateManager with this robust version:
 const ProgrammaticUpdateManager = {
   _isUpdating: false,
@@ -1299,7 +1305,6 @@ const ProgrammaticUpdateManager = {
     this._isUpdating = true;
     this._startTime = Date.now();
     this._callbacks = [];
- 
     // Safety timeout - force end after 3s
     this._timeoutId = setTimeout(() => {
       if (this._isUpdating) {
@@ -1310,10 +1315,8 @@ const ProgrammaticUpdateManager = {
   },
   end(callback = null) {
     if (callback) this._callbacks.push(callback);
- 
     clearTimeout(this._timeoutId);
     this._timeoutId = null;
- 
     requestAnimationFrame(() => {
       this._isUpdating = false;
       const callbacks = [...this._callbacks];
@@ -1657,12 +1660,19 @@ setInterval(() => {
             sessionStorage.removeItem('navStateBackup');
             return false;
           }
+          // FIXED: Validate state before restoring
+          if (!state.destination || isNaN(state.destination.lat) || isNaN(state.destination.lng) ||
+              !state.userLocation || isNaN(state.userLocation.lat) || isNaN(state.userLocation.lng)) {
+            console.warn('Invalid state data, discarding backup');
+            sessionStorage.removeItem('navStateBackup');
+            return false;
+          }
           navState.destination = state.destination;
           navState.currentRoute = state.currentRoute;
           navState.userLocation = state.userLocation;
           navState.currentHeading = state.currentHeading;
           navState.isFollowing = state.isFollowing;
-          navState.waypoints = state.waypoints;
+          navState.waypoints = state.waypoints || [];
           console.log('Navigation state restored from backup');
           return true;
         } catch (error) {
@@ -1675,7 +1685,7 @@ setInterval(() => {
           // App going to background (call incoming, etc.)
           console.log('App going to background, saving state');
           saveNavigationState();
-      
+     
           // Keep wake lock if possible during call
           if (!wakeLock && navState.isNavigating) {
             requestWakeLock();
@@ -1683,10 +1693,10 @@ setInterval(() => {
         } else if (navState.isNavigating) {
           // App returning to foreground
           console.log('App returning to foreground, restoring navigation');
-      
+     
           // Attempt state restoration
           const restored = restoreNavigationState();
-      
+     
           // Reconnect socket
           if (socket && !socket.connected) {
             socket.connect();
@@ -1716,7 +1726,7 @@ setInterval(() => {
           }
           // Re-enable interaction
           map.setOptions({ gestureHandling: navState.isFollowing ? 'none' : 'cooperative' });
-      
+     
           // Restart monitoring
           fetchCurrentAlerts();
           if (navState.hazardCheckInterval) {
@@ -1946,30 +1956,29 @@ setInterval(() => {
   const isTurning = speed > 5 && Math.abs(heading - navState.lastValidHeading) > 15;
   for (const { point, idx } of candidates) {
     const distance = google.maps.geometry.spherical.computeDistanceBetween(currentLatLng, point);
- 
     if (distance <= CONFIG.SNAP_BUFFER) {
       const nextPoint = idx < path.length - 1 ? path[idx + 1] : point;
       const pointHeading = getCachedHeading(point, nextPoint);
       const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
-   
+  
       // ✅ NEW: Boost score for points ahead during turns
       let proximityScore = (CONFIG.SNAP_BUFFER - distance) / CONFIG.SNAP_BUFFER * 0.6;
       if (isTurning && idx > navState.lastSnapIndex) {
         proximityScore *= 1.3; // 30% boost for forward points during turns
       }
-   
+  
       const headingScore = (1 - headingDiff / 180) * 0.3;
       const speedScore = speed > 20 ? 0.1 : speed < 10 ? 0.05 : 0;
       const contextScore = idx < path.length - 1 ? 0.1 : 0.05;
-   
+  
       const totalScore = proximityScore + headingScore + speedScore + contextScore;
-   
+  
       if (totalScore > bestScore) {
         bestScore = totalScore;
         bestPoint = { lat: point.lat(), lng: point.lng() };
         closestIndex = idx;
       }
-   
+  
       // Early exit for very close matches (unless turning)
       if (distance < 20 && !isTurning) break;
     }
@@ -1989,7 +1998,7 @@ setInterval(() => {
       // Single declaration of 'now' at the top
       const now = Date.now();
       const headingAge = now - lastHeadingUpdate;
-    
+   
       // Force recalculation if heading hasn't updated in 3s while moving
       if (speed > CONFIG.STATIONARY_SPEED_THRESHOLD && headingAge > 3000) {
         console.warn('Heading stale while moving, forcing GPS recalculation');
@@ -2002,7 +2011,7 @@ setInterval(() => {
           return freshHeading;
         }
       }
-    
+   
       if (isNaN(newHeading) || newHeading === null || speed <= CONFIG.STATIONARY_SPEED_THRESHOLD) {
         console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
@@ -2069,9 +2078,9 @@ setInterval(() => {
     }
     function smoothPosition(rawPos) {
       positionHistory.push(rawPos);
-      // FIXED: Cap array size
+      // FIXED: Use splice() for efficiency
       if (positionHistory.length > CONFIG.POSITION_HISTORY_WINDOW) {
-        positionHistory = positionHistory.slice(-CONFIG.POSITION_HISTORY_WINDOW);
+        positionHistory.splice(0, positionHistory.length - CONFIG.POSITION_HISTORY_WINDOW);
       }
       const avgLat = positionHistory.reduce((sum, p) => sum + p.lat, 0) / positionHistory.length;
       const avgLng = positionHistory.reduce((sum, p) => sum + p.lng, 0) / positionHistory.length;
@@ -2112,7 +2121,10 @@ setInterval(() => {
         })
       });
       if (!response.ok) {
-        throw new Error('Geocoding failed');
+        const errorData = await response.json().catch(() => ({}));
+        // FIXED: Sanitize error messages
+        const safeError = errorData.error ? errorData.error.replace(/\[.*?\]/g, '[REDACTED]') : 'Geocoding failed';
+        throw new Error(safeError);
       }
       return response.json();
     }
@@ -2525,8 +2537,14 @@ setInterval(() => {
     ProgrammaticUpdateManager.end();
     currentHeadingTween = null;
   });
-  currentHeadingTween = tween;
-  tween.start();
+  // FIXED: Wrap tween.start() in try-catch
+  try {
+    currentHeadingTween = tween;
+    tween.start();
+  } catch (e) {
+    console.error('Tween failed:', e);
+    ProgrammaticUpdateManager.forceEnd();
+  }
   lastCameraPosition = actualPos;
   lastHeading = finalHeading;
   navState.lastCameraUpdateTime = Date.now();
@@ -2648,7 +2666,7 @@ setInterval(() => {
         window.history.replaceState({}, document.title, window.location.pathname);
         const token = TokenManager.get();
         fetchWithRetry(`/api/markers?lat=${lat}&lng=${lng}&maxDistance=100`, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -2973,8 +2991,8 @@ setInterval(() => {
           if (password) body.password = password;
           const response = await fetchWithRetry('/api/auth/profile', {
             method: 'PUT',
-            headers: { 
-              'Content-Type': 'application/json', 
+            headers: {
+              'Content-Type': 'application/json',
               'Authorization': `Bearer ${token}`,
               'X-CSRF-Token': getCsrfToken()
             },
@@ -3323,8 +3341,8 @@ setInterval(() => {
           case 'postAlert':
             await fetchWithRetry('/api/alerts', {
               method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json', 
+              headers: {
+                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
                 'X-CSRF-Token': getCsrfToken()
               },
@@ -3334,8 +3352,8 @@ setInterval(() => {
           case 'updateLocation':
             await fetchWithRetry('/api/location', {
               method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json', 
+              headers: {
+                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
                 'X-CSRF-Token': getCsrfToken()
               },
@@ -3345,8 +3363,8 @@ setInterval(() => {
           case 'subscriptionCheckout':
             await fetchWithRetry('/api/subscription/create-checkout', {
               method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json', 
+              headers: {
+                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
                 'X-CSRF-Token': getCsrfToken()
               },
@@ -3356,8 +3374,8 @@ setInterval(() => {
           case 'subscriptionCancel':
             await fetchWithRetry('/api/subscription/cancel', {
               method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json', 
+              headers: {
+                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token}`,
                 'X-CSRF-Token': getCsrfToken()
               },
@@ -3618,12 +3636,13 @@ setInterval(() => {
         if (!TokenManager.isValid()) {
           throw new Error('Invalid token format in storage');
         }
-        // FIXED: Remove in production or use debug flag
-        if (window.location.hostname === 'localhost') {
+        // FIXED: Use environment variable instead of hostname check
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching profile with token:', token.substring(0, 10) + '...');
         }
         let response = await fetchWithRetry(`/api/auth/profile/${targetId}`, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -3720,7 +3739,8 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Subscribing to push with token:', token.substring(0, 10) + '...');
         }
         const response = await fetchWithRetry('/api/auth/subscribe', {
@@ -3753,7 +3773,8 @@ setInterval(() => {
             return;
           }
           // FIXED: Use debug flag for token log
-          if (window.location.hostname === 'localhost') {
+          const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+          if (isDebug) {
             console.log('Unsubscribing from push with token:', token.substring(0, 10) + '...');
           }
           await fetchWithRetry('/api/auth/unsubscribe', {
@@ -3797,11 +3818,12 @@ setInterval(() => {
       }
       try {
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching leaderboard with token:', token.substring(0, 10) + '...');
         }
         const response = await fetchWithRetry('/api/leaderboard', {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -3919,20 +3941,28 @@ setInterval(() => {
       }
     }
     async function refreshToken() {
+      // FIXED: Add retry counter
+      if (tokenRefreshRetries >= MAX_TOKEN_REFRESH_RETRIES) {
+        console.error('Max token refresh retries reached');
+        TokenManager.clear();
+        document.getElementById('auth-container').style.display = 'flex';
+        return false;
+      }
       try {
         const token = TokenManager.get();
         if (!TokenManager.isValid()) {
           throw new Error('Invalid token format in storage');
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Refreshing token:', token.substring(0, 10) + '...');
         }
         const response = await fetch('/api/auth/refresh', {
           method: 'POST',
           mode: 'cors',
           credentials: 'include',
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -3941,12 +3971,14 @@ setInterval(() => {
         const data = await response.json();
         if (response.ok) {
           TokenManager.set(data.token);
+          tokenRefreshRetries = 0; // Reset on success
           console.log('Token refreshed:', data.token.substring(0, 20) + '...');
           return true;
         } else {
           throw new Error('Token refresh failed: ' + (data.error || 'Unknown error'));
         }
       } catch (error) {
+        tokenRefreshRetries++;
         console.error('Token refresh failed:', error);
         showToast('Session expired. Please log in again.');
         TokenManager.clear();
@@ -3985,11 +4017,12 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Checking nearby alerts with token:', token.substring(0, 10) + '...');
         }
         const response = await fetchWithRetry(`/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=${CONFIG.MIN_ALERT_DISTANCE}`, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -4098,7 +4131,8 @@ setInterval(() => {
       return;
     }
     // FIXED: Use debug flag for token log
-    if (window.location.hostname === 'localhost') {
+    const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+    if (isDebug) {
       console.log('Posting alert with token:', token.substring(0, 10) + '...');
     }
     const response = await fetchWithRetry('/api/alerts', {
@@ -4240,7 +4274,8 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log(`Voting ${voteType} on alert ${alertId} with token:`, token.substring(0, 10) + '...');
         }
         const response = await fetchWithRetry(`/api/alerts/${alertId}/vote`, {
@@ -4291,6 +4326,11 @@ setInterval(() => {
     }
     async function deleteAlert(id, item) {
   console.log('deleteAlert called:', id);
+  // FIXED: Backup for rollback
+  const alertToBackup = currentAlerts.find(a => a._id === id);
+  if (alertToBackup) {
+    deletedAlertsBackup.set(id, { ...alertToBackup, item });
+  }
   // Optimistic UI update only if item provided
   if (item) item.remove();
   const marker = markers.get(id);
@@ -4308,32 +4348,38 @@ setInterval(() => {
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) throw new Error('Invalid token');
-  
+ 
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'X-CSRF-Token': getCsrfToken()
       }
     });
-  
+ 
     if (!response.ok) throw new Error(`Failed to delete: ${response.statusText}`);
-  
+ 
     if (socket?.connected) {
       socket.emit('alertDeleted', id);
     }
-  
+ 
     // Backup sync after 1s
     setTimeout(() => pollAlerts(), 1000);
-  
+ 
     showToast('Alert deleted successfully.');
   } catch (error) {
     console.error('Error deleting alert:', error);
-    // On error, re-add to UI (rollback optimistic update)
-    const alert = markers.get(id)?.alert; // If you store alert data
-    if (alert) {
-      currentAlerts.push(alert);
+    // On error, rollback optimistic update
+    const backup = deletedAlertsBackup.get(id);
+    if (backup) {
+      currentAlerts.push(backup);
       displayAlertsInHud(currentAlerts);
+      if (backup.item) {
+        // Re-insert the item if it was removed
+        const container = document.getElementById('information');
+        container.appendChild(backup.item);
+      }
+      deletedAlertsBackup.delete(id);
     }
     showToast('Failed to delete alert. Refreshing...');
     setTimeout(() => pollAlerts(), 500);
@@ -4348,11 +4394,12 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Polling alerts with token:', token.substring(0, 10) + '...');
         }
         const response = await fetchWithRetry(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${navState.alertRadius * 1609.34}`, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -4389,12 +4436,13 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching markers with token:', token.substring(0, 10) + '...');
         }
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=${navState.alertRadius * 1609.34}`;
         const response = await fetchWithRetry(url, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -4452,12 +4500,13 @@ setInterval(() => {
       }
       try {
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching current alerts with token:', token.substring(0, 10) + '...');
         }
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=${navState.alertRadius * 1609.34}`;
         const response = await fetchWithRetry(url, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -4939,8 +4988,16 @@ setInterval(() => {
       document.getElementById('bottom-hud-container').style.display = 'flex';
       lockNavigation();
       if (!wakeLock) requestWakeLock();
+      // FIXED: Add isCalculatingRoute flag
+      if (isCalculatingRoute) {
+        console.log('Route calculation already in progress, skipping');
+        return;
+      }
       if (!navState.currentRoute) {
-        debouncedRouteCalc(navState.userLocation, navState.destination);
+        isCalculatingRoute = true;
+        debouncedRouteCalc(navState.userLocation, navState.destination, () => {
+          isCalculatingRoute = false;
+        });
       } else {
         const startLocation = navState.currentRoute.routes[0].legs[0].start_location;
         navState.routePolyline = navState.currentRoute.routes[0].overview_path;
@@ -5361,7 +5418,7 @@ setInterval(() => {
       if (status === 'OK') {
         // FIXED: Clear but not rebuild here, rebuild after detailedPath
         routeSpatialIndex = null; // ← ADD THIS
-        
+       
         navState.currentRoute = response;
         navState.routePolyline = response.routes[0].overview_path;
         navState.detailedPath = [];
@@ -5548,6 +5605,13 @@ setInterval(() => {
           const verificationHud = document.getElementById('verification-hud');
           verificationHud.classList.add('active');
           verificationHudContainer.classList.add('active');
+          // FIXED: Add 30s auto-dismiss
+          setTimeout(() => {
+            if (verificationHudContainer.classList.contains('active')) {
+              dismissVerificationHud();
+              showToast('Verification timed out.');
+            }
+          }, 30000);
           console.log('Alert verification HUD shown for:', alertId);
         }
       });
@@ -5848,12 +5912,23 @@ setInterval(() => {
       console.log('Accordion toggled:', header.textContent, 'Active:', !isActive);
     }
     function showToast(message, duration = 3000) {
+      // FIXED: Queue toasts to prevent stacking
+      toastQueue.push({ message, duration });
+      if (toastQueue.length === 1) {
+        processToastQueue();
+      }
+    }
+    function processToastQueue() {
+      if (toastQueue.length === 0) return;
+      const { message, duration } = toastQueue[0];
       const toast = document.getElementById('toast');
       toast.textContent = message;
       toast.classList.add('visible-toast');
       if (toastTimeout) clearTimeout(toastTimeout);
       toastTimeout = setTimeout(() => {
         toast.classList.remove('visible-toast');
+        toastQueue.shift();
+        setTimeout(processToastQueue, 100); // Small delay before next toast
       }, duration);
       console.log('Toast shown:', message);
     }
@@ -5939,12 +6014,13 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching users with token:', token.substring(0, 10) + '...', 'Query:', query);
         }
         const url = query ? `/api/users/search?query=${encodeURIComponent(query)}` : '/api/users';
         const response = await fetchWithRetry(url, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -5999,11 +6075,12 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching user activity with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
         const response = await fetchWithRetry(`/api/users/${userId}/activity`, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6032,12 +6109,13 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Promoting user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
         const response = await fetchWithRetry(`/api/users/${userId}/promote`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6064,12 +6142,13 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Demoting user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
         const response = await fetchWithRetry(`/api/users/${userId}/demote`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6096,12 +6175,13 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Deleting user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
         const response = await fetchWithRetry(`/api/users/${userId}`, {
           method: 'DELETE',
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6128,12 +6208,13 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Banning user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
         const response = await fetchWithRetry(`/api/users/${userId}/ban`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6160,12 +6241,13 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('IP banning user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
         const response = await fetchWithRetry(`/api/users/${userId}/ipban`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6192,11 +6274,12 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching all users with token:', token.substring(0, 10) + '...');
         }
         const response = await fetchWithRetry('/api/users', {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6219,11 +6302,12 @@ setInterval(() => {
           return;
         }
         // FIXED: Use debug flag for token log
-        if (window.location.hostname === 'localhost') {
+        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
+        if (isDebug) {
           console.log('Fetching user for activity with token:', token.substring(0, 10) + '...', 'Query:', query);
         }
         const response = await fetchWithRetry(`/api/users/search?query=${encodeURIComponent(query)}`, {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6265,12 +6349,12 @@ function initSocket(token, userId) {
   if (navState.isNavigating) {
     checkHazardsAndOfferReroute();
     startRerouteCheck(); // ← ADD THIS
-  
+ 
     // Restart camera checking if enabled
     if (showTrafficCameras && !cameraCheckInterval) {
       cameraCheckInterval = setInterval(checkCameraProximity, CONFIG.CAMERA_CHECK_INTERVAL);
     }
-  
+ 
     // Restart hazard checking
     if (!navState.hazardCheckInterval) {
       navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 5000);
@@ -6507,7 +6591,7 @@ socket.on('alert', debouncedAlertHandler);
         }
         const response = await fetchWithRetry('/api/subscription/cancel', {
           method: 'POST',
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'X-CSRF-Token': getCsrfToken()
           }
@@ -6554,7 +6638,7 @@ async function checkSubscriptionStatus(retries = 3) {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) return;
     const response = await fetchWithRetry('/api/subscription/status', {
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'X-CSRF-Token': getCsrfToken()
       }
@@ -6590,12 +6674,13 @@ function updateUIForSubscription() {
   const trialDaysSpan = document.getElementById('trial-days-remaining');
   const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
   const now = Date.now();
+  // FIXED: Check if user dismissed it recently (48 hours)
   const shouldShowBanner = subscriptionStatus.isTrialActive && !subscriptionStatus.isPremium && (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000);
   if (shouldShowBanner) {
     trialBanner.style.display = 'flex';
     trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
     // Add click handler to banner
-    trialBanner.onclick = (e) => {
+    trialBanner.onclick =(e) => {
       if (e.target.id !== 'trial-banner-close') {
         showUpgradeModal('banner_click');
       }
@@ -6604,9 +6689,9 @@ function updateUIForSubscription() {
     trialBanner.style.display = 'none';
   }
   // Lock/unlock premium features
-  PREMIUM_FEATURES.forEach(featureId => {
-    const element = document.getElementById(featureId);
-    if (!element) return;
+  // FIXED: Use data attributes instead of static array
+  document.querySelectorAll('[data-premium-feature]').forEach(element => {
+    const featureId = element.getAttribute('data-premium-feature');
     if (hasAccess) {
       element.classList.remove('locked-feature');
       element.disabled = false;
@@ -6799,7 +6884,7 @@ async function cancelSubscription() {
     const token = TokenManager.get();
     const response = await fetchWithRetry('/api/subscription/cancel', {
       method: 'POST',
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'X-CSRF-Token': getCsrfToken()
       }
