@@ -64,7 +64,7 @@ router.post('/register', async (req, res) => {
     console.log('User registered:', { userId: user._id, username, email });
 
     // Generate token
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '15m' });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '7d' });
     res.status(201).json({
       token,
       user: {
@@ -134,7 +134,7 @@ router.post('/login', async (req, res) => {
     }
 
     // Generate token
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '15m' });
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '7d' });
     console.log('Login successful:', { userId: user._id, username: user.username });
     res.json({
       token,
@@ -199,7 +199,7 @@ router.post('/refresh', async (req, res) => {
     }
 
     // Generate new token
-    const newToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '15m' });
+    const newToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'your_jwt_secret', { expiresIn: '7d' });
     console.log('Token refreshed for user:', { userId: user._id, username: user.username });
     res.json({
       token: newToken,
