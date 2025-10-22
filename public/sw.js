@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.7'; // Version matches index.html updates
+const CACHE_NAME = 'waze-gps-v1.0.8'; // Updated version
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -12,6 +12,7 @@ const PRECACHE_ASSETS = [
 ];
 
 const MAX_CACHED_TILES = 500;
+const SUBSCRIPTION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes TTL for subscription status
 
 // Track cached regions and their metadata
 let cachedRegions = new Map(); // Stores region name, bounds, and cachedAt timestamp
@@ -42,20 +43,58 @@ self.addEventListener('fetch', event => {
         fetch(event.request).then(async networkResponse => {
           if (networkResponse && networkResponse.status === 200) {
             const cache = await caches.open(CACHE_NAME);
-            cache.put('/api/subscription/status', networkResponse.clone());
+            const responseWithTTL = new Response(await networkResponse.clone().text(), {
+              headers: {
+                ...Object.fromEntries(networkResponse.headers),
+                'X-Cached-At': Date.now().toString()
+              }
+            });
+            await cache.put('/api/subscription/status', responseWithTTL);
             console.log('Cached subscription status response');
+            return networkResponse;
           }
-          return networkResponse;
+          throw new Error('Invalid subscription status response');
         }).catch(async () => {
           const cachedStatus = await caches.match('/api/subscription/status');
           if (cachedStatus) {
-            console.log('Serving cached subscription status');
-            return cachedStatus;
+            const cachedAt = parseInt(cachedStatus.headers.get('X-Cached-At') || '0');
+            if (Date.now() - cachedAt < SUBSCRIPTION_CACHE_TTL) {
+              console.log('Serving cached subscription status');
+              return cachedStatus;
+            } else {
+              console.log('Cached subscription status expired');
+            }
           }
           return new Response(JSON.stringify({
             error: 'Offline: Cannot verify subscription',
             offline: true,
             suggest: 'Reconnect to check subscription status'
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        })
+      );
+    } else if (url.pathname === '/api/users/family' && event.request.method === 'GET') {
+      event.respondWith(
+        fetch(event.request).then(async networkResponse => {
+          if (networkResponse && networkResponse.status === 200) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(event.request, networkResponse.clone());
+            console.log('Cached family members response');
+            return networkResponse;
+          }
+          throw new Error('Invalid family members response');
+        }).catch(async () => {
+          const cachedResponse = await caches.match(event.request);
+          if (cachedResponse) {
+            console.log('Serving cached family members');
+            return cachedResponse;
+          }
+          return new Response(JSON.stringify({
+            error: 'Offline: Cannot fetch family members',
+            offline: true,
+            suggest: 'Reconnect to view family members'
           }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' }
@@ -73,8 +112,12 @@ self.addEventListener('fetch', event => {
           }
           const isSubscriptionPath = url.pathname.startsWith('/api/subscription');
           const isAuthPath = url.pathname.startsWith('/api/auth');
+          const isFamilyPath = url.pathname === '/api/users/family';
           let errorMessage = 'Network unavailable';
-          let suggest = isSubscriptionPath ? 'Reconnect to verify subscription' : isAuthPath ? 'Reconnect and refresh token' : 'Check connection';
+          let suggest = isSubscriptionPath ? 'Reconnect to verify subscription' :
+                        isAuthPath ? 'Reconnect and refresh token' :
+                        isFamilyPath ? 'Reconnect to sync family data' :
+                        'Check connection';
           return new Response(JSON.stringify({ 
             error: errorMessage, 
             offline: true, 
@@ -268,7 +311,12 @@ self.addEventListener('activate', event => {
 // Handle messages from client (e.g., cache regions, sync regions, offline queue)
 self.addEventListener('message', async event => {
   if (event.data.type === 'CACHE_REGION' && event.data.region) {
-    const { bounds, name } = event.data.region;
+    const { bounds, name, timestamp } = event.data.region;
+    // Validate bounds
+    if (!bounds || !bounds.north || !bounds.south || !bounds.east || !bounds.west) {
+      console.error('Invalid region bounds:', bounds);
+      return;
+    }
     try {
       const cache = await caches.open(CACHE_NAME);
       const tileUrls = generateTileUrls(bounds);
@@ -287,7 +335,7 @@ self.addEventListener('message', async event => {
           }
         }
       }
-      cachedRegions.set(name, { bounds, cachedAt: Date.now() });
+      cachedRegions.set(name, { bounds, cachedAt: new Date(timestamp).getTime() });
       console.log('Cached map tiles for region:', name, bounds);
       self.clients.matchAll().then(clients => {
         clients.forEach(client => {
@@ -352,6 +400,11 @@ self.addEventListener('message', async event => {
       for (const action of event.data.queue) {
         try {
           let url, method = 'POST', body = JSON.stringify(action.data);
+          const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${action.token || ''}`,
+            'X-CSRF-Token': action.csrfToken || '' // Include CSRF token
+          };
           switch (action.type) {
             case 'postAlert':
               url = '/api/alerts';
@@ -369,14 +422,7 @@ self.addEventListener('message', async event => {
               console.warn('Unknown offline action type:', action.type);
               continue;
           }
-          const response = await fetch(url, {
-            method,
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${action.token || ''}`
-            },
-            body
-          });
+          const response = await fetch(url, { method, headers, body });
           if (response.ok && action.type === 'subscriptionCheckout') {
             const { url } = await response.json();
             self.clients.matchAll().then(clients => {
@@ -396,6 +442,12 @@ self.addEventListener('message', async event => {
           if (self.Sentry) {
             self.Sentry.captureException(error, { tags: { context: 'offlineQueue', action: action.type } });
           }
+          // Re-queue action on failure
+          self.clients.matchAll().then(clients => {
+            clients.forEach(client => {
+              client.postMessage({ type: 'REQUEUE_ACTION', action });
+            });
+          });
         }
       }
     } catch (error) {
@@ -437,6 +489,8 @@ self.addEventListener('push', event => {
     data: {
       url: data.url || (data.type === 'subscription' ? 
         `${self.location.origin}/?payment=${data.status || ''}&session_id=${data.sessionId || ''}` : 
+        data.type === 'familyAlert' ?
+        `${self.location.origin}/?alertId=${data.alertId || ''}&lat=${data.lat || ''}&lng=${data.lng || ''}&familyEmail=${data.email || ''}` :
         `${self.location.origin}/?alertId=${data.alertId || ''}&lat=${data.lat || ''}&lng=${data.lng || ''}`)
     }
   };
@@ -447,6 +501,9 @@ self.addEventListener('push', event => {
     options.body = data.status === 'success' ? 'Your premium subscription is active. Enjoy all features!' :
                    data.status === 'trial_ending' ? `Your trial ends in ${data.daysRemaining} days. Upgrade now!` :
                    data.body || 'Check your subscription status.';
+  } else if (data.type === 'familyAlert') {
+    options.title = `Family Alert from ${data.email || 'Unknown'}`;
+    options.body = `A ${data.alertType || 'hazard'} alert was posted by a family member.`;
   }
   event.waitUntil(
     self.registration.showNotification(options.title, options)
@@ -481,6 +538,12 @@ function generateTileUrls(bounds) {
   const { north, south, east, west } = bounds;
   const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4'; // Match index.html
   const MAP_ID = '2666b5bd496d9c6026f43f82'; // Match index.html
+
+  // Validate bounds
+  if (north <= south || east <= west || !isFinite(north) || !isFinite(south) || !isFinite(east) || !isFinite(west)) {
+    console.error('Invalid bounds for tile generation:', bounds);
+    return urls;
+  }
 
   for (const zoom of zoomLevels) {
     const scale = 1 << zoom;
