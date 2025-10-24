@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.9'; // Updated version to reflect changes
+const CACHE_NAME = 'waze-gps-v1.0.9';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -12,103 +12,126 @@ const PRECACHE_ASSETS = [
 ];
 
 const MAX_CACHED_TILES = 500;
-const SUBSCRIPTION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes TTL for subscription status
-const API_CACHE_TTL = 15 * 60 * 1000; // 15 minutes TTL for other API responses
+const SUBSCRIPTION_CACHE_TTL = 5 * 60 * 1000;
+const API_CACHE_TTL = 15 * 60 * 1000;
 
-// Track cached regions and their metadata
-let cachedRegions = new Map(); // Stores region name, bounds, and cachedAt timestamp
+let cachedRegions = new Map();
 
-// Precache critical assets during install
 self.addEventListener('install', event => {
   console.log('Service Worker installing:', CACHE_NAME);
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(PRECACHE_ASSETS).catch(error => {
+    caches.open(CACHE_NAME)
+      .then(cache => cache.addAll(PRECACHE_ASSETS))
+      .catch(error => {
         console.error('Precache failed:', error);
         if (self.Sentry) {
           self.Sentry.captureException(error, { tags: { context: 'serviceWorkerInstall' } });
         }
-      });
-    }).then(() => {
-      console.log('Service Worker installed, forcing activation');
-      return self.skipWaiting();
-    })
+        throw error; // Ensure install fails if precache fails
+      })
+      .then(() => {
+        console.log('Service Worker installed, forcing activation');
+        return self.skipWaiting();
+      })
+      .catch(error => {
+        console.error('Install failed:', error);
+        if (self.Sentry) {
+          self.Sentry.captureException(error, { tags: { context: 'install' } });
+        }
+      })
   );
 });
 
-// Activate event: Clean up old caches and reset cachedRegions
 self.addEventListener('activate', event => {
   console.log('Service Worker activating:', CACHE_NAME);
   event.waitUntil(
-    caches.keys().then(cacheNames => {
-      return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
+    caches.keys()
+      .then(cacheNames => Promise.all(
+        cacheNames
+          .filter(cacheName => cacheName !== CACHE_NAME)
+          .map(cacheName => {
             console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => {
-      cachedRegions = new Map(); // Reset cachedRegions
-      console.log('Service Worker activated, claiming clients, reset cachedRegions');
-      return self.clients.claim();
-    })
+          })
+      ))
+      .then(() => {
+        cachedRegions = new Map();
+        console.log('Service Worker activated, claiming clients, reset cachedRegions');
+        return self.clients.claim();
+      })
+      .catch(error => {
+        console.error('Activation failed:', error);
+        if (self.Sentry) {
+          self.Sentry.captureException(error, { tags: { context: 'activate' } });
+        }
+      })
   );
 });
 
-// Fetch event handler
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // Handle API and Socket.IO requests
   if (url.pathname.startsWith('/api/') || url.pathname.includes('socket.io')) {
-    handleApiRequest(event, url);
+    event.respondWith(handleApiRequest(event, url));
     return;
   }
 
-  // Handle map tile requests with region-aware caching
   if (url.pathname.includes('maps.googleapis.com') || url.pathname.includes('mt0.google.com/vt')) {
     event.respondWith(
-      caches.match(event.request).then(cachedResponse => {
-        const fetchPromise = fetch(event.request).then(networkResponse => {
-          if (networkResponse && networkResponse.status === 200) {
-            caches.open(CACHE_NAME).then(cache => {
-              cache.put(event.request, networkResponse.clone());
-              cache.put(`${event.request.url}-meta`, new Response(JSON.stringify({ cachedAt: Date.now() })));
-              cleanupMapTileCache(cache);
+      caches.match(event.request)
+        .then(cachedResponse => {
+          const fetchPromise = fetch(event.request)
+            .then(networkResponse => {
+              if (networkResponse?.status === 200) {
+                caches.open(CACHE_NAME).then(cache => {
+                  cache.put(event.request, networkResponse.clone());
+                  cache.put(`${event.request.url}-meta`, new Response(JSON.stringify({ cachedAt: Date.now() })));
+                  cleanupMapTileCache(cache).catch(error => {
+                    console.error('Cleanup failed:', error);
+                    if (self.Sentry) {
+                      self.Sentry.captureException(error, { tags: { context: 'cleanupMapTileCache' } });
+                    }
+                  });
+                });
+              }
+              return networkResponse;
+            })
+            .catch(error => {
+              console.warn('Map tile fetch failed, using cache:', url.pathname, error);
+              if (self.Sentry) {
+                self.Sentry.captureException(error, { tags: { context: 'mapTileFetch', url: url.pathname } });
+              }
+              return cachedResponse || new Response('Map tile unavailable', { status: 503 });
             });
+          return cachedResponse || fetchPromise;
+        })
+        .catch(error => {
+          console.error('Map tile cache match failed:', error);
+          if (self.Sentry) {
+            self.Sentry.captureException(error, { tags: { context: 'mapTileCacheMatch' } });
           }
-          return networkResponse;
-        }).catch(() => {
-          console.warn('Map tile fetch failed, using cache:', url.pathname);
-          return cachedResponse || new Response('Map tile unavailable', { status: 503 });
-        });
-        return cachedResponse || fetchPromise;
-      })
+          return new Response('Map tile unavailable', { status: 503 });
+        })
     );
     return;
   }
 
-  // Handle document requests with network-first, cache fallback
   if (event.request.destination === 'document' || url.pathname === '/' || url.pathname.includes('index.html')) {
     event.respondWith(
       fetch(event.request)
         .then(networkResponse => {
-          if (networkResponse && networkResponse.status === 200 && networkResponse.headers.get('content-type')?.includes('text/html')) {
-            const responseToCache = networkResponse.clone();
+          if (networkResponse?.status === 200 && networkResponse.headers.get('content-type')?.includes('text/html')) {
             caches.open(CACHE_NAME).then(cache => {
-              cache.put(event.request, responseToCache);
+              cache.put(event.request, networkResponse.clone());
             });
-          } else {
-            console.warn('Network response invalid for document:', networkResponse ? networkResponse.status : 'No response', 'MIME:', networkResponse?.headers.get('content-type'));
+            return networkResponse;
           }
-          return networkResponse;
+          throw new Error(`Invalid response: ${networkResponse?.status || 'No response'}`);
         })
-        .catch(async () => {
-          console.log('Serving cached/offline for document:', url.pathname);
+        .catch(async error => {
+          console.log('Serving Cached/offline for document:', url.pathname, error);
           const isPaymentSuccess = url.searchParams.get('payment') === 'success' || url.searchParams.get('session_id');
-          const isPaymentCancelled = url.searchParams.get('payment') === 'cancelled');
+          const isPaymentCancelled = url.searchParams.get('payment') === 'cancelled';
           
           const cachedResponse = await caches.match('/index.html');
           if (cachedResponse) {
@@ -128,20 +151,20 @@ self.addEventListener('fetch', event => {
                   setTimeout(() => {celeb.remove(); style.remove();}, 2000);
                   if ('serviceWorker' in navigator) {
                     navigator.serviceWorker.ready.then(reg => {
-                      reg.active.postMessage({ type: 'CHECK_SUBSCRIPTION' });
-                      const checkOnline = () => {
+                      reg.active?.postMessage({ type: 'CHECK_SUBSCRIPTION' });
+                      const checkOnline = async () => {
                         if (navigator.onLine) {
-                          fetch('/api/subscription/status', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } })
-                            .then(res => res.json())
-                            .then(data => {
-                              if (data.isPremium) {
-                                caches.open('${CACHE_NAME}').then(cache => {
-                                  cache.put('/api/subscription/status', new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } }));
-                                });
-                                location.reload();
-                              }
-                            })
-                            .catch(() => setTimeout(checkOnline, 2000));
+                          try {
+                            const res = await fetch('/api/subscription/status', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+                            const data = await res.json();
+                            if (data.isPremium) {
+                              const cache = await caches.open('waze-gps-v1.0.9');
+                              await cache.put('/api/subscription/status', new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } }));
+                              location.reload();
+                            }
+                          } catch {
+                            setTimeout(checkOnline, 2000);
+                          }
                         } else {
                           setTimeout(checkOnline, 2000);
                         }
@@ -159,10 +182,10 @@ self.addEventListener('fetch', event => {
               );
             }
             return new Response(enhancedHTML, {
-              headers: cachedResponse.headers
+              headers: { ...Object.fromEntries(cachedResponse.headers), 'Content-Type': 'text/html' }
             });
           }
-          // Fallback offline page
+          
           const offlineHTML = `
             <!DOCTYPE html>
             <html><head><title>Offline</title><style>body{font-family:Arial;text-align:center;padding:2rem;background:#f0f0f0;color:#333;}button{background:#4CAF50;color:white;border:none;padding:1rem;border-radius:0.5rem;cursor:pointer;font-size:1rem;}</style></head><body>
@@ -174,7 +197,7 @@ self.addEventListener('fetch', event => {
               <script>
                 if ('serviceWorker' in navigator) {
                   navigator.serviceWorker.ready.then(reg => {
-                    reg.active.postMessage({ type: 'CHECK_SUBSCRIPTION' });
+                    reg.active?.postMessage({ type: 'CHECK_SUBSCRIPTION' });
                   });
                 }
                 const checkOnline = () => {
@@ -189,7 +212,7 @@ self.addEventListener('fetch', event => {
               </script>
             </body></html>
           `;
-          return new Response(offlineHTML, { 
+          return new Response(offlineHTML, {
             status: 503,
             headers: { 'Content-Type': 'text/html' }
           });
@@ -198,171 +221,192 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Default: Cache-first with network update (stale-while-revalidate)
   event.respondWith(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.match(event.request).then(cachedResponse => {
-        const fetchPromise = fetch(event.request).then(networkResponse => {
-          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-            cache.put(event.request, networkResponse.clone());
-          }
-          return networkResponse;
-        }).catch(() => {
-          console.log('Network fetch failed, using cache for:', url.pathname);
-          return cachedResponse;
-        });
-        return cachedResponse || fetchPromise;
-      });
-    }).catch(error => {
-      console.error('Fetch failed:', error, 'URL:', event.request.url);
-      if (self.Sentry) {
-        self.Sentry.captureException(error, { tags: { context: 'fetchDefault', url: event.request.url } });
-      }
-      return new Response('Resource unavailable', { status: 503 });
-    })
+    caches.open(CACHE_NAME)
+      .then(cache => cache.match(event.request)
+        .then(cachedResponse => {
+          const fetchPromise = fetch(event.request)
+            .then(networkResponse => {
+              if (networkResponse?.status === 200 && networkResponse.type === 'basic') {
+                cache.put(event.request, networkResponse.clone());
+              }
+              return networkResponse;
+            })
+            .catch(error => {
+              console.log('Network fetch failed, using cache for:', url.pathname, error);
+              if (self.Sentry) {
+                self.Sentry.captureException(error, { tags: { context: 'fetchDefault', url: event.request.url } });
+              }
+              return cachedResponse || new Response('Resource unavailable', { status: 503 });
+            });
+          return cachedResponse || fetchPromise;
+        })
+      )
+      .catch(error => {
+        console.error('Fetch failed:', error, 'URL:', event.request.url);
+        if (self.Sentry) {
+          self.Sentry.captureException(error, { tags: { context: 'fetchDefault', url: event.request.url } });
+        }
+        return new Response('Resource unavailable', { status: 503 });
+      })
   );
 });
 
-// Handle API requests with enhanced caching and offline support
 async function handleApiRequest(event, url) {
   const isSubscriptionPath = url.pathname === '/api/subscription/status' && event.request.method === 'GET';
   const isFamilyPath = url.pathname === '/api/users/family' && event.request.method === 'GET';
   const isAuthPath = url.pathname.startsWith('/api/auth');
   const isAlertPath = url.pathname.startsWith('/api/alerts');
 
-  if (isSubscriptionPath) {
-    event.respondWith(
-      fetch(event.request).then(async networkResponse => {
-        if (networkResponse && networkResponse.status === 200) {
-          const cache = await caches.open(CACHE_NAME);
-          const responseWithTTL = new Response(await networkResponse.clone().text(), {
-            headers: {
-              ...Object.fromEntries(networkResponse.headers),
-              'X-Cached-At': Date.now().toString()
+  try {
+    if (isSubscriptionPath) {
+      return await fetch(event.request)
+        .then(async networkResponse => {
+          if (networkResponse?.status === 200) {
+            const cache = await caches.open(CACHE_NAME);
+            const responseWithTTL = new Response(await networkResponse.clone().text(), {
+              headers: {
+                ...Object.fromEntries(networkResponse.headers),
+                'X-Cached-At': Date.now().toString()
+              }
+            });
+            await cache.put('/api/subscription/status', responseWithTTL);
+            console.log('Cached subscription status response');
+            return networkResponse;
+          }
+          throw new Error(`Invalid subscription status response: ${networkResponse?.status}`);
+        })
+        .catch(async error => {
+          console.warn('Subscription fetch failed:', error);
+          const cachedStatus = await caches.match('/api/subscription/status');
+          if (cachedStatus) {
+            const cachedAt = parseInt(cachedStatus.headers.get('X-Cached-At') || '0');
+            if (Date.now() - cachedAt < SUBSCRIPTION_CACHE_TTL) {
+              console.log('Serving cached subscription status');
+              return cachedStatus;
             }
-          });
-          await cache.put('/api/subscription/status', responseWithTTL);
-          console.log('Cached subscription status response');
-          return networkResponse;
-        }
-        throw new Error('Invalid subscription status response');
-      }).catch(async () => {
-        const cachedStatus = await caches.match('/api/subscription/status');
-        if (cachedStatus) {
-          const cachedAt = parseInt(cachedStatus.headers.get('X-Cached-At') || '0');
-          if (Date.now() - cachedAt < SUBSCRIPTION_CACHE_TTL) {
-            console.log('Serving cached subscription status');
-            return cachedStatus;
-          } else {
             console.log('Cached subscription status expired');
           }
-        }
-        return new Response(JSON.stringify({
-          error: 'Offline: Cannot verify subscription',
-          offline: true,
-          suggest: 'Reconnect to check subscription status'
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
+          return new Response(JSON.stringify({
+            error: 'Offline: Cannot verify subscription',
+            offline: true,
+            suggest: 'Reconnect to check subscription status'
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
         });
-      })
-    );
-  } else if (isFamilyPath) {
-    event.respondWith(
-      fetch(event.request).then(async networkResponse => {
-        if (networkResponse && networkResponse.status === 200) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put(event.request, networkResponse.clone());
-          console.log('Cached family members response');
-          return networkResponse;
-        }
-        throw new Error('Invalid family members response');
-      }).catch(async () => {
-        const cachedResponse = await caches.match(event.request);
-        if (cachedResponse) {
-          console.log('Serving cached family members');
-          return cachedResponse;
-        }
-        return new Response(JSON.stringify({
-          error: 'Offline: Cannot fetch family members',
-          offline: true,
-          suggest: 'Reconnect to view family members'
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
+    }
+
+    if (isFamilyPath) {
+      return await fetch(event.request)
+        .then(async networkResponse => {
+          if (networkResponse?.status === 200) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(event.request, networkResponse.clone());
+            console.log('Cached family members response');
+            return networkResponse;
+          }
+          throw new Error(`Invalid family members response: ${networkResponse?.status}`);
+        })
+        .catch(async error => {
+          console.warn('Family fetch failed:', error);
+          const cachedResponse = await caches.match(event.request);
+          if (cachedResponse) {
+            console.log('Serving cached family members');
+            return cachedResponse;
+          }
+          return new Response(JSON.stringify({
+            error: 'Offline: Cannot fetch family members',
+            offline: true,
+            suggest: 'Reconnect to view family members'
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
         });
-      })
-    );
-  } else if (isAlertPath) {
-    event.respondWith(
-      fetch(event.request).then(async networkResponse => {
-        if (networkResponse && networkResponse.status === 200) {
-          const cache = await caches.open(CACHE_NAME);
-          await cache.put(event.request, networkResponse.clone());
-          console.log('Cached alerts response:', event.request.url);
-          return networkResponse;
-        }
-        throw new Error('Invalid alerts response');
-      }).catch(async () => {
-        const cachedResponse = await caches.match(event.request);
-        if (cachedResponse) {
-          console.log('Serving cached alerts:', event.request.url);
-          return cachedResponse;
-        }
-        return new Response(JSON.stringify({
-          error: 'Offline: Cannot fetch alerts',
-          offline: true,
-          suggest: 'Reconnect to view alerts'
-        }), {
-          status: 503,
-          headers: { 'Content-Type': 'application/json' }
+    }
+
+    if (isAlertPath) {
+      return await fetch(event.request)
+        .then(async networkResponse => {
+          if (networkResponse?.status === 200) {
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(event.request, networkResponse.clone());
+            console.log('Cached alerts response:', event.request.url);
+            return networkResponse;
+          }
+          throw new Error(`Invalid alerts response: ${networkResponse?.status}`);
+        })
+        .catch(async error => {
+          console.warn('Alerts fetch failed:', error);
+          const cachedResponse = await caches.match(event.request);
+          if (cachedResponse) {
+            console.log('Serving cached alerts:', event.request.url);
+            return cachedResponse;
+          }
+          return new Response(JSON.stringify({
+            error: 'Offline: Cannot fetch alerts',
+            offline: true,
+            suggest: 'Reconnect to view alerts'
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
         });
-      })
-    );
-  } else {
-    event.respondWith(
-      fetch(event.request).catch(async error => {
+    }
+
+    return await fetch(event.request)
+      .catch(error => {
         console.error('API/Socket fetch failed:', error, 'URL:', event.request.url);
         if (self.Sentry) {
-          self.Sentry.captureException(error, {
-            tags: { context: 'fetchAPI', url: event.request.url }
-          });
+          self.Sentry.captureException(error, { tags: { context: 'fetchAPI', url: event.request.url } });
         }
-        let errorMessage = 'Network unavailable';
-        let suggest = isSubscriptionPath ? 'Reconnect to verify subscription' :
-                      isAuthPath ? 'Reconnect and refresh token' :
-                      isFamilyPath ? 'Reconnect to sync family data' :
-                      isAlertPath ? 'Reconnect to sync alerts' :
-                      'Check connection';
+        const suggest = isSubscriptionPath ? 'Reconnect to verify subscription' :
+                       isAuthPath ? 'Reconnect and refresh token' :
+                       isFamilyPath ? 'Reconnect to sync family data' :
+                       isAlertPath ? 'Reconnect to sync alerts' :
+                       'Check connection';
         return new Response(JSON.stringify({ 
-          error: errorMessage, 
+          error: 'Network unavailable', 
           offline: true, 
           suggest 
         }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }
         });
-      })
-    );
+      });
+  } catch (error) {
+    console.error('API request handling failed:', error);
+    if (self.Sentry) {
+      self.Sentry.captureException(error, { tags: { context: 'handleApiRequest', url: event.request.url } });
+    }
+    return new Response(JSON.stringify({ 
+      error: 'Service Worker error', 
+      offline: true, 
+      suggest: 'Try again later'
+    }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
 
-// Handle messages from client
 self.addEventListener('message', async event => {
-  if (event.data.type === 'CACHE_REGION' && event.data.region) {
-    const { bounds, name, timestamp } = event.data.region;
-    // Validate bounds
-    if (!bounds || !bounds.north || !bounds.south || !bounds.east || !bounds.west) {
-      console.error('Invalid region bounds:', bounds);
-      return;
-    }
-    try {
+  try {
+    if (event.data?.type === 'CACHE_REGION' && event.data.region) {
+      const { bounds, name, timestamp } = event.data.region;
+      if (!bounds || !isFinite(bounds.north) || !isFinite(bounds.south) || 
+          !isFinite(bounds.east) || !isFinite(bounds.west)) {
+        console.error('Invalid region bounds:', bounds);
+        return;
+      }
       const cache = await caches.open(CACHE_NAME);
       const tileUrls = generateTileUrls(bounds);
       for (const url of tileUrls) {
         try {
           const response = await fetch(url);
-          if (response && response.status === 200) {
+          if (response?.status === 200) {
             await cache.put(url, response);
             await cache.put(`${url}-meta`, new Response(JSON.stringify({ cachedAt: Date.now() })));
             console.log('Cached map tile:', url);
@@ -376,22 +420,16 @@ self.addEventListener('message', async event => {
       }
       cachedRegions.set(name, { bounds, cachedAt: new Date(timestamp).getTime() });
       console.log('Cached map tiles for region:', name, bounds);
-      self.clients.matchAll().then(clients => {
-        clients.forEach(client => {
-          client.postMessage({ type: 'REGION_CACHED', region: name });
-        });
+      const clients = await self.clients.matchAll();
+      clients.forEach(client => {
+        client.postMessage({ type: 'REGION_CACHED', region: name });
       });
       await cleanupMapTileCache(cache);
-    } catch (error) {
-      console.error('Error caching region:', error);
-      if (self.Sentry) {
-        self.Sentry.captureException(error, { tags: { context: 'cacheRegion', region: name } });
-      }
-    }
-  } else if (event.data.type === 'SYNC_REGIONS' && event.data.regions) {
-    try {
-      const clientRegions = new Map(event.data.regions.map(r => [r.name, { bounds: r.bounds, cachedAt: new Date(r.timestamp).getTime() }]));
+    } else if (event.data?.type === 'SYNC_REGIONS' && event.data.regions) {
       const cache = await caches.open(CACHE_NAME);
+      const clientRegions = new Map(event.data.regions.map(r => 
+        [r.name, { bounds: r.bounds, cachedAt: new Date(r.timestamp).getTime() }]
+      ));
       for (const [name, region] of cachedRegions) {
         if (!clientRegions.has(name)) {
           const tileUrls = generateTileUrls(region.bounds);
@@ -406,39 +444,31 @@ self.addEventListener('message', async event => {
       cachedRegions = clientRegions;
       console.log('Synced cached regions:', Array.from(cachedRegions.keys()));
       await cleanupMapTileCache(cache);
-    } catch (error) {
-      console.error('Error syncing regions:', error);
-      if (self.Sentry) {
-        self.Sentry.captureException(error, { tags: { context: 'syncRegions' } });
-      }
-    }
-  } else if (event.data.type === 'CHECK_SUBSCRIPTION') {
-    try {
+    } else if (event.data?.type === 'CHECK_SUBSCRIPTION') {
       const cache = await caches.open(CACHE_NAME);
-      const response = await fetch('/api/subscription/status', {
-        headers: { 'Authorization': 'Bearer ' + event.data.token }
-      });
-      if (response && response.status === 200) {
-        await cache.put('/api/subscription/status', response.clone());
-        console.log('Subscription status cached after payment');
-        self.clients.matchAll().then(clients => {
+      try {
+        const response = await fetch('/api/subscription/status', {
+          headers: { 'Authorization': 'Bearer ' + (event.data.token || '') }
+        });
+        if (response?.status === 200) {
+          await cache.put('/api/subscription/status', response.clone());
+          console.log('Subscription status cached after payment');
+          const clients = await self.clients.matchAll();
           clients.forEach(client => {
             client.postMessage({ type: 'SUBSCRIPTION_UPDATED' });
           });
-        });
+        }
+      } catch (error) {
+        console.error('Error checking subscription in SW:', error);
+        if (self.Sentry) {
+          self.Sentry.captureException(error, { tags: { context: 'checkSubscription' } });
+        }
       }
-    } catch (error) {
-      console.error('Error checking subscription in SW:', error);
-      if (self.Sentry) {
-        self.Sentry.captureException(error, { tags: { context: 'checkSubscription' } });
-      }
-    }
-  } else if (event.data.type === 'OFFLINE_QUEUE' && event.data.queue) {
-    try {
+    } else if (event.data?.type === 'OFFLINE_QUEUE' && event.data.queue) {
       const cache = await caches.open(CACHE_NAME);
       for (const action of event.data.queue) {
         try {
-          let url, method = 'POST', body = JSON.stringify(action.data);
+          let url, method = 'POST', body = JSON.stringify(action.data || {});
           const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${action.token || ''}`,
@@ -463,15 +493,17 @@ self.addEventListener('message', async event => {
           }
           const response = await fetch(url, { method, headers, body });
           if (response.ok && action.type === 'subscriptionCheckout') {
-            const { url } = await response.json();
-            self.clients.matchAll().then(clients => {
-              clients.forEach(client => {
-                client.postMessage({ type: 'REDIRECT_CHECKOUT', url });
-              });
+            const { url: redirectUrl } = await response.json();
+            const clients = await self.clients.matchAll();
+            clients.forEach(client => {
+              client.postMessage({ type: 'REDIRECT_CHECKOUT', url: redirectUrl });
             });
           }
           if (response.ok && action.type === 'subscriptionCancel') {
-            await cache.put('/api/subscription/status', new Response(JSON.stringify({ isPremium: false, isTrialActive: false }), {
+            await cache.put('/api/subscription/status', new Response(JSON.stringify({ 
+              isPremium: false, 
+              isTrialActive: false 
+            }), {
               headers: { 'Content-Type': 'application/json' }
             }));
           }
@@ -481,45 +513,44 @@ self.addEventListener('message', async event => {
           if (self.Sentry) {
             self.Sentry.captureException(error, { tags: { context: 'offlineQueue', action: action.type } });
           }
-          self.clients.matchAll().then(clients => {
-            clients.forEach(client => {
-              client.postMessage({ type: 'REQUEUE_ACTION', action });
-            });
+          const clients = await self.clients.matchAll();
+          clients.forEach(client => {
+            client.postMessage({ type: 'REQUEUE_ACTION', action });
           });
         }
       }
-    } catch (error) {
-      console.error('Error processing offline queue:', error);
-      if (self.Sentry) {
-        self.Sentry.captureException(error, { tags: { context: 'offlineQueue' } });
-      }
+    } else if (event.data?.type === 'CLEAR_OLD_CACHE') {
+      const cacheNames = await caches.keys();
+      await Promise.all(
+        cacheNames
+          .filter(cacheName => cacheName !== CACHE_NAME)
+          .map(cacheName => {
+            console.log('Clearing old cache on message:', cacheName);
+            return caches.delete(cacheName);
+          })
+      );
     }
-  } else if (event.data.type === 'CLEAR_OLD_CACHE') {
-    const cacheNames = await caches.keys();
-    await Promise.all(
-      cacheNames.map(cacheName => {
-        if (cacheName !== CACHE_NAME) {
-          console.log('Clearing old cache on message:', cacheName);
-          return caches.delete(cacheName);
-        }
-      })
-    );
+  } catch (error) {
+    console.error('Message event handling failed:', error);
+    if (self.Sentry) {
+      self.Sentry.captureException(error, { tags: { context: 'messageEvent' } });
+    }
   }
 });
 
-// Handle push notifications
 self.addEventListener('push', event => {
   let data = { title: 'New Alert', body: 'A new alert has been posted nearby.' };
-  if (event.data) {
-    try {
+  try {
+    if (event.data) {
       data = event.data.json();
-    } catch (error) {
-      console.error('Error parsing push data:', error);
-      if (self.Sentry) {
-        self.Sentry.captureException(error, { tags: { context: 'pushEvent' } });
-      }
+    }
+  } catch (error) {
+    console.error('Error parsing push data:', error);
+    if (self.Sentry) {
+      self.Sentry.captureException(error, { tags: { context: 'pushEvent' } });
     }
   }
+
   const options = {
     body: data.body,
     icon: 'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png',
@@ -532,53 +563,66 @@ self.addEventListener('push', event => {
         `${self.location.origin}/?alertId=${data.alertId || ''}&lat=${data.lat || ''}&lng=${data.lng || ''}`)
     }
   };
+
   if (data.type === 'subscription') {
     options.title = data.status === 'success' ? '🎉 Premium Unlocked!' :
                     data.status === 'trial_ending' ? '⏰ Trial Ending Soon' :
                     'Subscription Update';
     options.body = data.status === 'success' ? 'Your premium subscription is active. Enjoy all features!' :
-                   data.status === 'trial_ending' ? `Your trial ends in ${data.daysRemaining} days. Upgrade now!` :
+                   data.status === 'trial_ending' ? `Your trial ends in ${data.daysRemaining || 'unknown'} days. Upgrade now!` :
                    data.body || 'Check your subscription status.';
   } else if (data.type === 'familyAlert') {
     options.title = `Family Alert from ${data.email || 'Unknown'}`;
     options.body = `A ${data.alertType || 'hazard'} alert was posted by a family member.`;
   }
+
   event.waitUntil(
     self.registration.showNotification(options.title, options)
+      .catch(error => {
+        console.error('Notification display failed:', error);
+        if (self.Sentry) {
+          self.Sentry.captureException(error, { tags: { context: 'pushNotification' } });
+        }
+      })
   );
   console.log('Push notification received:', data);
 });
 
-// Handle notification clicks
 self.addEventListener('notificationclick', event => {
   event.notification.close();
   event.waitUntil(
-    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
-      const url = event.notification.data.url || self.location.origin;
-      for (const client of clientList) {
-        if (client.url === url && 'focus' in client) {
-          return client.focus();
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(clientList => {
+        const url = event.notification.data?.url || self.location.origin;
+        for (const client of clientList) {
+          if (client.url === url && 'focus' in client) {
+            return client.focus();
+          }
         }
-      }
-      if (clients.openWindow) {
-        return clients.openWindow(url);
-      }
-    })
+        if (clients.openWindow) {
+          return clients.openWindow(url);
+        }
+      })
+      .catch(error => {
+        console.error('Notification click handling failed:', error);
+        if (self.Sentry) {
+          self.Sentry.captureException(error, { tags: { context: 'notificationClick' } });
+        }
+      })
   );
-  console.log('Notification clicked, opening:', event.notification.data.url);
+  console.log('Notification clicked, opening:', event.notification.data?.url);
 });
 
-// Generate tile URLs for a given bounds
 function generateTileUrls(bounds) {
   const urls = [];
   const zoomLevels = [16, 17, 18, 19];
   const tileSize = 256;
   const { north, south, east, west } = bounds;
-  const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4'; // Match index.html
-  const MAP_ID = '2666b5bd496d9c6026f43f82'; // Match index.html
+  const API_KEY = 'AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4';
+  const MAP_ID = '2666b5bd496d9c6026f43f82';
 
-  // Validate bounds
-  if (!isFinite(north) || !isFinite(south) || !isFinite(east) || !isFinite(west) || north <= south || east <= west) {
+  if (!isFinite(north) || !isFinite(south) || !isFinite(east) || !isFinite(west) || 
+      north <= south || east <= west) {
     console.error('Invalid bounds for tile generation:', bounds);
     return urls;
   }
@@ -588,8 +632,8 @@ function generateTileUrls(bounds) {
     const topLeft = latLngToTile({ lat: north, lng: west }, zoom);
     const bottomRight = latLngToTile({ lat: south, lng: east }, zoom);
 
-    for (let x = topLeft.x; x <= bottomRight.x; x++) {
-      for (let y = topLeft.y; y <= bottomRight.y; y++) {
+    for (let x = Math.max(0, topLeft.x); x <= bottomRight.x; x++) {
+      for (let y = Math.max(0, topLeft.y); y <= bottomRight.y; y++) {
         const url = `https://mt0.google.com/vt?x=${x}&y=${y}&z=${zoom}&key=${API_KEY}&map_id=${MAP_ID}`;
         urls.push(url);
       }
@@ -598,52 +642,63 @@ function generateTileUrls(bounds) {
   return urls.slice(0, MAX_CACHED_TILES);
 }
 
-// Convert lat/lng to tile coordinates
 function latLngToTile(latLng, zoom) {
+  if (!latLng?.lat || !latLng?.lng || !isFinite(latLng.lat) || !isFinite(latLng.lng)) {
+    console.error('Invalid latLng for tile conversion:', latLng);
+    return { x: 0, y: 0 };
+  }
   const scale = 1 << zoom;
   const worldCoordinate = project(latLng);
-  const tileCoordinate = {
+  return {
     x: Math.floor(worldCoordinate.x * scale),
     y: Math.floor(worldCoordinate.y * scale)
   };
-  return tileCoordinate;
 }
 
-// Project lat/lng to world coordinates
 function project(latLng) {
   const siny = Math.sin((latLng.lat * Math.PI) / 180);
   const y = 0.5 - Math.log((1 + siny) / (1 - siny)) / (4 * Math.PI);
   return {
-    x: (latLng.lng + 180) / 360,
-    y: y
+    x: Math.max(0, Math.min(1, (latLng.lng + 180) / 360)),
+    y: Math.max(0, Math.min(1, y))
   };
 }
 
-// Clean up map tile cache
 async function cleanupMapTileCache(cache) {
-  const cacheInstance = cache || await caches.open(CACHE_NAME);
-  const requests = await cacheInstance.keys();
-  const tileRequests = requests.filter(req => req.url.includes('mt0.google.com/vt'));
-  const now = Date.now();
-  const STALE_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
+  try {
+    const cacheInstance = cache || await caches.open(CACHE_NAME);
+    const requests = await cacheInstance.keys();
+    const tileRequests = requests.filter(req => req.url.includes('mt0.google.com/vt'));
+    const now = Date.now();
+    const STALE_AGE = 30 * 24 * 60 * 60 * 1000;
 
-  const tilesWithMetadata = [];
-  for (const req of tileRequests) {
-    const metaResponse = await cacheInstance.match(`${req.url}-meta`);
-    let cachedAt = 0;
-    if (metaResponse) {
-      const meta = await metaResponse.json();
-      cachedAt = meta.cachedAt || 0;
+    const tilesWithMetadata = [];
+    for (const req of tileRequests) {
+      const metaResponse = await cacheInstance.match(`${req.url}-meta`);
+      let cachedAt = 0;
+      if (metaResponse) {
+        try {
+          const meta = await metaResponse.json();
+          cachedAt = meta.cachedAt || 0;
+        } catch (error) {
+          console.error('Failed to parse tile metadata:', req.url, error);
+        }
+      }
+      tilesWithMetadata.push({ request: req, cachedAt });
     }
-    tilesWithMetadata.push({ request: req, cachedAt });
-  }
 
-  tilesWithMetadata.sort((a, b) => a.cachedAt - b.cachedAt);
-  for (const { request, cachedAt } of tilesWithMetadata) {
-    if (now - cachedAt > STALE_AGE || tilesWithMetadata.length > MAX_CACHED_TILES) {
-      await cacheInstance.delete(request);
-      await cacheInstance.delete(`${request.url}-meta`);
-      console.log('Deleted stale or excess map tile:', request.url);
+    tilesWithMetadata.sort((a, b) => a.cachedAt - b.cachedAt);
+    for (const { request, cachedAt } of tilesWithMetadata) {
+      if (now - cachedAt > STALE_AGE || tilesWithMetadata.length > MAX_CACHED_TILES) {
+        await cacheInstance.delete(request);
+        await cacheInstance.delete(`${request.url}-meta`);
+        console.log('Deleted stale or excess map tile:', request.url);
+      }
+    }
+  } catch (error) {
+    console.error('Map tile cleanup failed:', error);
+    if (self.Sentry) {
+      self.Sentry.captureException(error, { tags: { context: 'cleanupMapTileCache' } });
     }
   }
 }
