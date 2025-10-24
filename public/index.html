@@ -1696,7 +1696,6 @@ setInterval(() => {
           // App going to background (call incoming, etc.)
           console.log('App going to background, saving state');
           saveNavigationState();
-     
           // Keep wake lock if possible during call
           if (!wakeLock && navState.isNavigating) {
             requestWakeLock();
@@ -1704,10 +1703,8 @@ setInterval(() => {
         } else if (navState.isNavigating) {
           // App returning to foreground
           console.log('App returning to foreground, restoring navigation');
-     
           // Attempt state restoration
           const restored = restoreNavigationState();
-     
           // Reconnect socket
           if (socket && !socket.connected) {
             socket.connect();
@@ -1737,7 +1734,6 @@ setInterval(() => {
           }
           // Re-enable interaction
           map.setOptions({ gestureHandling: navState.isFollowing ? 'none' : 'cooperative' });
-     
           // Restart monitoring
           fetchCurrentAlerts();
           if (navState.hazardCheckInterval) {
@@ -1971,25 +1967,20 @@ setInterval(() => {
       const nextPoint = idx < path.length - 1 ? path[idx + 1] : point;
       const pointHeading = getCachedHeading(point, nextPoint);
       const headingDiff = Math.abs(((pointHeading - heading + 180) % 360) - 180);
-  
       // ✅ NEW: Boost score for points ahead during turns
       let proximityScore = (CONFIG.SNAP_BUFFER - distance) / CONFIG.SNAP_BUFFER * 0.6;
       if (isTurning && idx > navState.lastSnapIndex) {
         proximityScore *= 1.3; // 30% boost for forward points during turns
       }
-  
       const headingScore = (1 - headingDiff / 180) * 0.3;
       const speedScore = speed > 20 ? 0.1 : speed < 10 ? 0.05 : 0;
       const contextScore = idx < path.length - 1 ? 0.1 : 0.05;
-  
       const totalScore = proximityScore + headingScore + speedScore + contextScore;
-  
       if (totalScore > bestScore) {
         bestScore = totalScore;
         bestPoint = { lat: point.lat(), lng: point.lng() };
         closestIndex = idx;
       }
-  
       // Early exit for very close matches (unless turning)
       if (distance < 20 && !isTurning) break;
     }
@@ -2009,7 +2000,6 @@ setInterval(() => {
       // Single declaration of 'now' at the top
       const now = Date.now();
       const headingAge = now - lastHeadingUpdate;
-   
       // Force recalculation if heading hasn't updated in 3s while moving
       if (speed > CONFIG.STATIONARY_SPEED_THRESHOLD && headingAge > 3000) {
         console.warn('Heading stale while moving, forcing GPS recalculation');
@@ -2022,7 +2012,6 @@ setInterval(() => {
           return freshHeading;
         }
       }
-   
       if (isNaN(newHeading) || newHeading === null || speed <= CONFIG.STATIONARY_SPEED_THRESHOLD) {
         console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
@@ -3356,7 +3345,7 @@ setInterval(() => {
       });
       // Show button when stuck
       setInterval(() => {
-        if (ProgrammaticUpdateManager.isActive && 
+        if (ProgrammaticUpdateManager.isActive &&
             Date.now() - ProgrammaticUpdateManager._startTime > 3000) {
           document.getElementById('debug-reset-button').style.display = 'block';
         } else {
@@ -3584,14 +3573,14 @@ setInterval(() => {
         if (now - lastVoiceRestart > VOICE_RESTART_WINDOW) {
           voiceRestartCount = 0;
         }
-        
+  
         if (voiceRestartCount >= MAX_VOICE_RESTARTS) {
           console.error('Voice recognition restarting too frequently, disabling');
           voiceAssistantEnabled = false;
           showToast('Voice assistant disabled due to errors');
           return;
         }
-        
+  
         if (voiceAssistantEnabled) {
           voiceRestartCount++;
           lastVoiceRestart = now;
@@ -3616,7 +3605,6 @@ setInterval(() => {
     function stopWakeWordDetection() {
       voiceRecognitionActive = false;
       voiceErrorCount = 0;
-      
       // Clean up all recognizer instances
       [wakeWordRecognizer, commandSpeechRecognition].forEach(recognizer => {
         if (recognizer) {
@@ -3632,7 +3620,6 @@ setInterval(() => {
           }
         }
       });
-      
       wakeWordRecognizer = null;
       commandSpeechRecognition = null;
       // ... rest of cleanup
@@ -4409,15 +4396,13 @@ setInterval(() => {
   console.log('deleteAlert called:', id);
   const alertToBackup = currentAlerts.find(a => a._id === id);
   const itemParent = item?.parentElement; // Store parent reference
-  
   if (alertToBackup) {
-    deletedAlertsBackup.set(id, { 
-      alert: { ...alertToBackup }, 
+    deletedAlertsBackup.set(id, {
+      alert: { ...alertToBackup },
       itemHTML: item?.outerHTML, // Store HTML string
-      itemParent 
+      itemParent
     });
   }
-  
   // Optimistic UI update only if item provided
   if (item) item.remove();
   const marker = markers.get(id);
@@ -4435,7 +4420,6 @@ setInterval(() => {
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) throw new Error('Invalid token');
- 
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
       headers: {
@@ -4443,13 +4427,10 @@ setInterval(() => {
         'X-CSRF-Token': getCsrfToken()
       }
     });
- 
     if (!response.ok) throw new Error(`Failed to delete: ${response.statusText}`);
- 
     if (socket?.connected) {
       socket.emit('alertDeleted', id);
     }
- 
     showToast('Alert deleted successfully.');
   } catch (error) {
     console.error('Error deleting alert:', error);
@@ -5501,7 +5482,7 @@ setInterval(() => {
       if (status === 'OK') {
         // FIXED: Clear but not rebuild here, rebuild after detailedPath
         routeSpatialIndex = null; // ← ADD THIS
-       
+ 
         navState.currentRoute = response;
         navState.routePolyline = response.routes[0].overview_path;
         navState.detailedPath = [];
@@ -6006,25 +5987,24 @@ setInterval(() => {
     }
     function processToastQueue() {
       if (toastQueue.length === 0) return;
-      
       try {
         const { message, duration } = toastQueue[0];
         const toast = document.getElementById('toast');
         toast.textContent = message;
         toast.classList.add('visible-toast');
-        
+  
         if (toastTimeout) clearTimeout(toastTimeout);
         toastTimeout = setTimeout(() => {
           toast.classList.remove('visible-toast');
           toastQueue.shift();
           setTimeout(processToastQueue, 100);
         }, duration);
+        console.log('Toast shown:', message);
       } catch (error) {
         console.error('Toast error:', error);
         toastQueue.shift(); // Remove problematic toast
         processToastQueue(); // Continue with next
       }
-      console.log('Toast shown:', message);
     }
     function startPositionSimulation() {
       if (!navState.currentRoute || !navState.currentRoute.routes[0]) {
@@ -6425,12 +6405,10 @@ function initSocket(token, userId) {
   if (navState.isNavigating) {
     checkHazardsAndOfferReroute();
     startRerouteCheck(); // ← ADD THIS
- 
     // Restart camera checking if enabled
     if (showTrafficCameras && !cameraCheckInterval) {
       cameraCheckInterval = setInterval(debouncedCheckCamera, CONFIG.CAMERA_CHECK_INTERVAL);
     }
- 
     // Restart hazard checking
     if (!navState.hazardCheckInterval) {
       navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 5000);

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.10';
+const CACHE_NAME = 'waze-gps-v1.0.11';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
