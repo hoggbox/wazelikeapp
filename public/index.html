@@ -1241,7 +1241,7 @@
     let cameraCheckInterval = null;
     let alertPollInterval = null;
     let cameraPositions = [];
-    let cameraAlertShown = new Set();
+    let cameraAlertShown = new Map();
     let positionHistory = [];
     let showTrafficCameras = localStorage.getItem('showTrafficCameras') !== 'false';
     let hazardAlertDistance = parseFloat(localStorage.getItem('hazardAlertDistance')) || 2;
@@ -1303,6 +1303,10 @@
     let isPostingAlert = false; // Guard for race condition in postAlert
     let postingTimeout = null;
     let isCheckingSubscription = false;
+    let isInitializingMap = false;
+    let navStateIntervalId = null;
+    const socketListeners = new Map();
+    const MAX_TOAST_QUEUE_SIZE = 5;
     // Replace existing ProgrammaticUpdateManager with this robust version:
 const ProgrammaticUpdateManager = {
   _isUpdating: false,
@@ -1453,10 +1457,9 @@ setInterval(() => {
       },
       isValid() {
         const token = this.get();
-        if (!token || !token.includes('.') || token === 'undefined') {
+        if (!token || token === 'null' || token === 'undefined' || typeof token !== 'string' || !token.includes('.')) {
           return false;
         }
-        // Check expiration
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
           return payload.exp * 1000 > Date.now();
@@ -2012,7 +2015,9 @@ setInterval(() => {
           return freshHeading;
         }
       }
-      if (isNaN(newHeading) || newHeading === null || speed <= CONFIG.STATIONARY_SPEED_THRESHOLD) {
+      // FIXED: Add null check first
+      if (newHeading == null || isNaN(newHeading)) return navState.lastValidHeading;
+      if (speed <= CONFIG.STATIONARY_SPEED_THRESHOLD) {
         console.log('Stationary or invalid heading used:', { heading: navState.lastValidHeading, source: 'lastValid', speed });
         return navState.lastValidHeading;
       }
@@ -2070,6 +2075,9 @@ setInterval(() => {
       }
       smoothedHeading = smoothedHeading % 360;
       if (smoothedHeading < 0) smoothedHeading += 360;
+      if (isNaN(smoothedHeading)) {
+        smoothedHeading = navState.lastValidHeading;
+      }
       navState.lastValidHeading = smoothedHeading;
       lastStableHeading = smoothedHeading;
       lastHeadingUpdate = now;
@@ -2200,10 +2208,8 @@ setInterval(() => {
           setTimeout(initializeMap, 500);
           return;
         }
-        if (map) {
-          console.warn('Map already initialized, skipping to prevent multiple instances');
-          return;
-        }
+        if (isInitializingMap || map) return;
+        isInitializingMap = true;
         map = new google.maps.Map(document.getElementById('map'), {
           center: navState.userLocation,
           zoom: navState.navigationZoom,
@@ -2444,6 +2450,8 @@ setInterval(() => {
             </div>
           </div>
         `;
+      } finally {
+        isInitializingMap = false;
       }
     }
     function updateVisibleMarkers() {
@@ -2664,12 +2672,14 @@ setInterval(() => {
       showToast('Region deleted');
     }
     function syncOfflineRegions() {
-      if (navigator.serviceWorker.controller) {
+      if (navigator.serviceWorker.controller && !navState.syncingRegions) {
+        navState.syncingRegions = true;
         navigator.serviceWorker.controller.postMessage({
           type: 'SYNC_REGIONS',
           regions: navState.offlineRegions
         });
         console.log('Sent SYNC_REGIONS message with:', navState.offlineRegions);
+        setTimeout(() => { navState.syncingRegions = false; }, 1000);
       }
     }
     function loadFamilyMembers() {
@@ -3573,14 +3583,12 @@ setInterval(() => {
         if (now - lastVoiceRestart > VOICE_RESTART_WINDOW) {
           voiceRestartCount = 0;
         }
-  
         if (voiceRestartCount >= MAX_VOICE_RESTARTS) {
           console.error('Voice recognition restarting too frequently, disabling');
           voiceAssistantEnabled = false;
           showToast('Voice assistant disabled due to errors');
           return;
         }
-  
         if (voiceAssistantEnabled) {
           voiceRestartCount++;
           lastVoiceRestart = now;
@@ -3605,6 +3613,7 @@ setInterval(() => {
     function stopWakeWordDetection() {
       voiceRecognitionActive = false;
       voiceErrorCount = 0;
+      voiceRestartCount = 0;
       // Clean up all recognizer instances
       [wakeWordRecognizer, commandSpeechRecognition].forEach(recognizer => {
         if (recognizer) {
@@ -3994,7 +4003,8 @@ setInterval(() => {
             continue;
           }
           if (response.ok) return response;
-          if (response.status === 401) {
+          if (response.status === 401 && !options._retryCount) {
+            options._retryCount = 1;
             const refreshed = await refreshToken();
             if (refreshed) {
               const newToken = TokenManager.get();
@@ -4284,13 +4294,7 @@ setInterval(() => {
     showToast(`Error posting alert: ${error.message}`);
   } finally {
     clearTimeout(timeoutId);
-    isPostingAlert = false;
-    // FIXED: Re-enable button
-    postButton.disabled = false;
-    postButton.textContent = 'Post';
-    // After successful post, clear timeout
-    clearTimeout(postingTimeout);
-    // Always clean up temp state
+    // FIXED: Move button re-enable to the very end, after all cleanup
     if (navState.tempMarker) {
       releaseMarker(navState.tempMarker);
       navState.tempMarker = null;
@@ -4308,6 +4312,10 @@ setInterval(() => {
       console.log('Navigation view re-locked after manual report');
     }
     clearTimeout(postingTimeout);
+    isPostingAlert = false;
+    // FIXED: Re-enable button
+    postButton.disabled = false;
+    postButton.textContent = 'Post';
   }
 }
     function cancelAlert() {
@@ -4613,25 +4621,84 @@ setInterval(() => {
         const durationMs = now - dateObj;
         const item = document.createElement('div');
         item.className = 'alert-item';
-        const postedBy = alert.userId && alert.userId.username ? `<a href="#" onclick="viewUserProfile('${alert.userId._id}')">${alert.userId.username}</a>` : 'Anonymous';
+        // Create elements safely
+        const locationDiv = document.createElement('div');
+        locationDiv.className = 'alert-field';
+        locationDiv.innerHTML = '<strong>Exact Location:</strong> ';
+        const locationSpan = document.createElement('span');
+        locationSpan.textContent = alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`; // Safe
+        locationDiv.appendChild(locationSpan);
+        item.appendChild(locationDiv);
+        const dateDiv = document.createElement('div');
+        dateDiv.className = 'alert-field';
+        dateDiv.innerHTML = '<strong>Date:</strong> ';
+        const dateSpan = document.createElement('span');
+        dateSpan.textContent = dateObj.toLocaleDateString(); // Safe
+        dateDiv.appendChild(dateSpan);
+        item.appendChild(dateDiv);
+        const timestampDiv = document.createElement('div');
+        timestampDiv.className = 'alert-field';
+        timestampDiv.innerHTML = '<strong>Timestamp:</strong> ';
+        const timestampSpan = document.createElement('span');
+        timestampSpan.textContent = dateObj.toLocaleTimeString(); // Safe
+        timestampDiv.appendChild(timestampSpan);
+        item.appendChild(timestampDiv);
+        const durationDiv = document.createElement('div');
+        durationDiv.className = 'alert-field';
+        durationDiv.innerHTML = '<strong>How long active:</strong> ';
+        const durationSpan = document.createElement('span');
+        durationSpan.textContent = formatDuration(durationMs); // Safe
+        durationDiv.appendChild(durationSpan);
+        item.appendChild(durationDiv);
+        const postedByDiv = document.createElement('div');
+        postedByDiv.className = 'alert-field';
+        postedByDiv.innerHTML = '<strong>User who posted:</strong> ';
+        if (alert.userId?.username) {
+          const link = document.createElement('a');
+          link.href = '#';
+          link.textContent = alert.userId.username; // Safe
+          link.onclick = () => viewUserProfile(alert.userId._id);
+          postedByDiv.appendChild(link);
+        } else {
+          postedByDiv.appendChild(document.createTextNode('Anonymous'));
+        }
+        item.appendChild(postedByDiv);
+        const votesDiv = document.createElement('div');
+        votesDiv.className = 'alert-votes';
+        const votesSpan = document.createElement('span');
+        votesSpan.textContent = `Votes: 👍 ${alert.votes?.up || 0} 👎 ${alert.votes?.down || 0}`; // Safe
+        votesDiv.appendChild(votesSpan);
+        item.appendChild(votesDiv);
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'alert-actions';
+        const centerBtn = document.createElement('button');
+        centerBtn.className = 'center-btn';
+        centerBtn.dataset.lat = alert.location.coordinates[1];
+        centerBtn.dataset.lng = alert.location.coordinates[0];
+        centerBtn.textContent = 'Center';
+        actionsDiv.appendChild(centerBtn);
         const isOwn = alert.userId && alert.userId._id === ownId;
         const showDelete = isOwn || isAdmin;
-        item.innerHTML = `
-          <div class="alert-field"><strong>Exact Location:</strong> ${alert.address || `${alert.location.coordinates[1].toFixed(4)}, ${alert.location.coordinates[0].toFixed(4)}`}</div>
-          <div class="alert-field"><strong>Date:</strong> ${dateObj.toLocaleDateString()}</div>
-          <div class="alert-field"><strong>Timestamp:</strong> ${dateObj.toLocaleTimeString()}</div>
-          <div class="alert-field"><strong>How long active:</strong> ${formatDuration(durationMs)}</div>
-          <div class="alert-field"><strong>User who posted:</strong> ${postedBy}</div>
-          <div class="alert-votes">
-            <span>Votes: 👍 ${alert.votes?.up || 0} 👎 ${alert.votes?.down || 0}</span>
-          </div>
-          <div class="alert-actions">
-            <button class="center-btn" data-lat="${alert.location.coordinates[1]}" data-lng="${alert.location.coordinates[0]}">Center</button>
-            ${showDelete ? `<button class="delete-btn" data-id="${alert._id}">Delete</button>` : ''}
-            <button class="vote-btn upvote-btn" data-id="${alert._id}" data-type="up">👍 Upvote</button>
-            <button class="vote-btn downvote-btn" data-id="${alert._id}" data-type="down">👎 Downvote</button>
-          </div>
-        `;
+        if (showDelete) {
+          const deleteBtn = document.createElement('button');
+          deleteBtn.className = 'delete-btn';
+          deleteBtn.dataset.id = alert._id;
+          deleteBtn.textContent = 'Delete';
+          actionsDiv.appendChild(deleteBtn);
+        }
+        const upvoteBtn = document.createElement('button');
+        upvoteBtn.className = 'vote-btn upvote-btn';
+        upvoteBtn.dataset.id = alert._id;
+        upvoteBtn.dataset.type = 'up';
+        upvoteBtn.textContent = '👍 Upvote';
+        actionsDiv.appendChild(upvoteBtn);
+        const downvoteBtn = document.createElement('button');
+        downvoteBtn.className = 'vote-btn downvote-btn';
+        downvoteBtn.dataset.id = alert._id;
+        downvoteBtn.dataset.type = 'down';
+        downvoteBtn.textContent = '👎 Downvote';
+        actionsDiv.appendChild(downvoteBtn);
+        item.appendChild(actionsDiv);
         content.appendChild(item);
       });
       content.querySelectorAll('.center-btn').forEach(btn => {
@@ -4908,8 +4975,8 @@ setInterval(() => {
             }
           }
           // FIXED: Use the destructured index
-          if (heading == null && speed > CONFIG.STATIONARY_SPEED_THRESHOLD && index < path.length - 1) {
-            computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[index + 1]);
+          if (heading == null && speed > CONFIG.STATIONARY_SPEED_THRESHOLD && navState.lastSnapIndex < path.length - 1) {
+            computedHeading = google.maps.geometry.spherical.computeHeading(new google.maps.LatLng(pos), path[navState.lastSnapIndex + 1]);
             console.log('Computed heading from polyline:', computedHeading);
           } else if (heading == null && speed > CONFIG.STATIONARY_SPEED_THRESHOLD && navState.previousUserLocation) {
             computedHeading = google.maps.geometry.spherical.computeHeading(
@@ -5144,14 +5211,7 @@ setInterval(() => {
           console.log('Initial navigation view set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
           ProgrammaticUpdateManager.end();
         });
-        onPositionUpdate({
-          coords: {
-            latitude: navState.userLocation.lat,
-            longitude: navState.userLocation.lng,
-            speed: 0,
-            heading: navState.currentHeading
-          }
-        });
+        // FIXED: Remove this self-call at the end of startGPS() - it creates infinite recursion.
       }
     }
     function handleGeolocationError(error, isInitial = false) {
@@ -5199,6 +5259,7 @@ setInterval(() => {
               lng: position.coords.longitude
             };
             rawUserLocation = navState.userLocation;
+            retryCount = 0;
             console.log('Initial location:', navState.userLocation);
             requestDeviceOrientationPermission();
             loadGoogleMaps();
@@ -5338,7 +5399,7 @@ setInterval(() => {
       // Stop all intervals/timeouts
       [cameraCheckInterval, alertPollInterval, navState.rerouteCheckTimeout,
        navState.hazardCheckInterval, mockSimulationInterval, dragTimer,
-       postingTimeout].forEach(id => {
+       postingTimeout, navStateIntervalId].forEach(id => {
         if (id) {
           clearInterval(id);
           clearTimeout(id);
@@ -5367,6 +5428,9 @@ setInterval(() => {
       google.maps.event.clearInstanceListeners(userMarker);
       // Disconnect socket
       if (socket) {
+        // FIXED: Store all listeners in socketListeners Map and clear in cleanupResources()
+        socketListeners.forEach((handler, event) => socket.off(event, handler));
+        socketListeners.clear();
         socket.disconnect();
         socket = null;
       }
@@ -5441,111 +5505,120 @@ setInterval(() => {
   }
 }
     async function calculateAndDisplayRoute(origin, dest, callback) {
-  if (!origin || !dest) {
-    console.error('Invalid origin or destination:', origin, dest);
-    showToast('Invalid route. Please select a destination.');
-    return;
-  }
-  let waypoints = navState.waypoints.filter(w => w.lat && w.lng).map(w => ({ location: new google.maps.LatLng(w), stopover: true }));
-  if (navState.evCharging && placesService) {
-    // Find nearest EV station
-    const request = {
-      location: origin,
-      radius: '5000',
-      keyword: 'EV charging station'
-    };
-    placesService.nearbySearch(request, (results, status) => {
-      if (status === google.maps.places.PlacesServiceStatus.OK && results[0]) {
-        const station = results[0].geometry.location;
-        waypoints.unshift({ location: station, stopover: true });
-        console.log('EV station added as waypoint:', station);
-      } else {
-        console.warn('No EV station found, proceeding without');
-      }
-      // Proceed with route calculation
+  try {
+    if (!origin || !dest) {
+      console.error('Invalid origin or destination:', origin, dest);
+      showToast('Invalid route. Please select a destination.');
+      return;
+    }
+    let waypoints = navState.waypoints.filter(w => w.lat && w.lng).map(w => ({ location: new google.maps.LatLng(w), stopover: true }));
+    if (navState.evCharging && placesService) {
+      // Find nearest EV station
+      const request = {
+        location: origin,
+        radius: '5000',
+        keyword: 'EV charging station'
+      };
+      placesService.nearbySearch(request, (results, status) => {
+        if (status === google.maps.places.PlacesServiceStatus.OK && results[0]) {
+          const station = results[0].geometry.location;
+          waypoints.unshift({ location: station, stopover: true });
+          console.log('EV station added as waypoint:', station);
+        } else {
+          console.warn('No EV station found, proceeding without');
+        }
+        // Proceed with route calculation
+        proceedWithRoute();
+      });
+    } else {
       proceedWithRoute();
-    });
-  } else {
-    proceedWithRoute();
-  }
-  function proceedWithRoute() {
-    const request = {
-      origin: origin,
-      destination: dest,
-      travelMode: google.maps.TravelMode.DRIVING,
-      provideRouteAlternatives: true,
-      waypoints: waypoints,
-      avoidTolls: navState.avoidTolls,
-      avoidHighways: navState.avoidHighways
-    };
-    directionsService.route(request, (response, status) => {
-      if (status === 'OK') {
-        // FIXED: Clear but not rebuild here, rebuild after detailedPath
-        routeSpatialIndex = null; // ← ADD THIS
- 
-        navState.currentRoute = response;
-        navState.routePolyline = response.routes[0].overview_path;
-        navState.detailedPath = [];
-        const legs = response.routes[0].legs;
-        for (const leg of legs) {
-          for (const step of leg.steps) {
-            step.path.forEach(point => navState.detailedPath.push(point));
-          }
-        }
-        // FIXED: Rebuild after route calculation
-        routeSpatialIndex = buildRouteIndex(navState.detailedPath);
-        navState.detailedPath = navState.detailedPath.filter((point, index, self) =>
-          index === self.findIndex(p => Math.abs(p.lat() - point.lat()) < 1e-6 && Math.abs(p.lng() - point.lng()) < 1e-6)
-        );
-        console.log('Detailed path computed for route:', navState.detailedPath.length, 'points');
-        directionsRenderer.setMap(map);
-        directionsRenderer.setDirections(response);
-        updateRouteAhead(navState.userLocation);
-        updateOffRoadPolyline(rawUserLocation || navState.userLocation, response.routes[0].overview_path[0]);
-        updateHUD(response, navState.userLocation);
-        updateBottomHUD(response);
-        if (callback) callback();
-        // Show simulation button
-        document.getElementById('simulate-position-button').style.display = 'block';
-        if (navState.isFollowing && navState.isNavigating) {
-          const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
-          navState.navigationZoom = zoom;
-          const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
-          const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
-          ProgrammaticUpdateManager.start();
-          requestAnimationFrame(() => {
-            if (isMobile && typeof TWEEN !== 'undefined') {
-              new TWEEN.Tween(map.getCenter())
-                .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
-                .easing(TWEEN.Easing.Quadratic.Out)
-                .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
-                .start();
-              updateMapHeading(heading);
-            } else {
-              map.panTo(lookaheadPoint);
-              map.setHeading(heading);
+    }
+    function proceedWithRoute() {
+      const request = {
+        origin: origin,
+        destination: dest,
+        travelMode: google.maps.TravelMode.DRIVING,
+        provideRouteAlternatives: true,
+        waypoints: waypoints,
+        avoidTolls: navState.avoidTolls,
+        avoidHighways: navState.avoidHighways
+      };
+      directionsService.route(request, (response, status) => {
+        try {
+          if (status === 'OK') {
+            // FIXED: Clear but not rebuild here, rebuild after detailedPath
+            routeSpatialIndex = null; // ← ADD THIS
+            navState.currentRoute = response;
+            navState.routePolyline = response.routes[0].overview_path;
+            navState.detailedPath = [];
+            const legs = response.routes[0].legs;
+            for (const leg of legs) {
+              for (const step of leg.steps) {
+                step.path.forEach(point => navState.detailedPath.push(point));
+              }
             }
-            lastProgrammaticZoom = zoom;
-            map.setZoom(zoom);
-            map.setTilt(tilt);
-            userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-            console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
-            ProgrammaticUpdateManager.end();
-          });
+            // FIXED: Rebuild after route calculation
+            routeSpatialIndex = buildRouteIndex(navState.detailedPath);
+            navState.detailedPath = navState.detailedPath.filter((point, index, self) =>
+              index === self.findIndex(p => Math.abs(p.lat() - point.lat()) < 1e-6 && Math.abs(p.lng() - point.lng()) < 1e-6)
+            );
+            console.log('Detailed path computed for route:', navState.detailedPath.length, 'points');
+            directionsRenderer.setMap(map);
+            directionsRenderer.setDirections(response);
+            updateRouteAhead(navState.userLocation);
+            updateOffRoadPolyline(rawUserLocation || navState.userLocation, response.routes[0].overview_path[0]);
+            updateHUD(response, navState.userLocation);
+            updateBottomHUD(response);
+            if (callback) callback();
+            // Show simulation button
+            document.getElementById('simulate-position-button').style.display = 'block';
+            if (navState.isFollowing && navState.isNavigating) {
+              const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+              navState.navigationZoom = zoom;
+              const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+              const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+              ProgrammaticUpdateManager.start();
+              requestAnimationFrame(() => {
+                if (isMobile && typeof TWEEN !== 'undefined') {
+                  new TWEEN.Tween(map.getCenter())
+                    .to({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }, 300)
+                    .easing(TWEEN.Easing.Quadratic.Out)
+                    .onUpdate(() => map.setCenter({ lat: lookaheadPoint.lat(), lng: lookaheadPoint.lng() }))
+                    .start();
+                  updateMapHeading(heading);
+                } else {
+                  map.panTo(lookaheadPoint);
+                  map.setHeading(heading);
+                }
+                lastProgrammaticZoom = zoom;
+                map.setZoom(zoom);
+                map.setTilt(tilt);
+                userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+                console.log('Route calculated, camera set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt });
+                ProgrammaticUpdateManager.end();
+              });
+            }
+            console.log('Route calculated:', {
+              pathLength: navState.routePolyline.length,
+              endPoint: navState.routePolyline[navState.routePolyline.length - 1],
+              destination: dest
+            });
+          } else {
+            console.error('Directions request failed:', status);
+            showToast('Directions request failed: ' + status);
+            if (status === 'REQUEST_DENIED') {
+              showToast('API key invalid or restricted. Check Google Cloud Console.');
+            }
+          }
+        } catch (error) {
+          console.error('Route processing error:', error);
+          showToast('Failed to process route. Please try again.');
         }
-        console.log('Route calculated:', {
-          pathLength: navState.routePolyline.length,
-          endPoint: navState.routePolyline[navState.routePolyline.length - 1],
-          destination: dest
-        });
-      } else {
-        console.error('Directions request failed:', status);
-        showToast('Directions request failed: ' + status);
-        if (status === 'REQUEST_DENIED') {
-          showToast('API key invalid or restricted. Check Google Cloud Console.');
-        }
-      }
-    });
+      });
+    }
+  } catch (error) {
+    console.error('Route calculation error:', error);
+    showToast('Failed to calculate route.');
   }
 }
     function updateBottomHUD(route) {
@@ -5632,11 +5705,14 @@ setInterval(() => {
         const cameraLatLng = new google.maps.LatLng(camera);
         const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, cameraLatLng);
         const cameraKey = `static-${camera.lat.toFixed(4)}-${camera.lng.toFixed(4)}`;
-        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(cameraKey)) {
-          showCameraHud();
-          cameraAlertShown.add(cameraKey);
-          console.log('Traffic camera alert triggered:', { distance, camera });
-          break;
+        // FIXED: Use Map with timestamps
+        if (!cameraAlertShown.has(cameraKey) || Date.now() - cameraAlertShown.get(cameraKey) > 300000) {
+          if (distance <= cameraAlertDistance * 1609.34) {
+            showCameraHud();
+            cameraAlertShown.set(cameraKey, Date.now());
+            console.log('Traffic camera alert triggered:', { distance, camera });
+            break;
+          }
         }
       }
       for (const alert of currentAlerts) {
@@ -5644,11 +5720,14 @@ setInterval(() => {
         const alertLatLng = new google.maps.LatLng(alert.location.coordinates[1], alert.location.coordinates[0]);
         const distance = google.maps.geometry.spherical.computeDistanceBetween(userLatLng, alertLatLng);
         const alertKey = `mongo-${alert._id}`;
-        if (distance <= cameraAlertDistance * 1609.34 && !cameraAlertShown.has(alertKey)) {
-          showCameraHud();
-          cameraAlertShown.add(alertKey);
-          console.log('MongoDB traffic camera alert triggered:', { distance, alertId: alert._id });
-          break;
+        // FIXED: Use Map with timestamps
+        if (!cameraAlertShown.has(alertKey) || Date.now() - cameraAlertShown.get(alertKey) > 300000) {
+          if (distance <= cameraAlertDistance * 1609.34) {
+            showCameraHud();
+            cameraAlertShown.set(alertKey, Date.now());
+            console.log('MongoDB traffic camera alert triggered:', { distance, alertId: alert._id });
+            break;
+          }
         }
       }
     }
@@ -5719,7 +5798,7 @@ setInterval(() => {
       if (!map || !position || !navState.isFollowing) return;
       const now = Date.now();
       if (now - lastBoundsCheck < BOUNDS_CHECK_INTERVAL) return;
-      lastBoundsCheck = now;
+      // FIXED: Called on every position update
       const bounds = map.getBounds();
       if (!bounds) {
         console.warn('Map bounds unavailable, cannot check viewport');
@@ -5742,6 +5821,8 @@ setInterval(() => {
           map.setCenter(position);
         });
       }
+      // FIXED: ADD THIS after bounds.contains() check
+      lastBoundsCheck = now;
     }
     function checkHazardsAndOfferReroute() {
       if (!navState.isNavigating || !navState.currentRoute || !navState.userLocation) {
@@ -5980,6 +6061,9 @@ setInterval(() => {
     }
     function showToast(message, duration = 3000) {
       // FIXED: Queue toasts to prevent stacking
+      if (toastQueue.length >= MAX_TOAST_QUEUE_SIZE) {
+        toastQueue.shift(); // Remove oldest
+      }
       toastQueue.push({ message, duration });
       if (toastQueue.length === 1) {
         processToastQueue();
@@ -5992,7 +6076,6 @@ setInterval(() => {
         const toast = document.getElementById('toast');
         toast.textContent = message;
         toast.classList.add('visible-toast');
-  
         if (toastTimeout) clearTimeout(toastTimeout);
         toastTimeout = setTimeout(() => {
           toast.classList.remove('visible-toast');
@@ -6466,11 +6549,13 @@ function initSocket(token, userId) {
   // ✅ Force sync as backup
   setTimeout(() => pollAlerts(), 2000);
 }, 500);
+socketListeners.set('alert', debouncedAlertHandler);
 socket.on('alert', debouncedAlertHandler);
       const debouncedLocationUpdate = debounce((data) => {
     // Handle location update
     updateTrackedUserLocation(data);
   }, 200);
+  socketListeners.set('locationUpdate', debouncedLocationUpdate);
   socket.on('locationUpdate', debouncedLocationUpdate);
   socket.on('familyLocation', (data) => {
     console.log('Received family location update:', data.userId);
@@ -6593,6 +6678,12 @@ socket.on('alert', debouncedAlertHandler);
           OfflineQueue.process();
         }
         syncOfflineRegions(); // Add this to sync regions on init
+      }
+      // FIXED: Service Worker Registration Missing
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(reg => console.log('SW registered:', reg.scope))
+          .catch(err => console.error('SW registration failed:', err));
       }
     }
     // Service Worker Message Listener

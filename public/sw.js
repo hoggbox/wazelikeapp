@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.11';
+const CACHE_NAME = 'waze-gps-v1.0.12'; // Updated version
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -130,7 +130,7 @@ self.addEventListener('fetch', event => {
           throw new Error(`Invalid response: ${networkResponse?.status || 'No response'}`);
         })
         .catch(async error => {
-          console.log('Serving Cached/offline for document:', url.pathname, error);
+          console.log('Serving cached/offline for document:', url.pathname, error);
           const isPaymentSuccess = url.searchParams.get('payment') === 'success' || url.searchParams.get('session_id');
           const isPaymentCancelled = url.searchParams.get('payment') === 'cancelled';
           
@@ -142,7 +142,7 @@ self.addEventListener('fetch', event => {
                 '</body>',
                 `
                 <script>
-                  const token = localStorage.getItem('token');
+                  const token = localStorage.getItem('token') || sessionStorage.getItem('token');
                   const csrfToken = document.cookie.match(/csrfToken=([^;]+)/)?.[1] || '';
                   const celeb = document.createElement('div');
                   celeb.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;z-index:10003;animation:celebrate 2s ease-out forwards;pointer-events:none';
@@ -173,6 +173,7 @@ self.addEventListener('fetch', event => {
                               await cache.put('/api/subscription/status', new Response(JSON.stringify(data), { 
                                 headers: { 'Content-Type': 'application/json', 'X-Cached-At': Date.now().toString() } 
                               }));
+                              localStorage.setItem('subscriptionStatus', JSON.stringify(data));
                               location.reload();
                             }
                           } catch (error) {
@@ -241,7 +242,7 @@ self.addEventListener('fetch', event => {
         .then(cachedResponse => {
           const fetchPromise = fetch(event.request)
             .then(networkResponse => {
-              if (networkResponse?.status === 200 && networkResponse.type === 'basic') {
+              if (networkResponse?.status === 201 && networkResponse.type === 'basic') {
                 cache.put(event.request, networkResponse.clone());
               }
               return networkResponse;
@@ -271,6 +272,7 @@ async function handleApiRequest(event, url) {
   const isFamilyPath = url.pathname === '/api/users/family' && event.request.method === 'GET';
   const isAuthPath = url.pathname.startsWith('/api/auth');
   const isAlertPath = url.pathname.startsWith('/api/alerts');
+  const isLocationPath = url.pathname === '/api/location' && event.request.method === 'POST';
 
   try {
     if (isSubscriptionPath) {
@@ -351,10 +353,10 @@ async function handleApiRequest(event, url) {
         });
     }
 
-    if (isAlertPath) {
+    if (isAlertPath || isLocationPath) {
       return await fetch(event.request)
         .then(async networkResponse => {
-          if (networkResponse?.status === 200) {
+          if (networkResponse?.status === 200 || networkResponse?.status === 201) {
             const cache = await caches.open(CACHE_NAME);
             const responseWithTTL = new Response(await networkResponse.clone().text(), {
               headers: {
@@ -363,26 +365,47 @@ async function handleApiRequest(event, url) {
               }
             });
             await cache.put(event.request, responseWithTTL);
-            console.log('Cached alerts response:', event.request.url);
+            console.log(`Cached ${isAlertPath ? 'alerts' : 'location'} response:`, event.request.url);
             return networkResponse;
           }
-          throw new Error(`Invalid alerts response: ${networkResponse?.status}`);
+          throw new Error(`Invalid ${isAlertPath ? 'alerts' : 'location'} response: ${networkResponse?.status}`);
         })
         .catch(async error => {
-          console.warn('Alerts fetch failed:', error);
+          console.warn(`${isAlertPath ? 'Alerts' : 'Location'} fetch failed:`, error);
           const cachedResponse = await caches.match(event.request);
           if (cachedResponse) {
             const cachedAt = parseInt(cachedResponse.headers.get('X-Cached-At') || '0');
             if (Date.now() - cachedAt < API_CACHE_TTL) {
-              console.log('Serving cached alerts:', event.request.url);
+              console.log(`Serving cached ${isAlertPath ? 'alerts' : 'location'}:`, event.request.url);
               return cachedResponse;
             }
-            console.log('Cached alerts expired');
+            console.log(`Cached ${isAlertPath ? 'alerts' : 'location'} expired`);
           }
           return new Response(JSON.stringify({
-            error: 'Offline: Cannot fetch alerts',
+            error: `Offline: Cannot fetch ${isAlertPath ? 'alerts' : 'location'}`,
             offline: true,
-            suggest: 'Reconnect to view alerts'
+            suggest: `Reconnect to ${isAlertPath ? 'view alerts' : 'update location'}`
+          }), {
+            status: 503,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        });
+    }
+
+    if (isAuthPath) {
+      return await fetch(event.request)
+        .then(networkResponse => {
+          return networkResponse;
+        })
+        .catch(error => {
+          console.error('Auth fetch failed:', error, 'URL:', event.request.url);
+          if (self.Sentry) {
+            self.Sentry.captureException(error, { tags: { context: 'fetchAuth', url: event.request.url } });
+          }
+          return new Response(JSON.stringify({ 
+            error: 'Network unavailable', 
+            offline: true, 
+            suggest: 'Reconnect and refresh token'
           }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' }
@@ -400,6 +423,7 @@ async function handleApiRequest(event, url) {
                         isAuthPath ? 'Reconnect and refresh token' :
                         isFamilyPath ? 'Reconnect to sync family data' :
                         isAlertPath ? 'Reconnect to sync alerts' :
+                        isLocationPath ? 'Reconnect to update location' :
                         'Check connection';
         return new Response(JSON.stringify({ 
           error: 'Network unavailable', 
@@ -445,11 +469,11 @@ self.addEventListener('message', async event => {
       const tileUrls = generateTileUrls(bounds);
       for (const url of tileUrls) {
         try {
-          const response = await fetch(url);
+          const response = await fetch(url, { mode: 'cors' });
           if (response?.status === 200) {
             await cache.put(url, response);
-            await cache.put(`${url}-meta`, new Response(JSON.stringify({ cachedAt: Date.now() })));
-            console.log('Cached map tile:', url);
+            await cache.put(`${url}-meta`, new Response(JSON.stringify({ cachedAt: Date.now(), region: name })));
+            console.log('Cached map tile:', url, 'for region:', name);
           }
         } catch (error) {
           console.error('Failed to cache map tile:', url, error);
@@ -507,7 +531,7 @@ self.addEventListener('message', async event => {
           console.log('Subscription status cached after payment');
           const clients = await self.clients.matchAll();
           clients.forEach(client => {
-            client.postMessage({ type: 'SUBSCRIPTION_UPDATED' });
+            client.postMessage({ type: 'SUBSCRIPTION_UPDATED', data: responseWithTTL });
           });
         }
       } catch (error) {
@@ -561,12 +585,18 @@ self.addEventListener('message', async event => {
                 'X-Cached-At': Date.now().toString()
               }
             }));
+            const clients = await self.clients.matchAll();
+            clients.forEach(client => {
+              client.postMessage({ type: 'SUBSCRIPTION_UPDATED', data: { isPremium: false, isTrialActive: false } });
+            });
           }
-          console.log('Processed offline action:', action.type);
+          console.log('Processed offline action:', action.type, 'ID:', action.id);
         } catch (error) {
-          console.error('Failed to process offline action:', action.type, error);
+          console.error('Failed to process offline action:', action.type, 'ID:', action.id, error);
           if (self.Sentry) {
-            self.Sentry.captureException(error, { tags: { context: 'offlineQueue', action: action.type } });
+            self.Sentry.captureException(error, { 
+              tags: { context: 'offlineQueue', action: action.type, actionId: action.id } 
+            });
           }
           const clients = await self.clients.matchAll();
           clients.forEach(client => {
@@ -584,6 +614,27 @@ self.addEventListener('message', async event => {
             return caches.delete(cacheName);
           })
       );
+      // Additional cleanup for stale API responses
+      const cache = await caches.open(CACHE_NAME);
+      const requests = await cache.keys();
+      const now = Date.now();
+      for (const req of requests) {
+        if (req.url.includes('/api/')) {
+          const metaResponse = await cache.match(`${req.url}-meta`);
+          let cachedAt = 0;
+          if (metaResponse) {
+            try {
+              const meta = await metaResponse.json();
+              cachedAt = meta.cachedAt || 0;
+            } catch {}
+          }
+          if (now - cachedAt > API_CACHE_TTL) {
+            await cache.delete(req);
+            await cache.delete(`${req.url}-meta`);
+            console.log('Deleted stale API response:', req.url);
+          }
+        }
+      }
     }
   } catch (error) {
     console.error('Message event handling failed:', error);
@@ -747,10 +798,12 @@ async function cleanupMapTileCache(cache) {
     for (const req of tileRequests) {
       const metaResponse = await cacheInstance.match(`${req.url}-meta`);
       let cachedAt = 0;
+      let region = null;
       if (metaResponse) {
         try {
           const meta = await metaResponse.json();
           cachedAt = meta.cachedAt || 0;
+          region = meta.region || null;
         } catch (error) {
           console.error('Failed to parse tile metadata:', req.url, error);
           if (self.Sentry) {
@@ -758,7 +811,7 @@ async function cleanupMapTileCache(cache) {
           }
         }
       }
-      tilesWithMetadata.push({ request: req, cachedAt });
+      tilesWithMetadata.push({ request: req, cachedAt, region });
     }
 
     tilesWithMetadata.sort((a, b) => a.cachedAt - b.cachedAt);
@@ -774,17 +827,19 @@ async function cleanupMapTileCache(cache) {
       }
     }
 
-    for (const { request, cachedAt } of tilesWithMetadata) {
+    for (const { request, cachedAt, region } of tilesWithMetadata) {
       let isInRegion = false;
-      for (const [, region] of cachedRegions) {
-        const zoom = parseInt(new URL(request.url).searchParams.get('z') || '16');
-        const x = parseInt(new URL(request.url).searchParams.get('x') || '0');
-        const y = parseInt(new URL(request.url).searchParams.get('y') || '0');
-        const regionTopLeft = latLngToTile({ lat: region.bounds.north, lng: region.bounds.west }, zoom);
-        const regionBottomRight = latLngToTile({ lat: region.bounds.south, lng: region.bounds.east }, zoom);
-        if (x >= regionTopLeft.x && x <= regionBottomRight.x && y >= regionTopLeft.y && y <= regionBottomRight.y) {
-          isInRegion = true;
-          break;
+      if (region) {
+        for (const [, cachedRegion] of cachedRegions) {
+          const zoom = parseInt(new URL(request.url).searchParams.get('z') || '16');
+          const x = parseInt(new URL(request.url).searchParams.get('x') || '0');
+          const y = parseInt(new URL(request.url).searchParams.get('y') || '0');
+          const regionTopLeft = latLngToTile({ lat: cachedRegion.bounds.north, lng: cachedRegion.bounds.west }, zoom);
+          const regionBottomRight = latLngToTile({ lat: cachedRegion.bounds.south, lng: cachedRegion.bounds.east }, zoom);
+          if (x >= regionTopLeft.x && x <= regionBottomRight.x && y >= regionTopLeft.y && y <= regionBottomRight.y) {
+            isInRegion = true;
+            break;
+          }
         }
       }
       if (!isInRegion || now - cachedAt > REGION_STALE_AGE) {
@@ -801,13 +856,15 @@ async function cleanupMapTileCache(cache) {
       for (const req of updatedTileRequests) {
         const metaResp = await cacheInstance.match(`${req.url}-meta`);
         let cachedAt = 0;
+        let region = null;
         if (metaResp) {
           try {
             const meta = await metaResp.json();
             cachedAt = meta.cachedAt || 0;
+            region = meta.region || null;
           } catch {}
         }
-        allTilesWithMeta.push({ request: req, cachedAt });
+        allTilesWithMeta.push({ request: req, cachedAt, region });
       }
       allTilesWithMeta.sort((a, b) => a.cachedAt - b.cachedAt);
       const toDeleteCount = allTilesWithMeta.length - MAX_CACHED_TILES;
