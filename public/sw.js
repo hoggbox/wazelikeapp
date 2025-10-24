@@ -1,19 +1,20 @@
-const CACHE_NAME = 'waze-gps-v1.0.9';
+const CACHE_NAME = 'waze-gps-v1.0.10';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
-  '/manifest.json',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css',
-  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js',
-  'https://cdn.socket.io/4.7.5/socket.io.min.js',
+  '/manifest.json?v=1.0.3',
+  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css?v=1.0.3',
+  'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js?v=1.0.3',
+  'https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3',
   'https://browser.sentry-cdn.com/7.x.x/bundle.min.js',
   'https://i.postimg.cc/YS0h0m7R/compass.png',
   'https://i.postimg.cc/jjN0JrPZ/New-Project-5.png'
 ];
 
 const MAX_CACHED_TILES = 500;
-const SUBSCRIPTION_CACHE_TTL = 5 * 60 * 1000;
-const API_CACHE_TTL = 15 * 60 * 1000;
+const SUBSCRIPTION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const API_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+const REGION_STALE_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 let cachedRegions = new Map();
 
@@ -27,7 +28,7 @@ self.addEventListener('install', event => {
         if (self.Sentry) {
           self.Sentry.captureException(error, { tags: { context: 'serviceWorkerInstall' } });
         }
-        throw error; // Ensure install fails if precache fails
+        throw error;
       })
       .then(() => {
         console.log('Service Worker installed, forcing activation');
@@ -141,6 +142,8 @@ self.addEventListener('fetch', event => {
                 '</body>',
                 `
                 <script>
+                  const token = localStorage.getItem('token');
+                  const csrfToken = document.cookie.match(/csrfToken=([^;]+)/)?.[1] || '';
                   const celeb = document.createElement('div');
                   celeb.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:5rem;z-index:10003;animation:celebrate 2s ease-out forwards;pointer-events:none';
                   celeb.textContent = '🎉 Premium Unlocked!';
@@ -151,18 +154,29 @@ self.addEventListener('fetch', event => {
                   setTimeout(() => {celeb.remove(); style.remove();}, 2000);
                   if ('serviceWorker' in navigator) {
                     navigator.serviceWorker.ready.then(reg => {
-                      reg.active?.postMessage({ type: 'CHECK_SUBSCRIPTION' });
+                      if (token) {
+                        reg.active?.postMessage({ type: 'CHECK_SUBSCRIPTION', token, csrfToken });
+                      }
                       const checkOnline = async () => {
                         if (navigator.onLine) {
                           try {
-                            const res = await fetch('/api/subscription/status', { headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') } });
+                            if (!token) throw new Error('No token found');
+                            const res = await fetch('/api/subscription/status', { 
+                              headers: { 
+                                'Authorization': 'Bearer ' + token,
+                                'X-CSRF-Token': csrfToken
+                              } 
+                            });
                             const data = await res.json();
                             if (data.isPremium) {
-                              const cache = await caches.open('waze-gps-v1.0.9');
-                              await cache.put('/api/subscription/status', new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } }));
+                              const cache = await caches.open('${CACHE_NAME}');
+                              await cache.put('/api/subscription/status', new Response(JSON.stringify(data), { 
+                                headers: { 'Content-Type': 'application/json', 'X-Cached-At': Date.now().toString() } 
+                              }));
                               location.reload();
                             }
-                          } catch {
+                          } catch (error) {
+                            console.error('Subscription check failed:', error);
                             setTimeout(checkOnline, 2000);
                           }
                         } else {
@@ -303,7 +317,13 @@ async function handleApiRequest(event, url) {
         .then(async networkResponse => {
           if (networkResponse?.status === 200) {
             const cache = await caches.open(CACHE_NAME);
-            await cache.put(event.request, networkResponse.clone());
+            const responseWithTTL = new Response(await networkResponse.clone().text(), {
+              headers: {
+                ...Object.fromEntries(networkResponse.headers),
+                'X-Cached-At': Date.now().toString()
+              }
+            });
+            await cache.put(event.request, responseWithTTL);
             console.log('Cached family members response');
             return networkResponse;
           }
@@ -313,8 +333,12 @@ async function handleApiRequest(event, url) {
           console.warn('Family fetch failed:', error);
           const cachedResponse = await caches.match(event.request);
           if (cachedResponse) {
-            console.log('Serving cached family members');
-            return cachedResponse;
+            const cachedAt = parseInt(cachedResponse.headers.get('X-Cached-At') || '0');
+            if (Date.now() - cachedAt < API_CACHE_TTL) {
+              console.log('Serving cached family members');
+              return cachedResponse;
+            }
+            console.log('Cached family members expired');
           }
           return new Response(JSON.stringify({
             error: 'Offline: Cannot fetch family members',
@@ -332,7 +356,13 @@ async function handleApiRequest(event, url) {
         .then(async networkResponse => {
           if (networkResponse?.status === 200) {
             const cache = await caches.open(CACHE_NAME);
-            await cache.put(event.request, networkResponse.clone());
+            const responseWithTTL = new Response(await networkResponse.clone().text(), {
+              headers: {
+                ...Object.fromEntries(networkResponse.headers),
+                'X-Cached-At': Date.now().toString()
+              }
+            });
+            await cache.put(event.request, responseWithTTL);
             console.log('Cached alerts response:', event.request.url);
             return networkResponse;
           }
@@ -342,8 +372,12 @@ async function handleApiRequest(event, url) {
           console.warn('Alerts fetch failed:', error);
           const cachedResponse = await caches.match(event.request);
           if (cachedResponse) {
-            console.log('Serving cached alerts:', event.request.url);
-            return cachedResponse;
+            const cachedAt = parseInt(cachedResponse.headers.get('X-Cached-At') || '0');
+            if (Date.now() - cachedAt < API_CACHE_TTL) {
+              console.log('Serving cached alerts:', event.request.url);
+              return cachedResponse;
+            }
+            console.log('Cached alerts expired');
           }
           return new Response(JSON.stringify({
             error: 'Offline: Cannot fetch alerts',
@@ -363,10 +397,10 @@ async function handleApiRequest(event, url) {
           self.Sentry.captureException(error, { tags: { context: 'fetchAPI', url: event.request.url } });
         }
         const suggest = isSubscriptionPath ? 'Reconnect to verify subscription' :
-                       isAuthPath ? 'Reconnect and refresh token' :
-                       isFamilyPath ? 'Reconnect to sync family data' :
-                       isAlertPath ? 'Reconnect to sync alerts' :
-                       'Check connection';
+                        isAuthPath ? 'Reconnect and refresh token' :
+                        isFamilyPath ? 'Reconnect to sync family data' :
+                        isAlertPath ? 'Reconnect to sync alerts' :
+                        'Check connection';
         return new Response(JSON.stringify({ 
           error: 'Network unavailable', 
           offline: true, 
@@ -399,6 +433,12 @@ self.addEventListener('message', async event => {
       if (!bounds || !isFinite(bounds.north) || !isFinite(bounds.south) || 
           !isFinite(bounds.east) || !isFinite(bounds.west)) {
         console.error('Invalid region bounds:', bounds);
+        if (self.Sentry) {
+          self.Sentry.captureException(new Error('Invalid region bounds'), { 
+            tags: { context: 'cacheRegion' }, 
+            extra: { bounds } 
+          });
+        }
         return;
       }
       const cache = await caches.open(CACHE_NAME);
@@ -447,11 +487,23 @@ self.addEventListener('message', async event => {
     } else if (event.data?.type === 'CHECK_SUBSCRIPTION') {
       const cache = await caches.open(CACHE_NAME);
       try {
+        const token = event.data.token;
+        const csrfToken = event.data.csrfToken || '';
+        if (!token) throw new Error('No token provided for subscription check');
         const response = await fetch('/api/subscription/status', {
-          headers: { 'Authorization': 'Bearer ' + (event.data.token || '') }
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'X-CSRF-Token': csrfToken
+          }
         });
         if (response?.status === 200) {
-          await cache.put('/api/subscription/status', response.clone());
+          const responseWithTTL = new Response(await response.clone().text(), {
+            headers: {
+              ...Object.fromEntries(response.headers),
+              'X-Cached-At': Date.now().toString()
+            }
+          });
+          await cache.put('/api/subscription/status', responseWithTTL);
           console.log('Subscription status cached after payment');
           const clients = await self.clients.matchAll();
           clients.forEach(client => {
@@ -504,7 +556,10 @@ self.addEventListener('message', async event => {
               isPremium: false, 
               isTrialActive: false 
             }), {
-              headers: { 'Content-Type': 'application/json' }
+              headers: { 
+                'Content-Type': 'application/json',
+                'X-Cached-At': Date.now().toString()
+              }
             }));
           }
           console.log('Processed offline action:', action.type);
@@ -539,16 +594,19 @@ self.addEventListener('message', async event => {
 });
 
 self.addEventListener('push', event => {
-  let data = { title: 'New Alert', body: 'A new alert has been posted nearby.' };
+  const origin = new URL(self.registration.scope).origin;
+  let data;
   try {
-    if (event.data) {
-      data = event.data.json();
+    data = event.data?.json() || { title: 'New Alert', body: 'A new alert has been posted nearby.' };
+    if (!data.title || !data.body) {
+      throw new Error('Invalid notification payload');
     }
   } catch (error) {
     console.error('Error parsing push data:', error);
     if (self.Sentry) {
       self.Sentry.captureException(error, { tags: { context: 'pushEvent' } });
     }
+    data = { title: 'New Alert', body: 'A new alert has been posted nearby.' };
   }
 
   const options = {
@@ -557,10 +615,10 @@ self.addEventListener('push', event => {
     badge: 'https://i.postimg.cc/YS0h0m7R/compass.png',
     data: {
       url: data.url || (data.type === 'subscription' ? 
-        `${self.location.origin}/?payment=${data.status || ''}&session_id=${data.sessionId || ''}` : 
+        `${origin}/?payment=${data.status || ''}&session_id=${data.sessionId || ''}` : 
         data.type === 'familyAlert' ?
-        `${self.location.origin}/?alertId=${data.alertId || ''}&lat=${data.lat || ''}&lng=${data.lng || ''}&familyEmail=${data.email || ''}` :
-        `${self.location.origin}/?alertId=${data.alertId || ''}&lat=${data.lat || ''}&lng=${data.lng || ''}`)
+        `${origin}/?alertId=${data.alertId || ''}&lat=${data.lat || ''}&lng=${data.lng || ''}&familyEmail=${data.email || ''}` :
+        `${origin}/?alertId=${data.alertId || ''}&lat=${data.lat || ''}&lng=${data.lng || ''}`)
     }
   };
 
@@ -589,11 +647,12 @@ self.addEventListener('push', event => {
 });
 
 self.addEventListener('notificationclick', event => {
+  const origin = new URL(self.registration.scope).origin;
   event.notification.close();
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then(clientList => {
-        const url = event.notification.data?.url || self.location.origin;
+        const url = event.notification.data?.url || origin;
         for (const client of clientList) {
           if (client.url === url && 'focus' in client) {
             return client.focus();
@@ -624,16 +683,23 @@ function generateTileUrls(bounds) {
   if (!isFinite(north) || !isFinite(south) || !isFinite(east) || !isFinite(west) || 
       north <= south || east <= west) {
     console.error('Invalid bounds for tile generation:', bounds);
+    if (self.Sentry) {
+      self.Sentry.captureException(new Error('Invalid bounds for tile generation'), { 
+        tags: { context: 'generateTileUrls' }, 
+        extra: { bounds } 
+      });
+    }
     return urls;
   }
 
   for (const zoom of zoomLevels) {
     const scale = 1 << zoom;
+    const maxTile = scale - 1;
     const topLeft = latLngToTile({ lat: north, lng: west }, zoom);
     const bottomRight = latLngToTile({ lat: south, lng: east }, zoom);
 
-    for (let x = Math.max(0, topLeft.x); x <= bottomRight.x; x++) {
-      for (let y = Math.max(0, topLeft.y); y <= bottomRight.y; y++) {
+    for (let x = Math.max(0, topLeft.x); x <= Math.min(maxTile, bottomRight.x); x++) {
+      for (let y = Math.max(0, topLeft.y); y <= Math.min(maxTile, bottomRight.y); y++) {
         const url = `https://mt0.google.com/vt?x=${x}&y=${y}&z=${zoom}&key=${API_KEY}&map_id=${MAP_ID}`;
         urls.push(url);
       }
@@ -645,6 +711,12 @@ function generateTileUrls(bounds) {
 function latLngToTile(latLng, zoom) {
   if (!latLng?.lat || !latLng?.lng || !isFinite(latLng.lat) || !isFinite(latLng.lng)) {
     console.error('Invalid latLng for tile conversion:', latLng);
+    if (self.Sentry) {
+      self.Sentry.captureException(new Error('Invalid latLng for tile conversion'), { 
+        tags: { context: 'latLngToTile' }, 
+        extra: { latLng } 
+      });
+    }
     return { x: 0, y: 0 };
   }
   const scale = 1 << zoom;
@@ -670,7 +742,6 @@ async function cleanupMapTileCache(cache) {
     const requests = await cacheInstance.keys();
     const tileRequests = requests.filter(req => req.url.includes('mt0.google.com/vt'));
     const now = Date.now();
-    const STALE_AGE = 30 * 24 * 60 * 60 * 1000;
 
     const tilesWithMetadata = [];
     for (const req of tileRequests) {
@@ -682,17 +753,86 @@ async function cleanupMapTileCache(cache) {
           cachedAt = meta.cachedAt || 0;
         } catch (error) {
           console.error('Failed to parse tile metadata:', req.url, error);
+          if (self.Sentry) {
+            self.Sentry.captureException(error, { tags: { context: 'parseTileMetadata', url: req.url } });
+          }
         }
       }
       tilesWithMetadata.push({ request: req, cachedAt });
     }
 
     tilesWithMetadata.sort((a, b) => a.cachedAt - b.cachedAt);
+    for (const [name, region] of cachedRegions) {
+      if (now - region.cachedAt > REGION_STALE_AGE) {
+        const tileUrls = generateTileUrls(region.bounds);
+        for (const url of tileUrls) {
+          await cacheInstance.delete(url);
+          await cacheInstance.delete(`${url}-meta`);
+          console.log('Deleted tiles for stale region:', name, url);
+        }
+        cachedRegions.delete(name);
+      }
+    }
+
     for (const { request, cachedAt } of tilesWithMetadata) {
-      if (now - cachedAt > STALE_AGE || tilesWithMetadata.length > MAX_CACHED_TILES) {
+      let isInRegion = false;
+      for (const [, region] of cachedRegions) {
+        const zoom = parseInt(new URL(request.url).searchParams.get('z') || '16');
+        const x = parseInt(new URL(request.url).searchParams.get('x') || '0');
+        const y = parseInt(new URL(request.url).searchParams.get('y') || '0');
+        const regionTopLeft = latLngToTile({ lat: region.bounds.north, lng: region.bounds.west }, zoom);
+        const regionBottomRight = latLngToTile({ lat: region.bounds.south, lng: region.bounds.east }, zoom);
+        if (x >= regionTopLeft.x && x <= regionBottomRight.x && y >= regionTopLeft.y && y <= regionBottomRight.y) {
+          isInRegion = true;
+          break;
+        }
+      }
+      if (!isInRegion || now - cachedAt > REGION_STALE_AGE) {
         await cacheInstance.delete(request);
         await cacheInstance.delete(`${request.url}-meta`);
         console.log('Deleted stale or excess map tile:', request.url);
+      }
+    }
+
+    const updatedRequests = await cacheInstance.keys();
+    const updatedTileRequests = updatedRequests.filter(req => req.url.includes('mt0.google.com/vt'));
+    if (updatedTileRequests.length > MAX_CACHED_TILES) {
+      const allTilesWithMeta = [];
+      for (const req of updatedTileRequests) {
+        const metaResp = await cacheInstance.match(`${req.url}-meta`);
+        let cachedAt = 0;
+        if (metaResp) {
+          try {
+            const meta = await metaResp.json();
+            cachedAt = meta.cachedAt || 0;
+          } catch {}
+        }
+        allTilesWithMeta.push({ request: req, cachedAt });
+      }
+      allTilesWithMeta.sort((a, b) => a.cachedAt - b.cachedAt);
+      const toDeleteCount = allTilesWithMeta.length - MAX_CACHED_TILES;
+      for (let i = 0; i < toDeleteCount; i++) {
+        const tile = allTilesWithMeta[i];
+        await cacheInstance.delete(tile.request);
+        await cacheInstance.delete(`${tile.request.url}-meta`);
+        console.log('Deleted oldest tile to enforce limit:', tile.request.url);
+      }
+    }
+
+    if (navigator.storage?.estimate) {
+      const { quota, usage } = await navigator.storage.estimate();
+      console.log('Storage usage:', { usage: (usage / 1024 / 1024).toFixed(2) + 'MB', quota: (quota / 1024 / 1024).toFixed(2) + 'MB' });
+      if (usage / quota > 0.8) {
+        console.warn('Storage quota nearly exceeded, forcing cleanup');
+        const currentRequests = await cacheInstance.keys();
+        const currentTileRequests = currentRequests.filter(req => req.url.includes('mt0.google.com/vt'));
+        const halfCount = Math.floor(currentTileRequests.length / 2);
+        for (let i = 0; i < halfCount; i++) {
+          const req = currentTileRequests[i];
+          await cacheInstance.delete(req);
+          await cacheInstance.delete(`${req.url}-meta`);
+          console.log('Deleted tile to free up storage:', req.url);
+        }
       }
     }
   } catch (error) {

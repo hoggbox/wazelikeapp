@@ -740,6 +740,10 @@
   color: white;
   font-size: 1.2rem;
 }
+#debug-reset-button {
+  position: fixed; bottom: 2vh; right: 2vw; background: #FF5722; color: white; padding: 0.5rem 1rem; border-radius: 0.5rem; cursor: pointer; z-index: 1005; display: none; font-size: 0.9rem; box-shadow: 0 0.2rem 0.4rem rgba(0,0,0,0.2);
+}
+#debug-reset-button:hover { background: #E64A19; }
   </style>
 </head>
 <body>
@@ -775,9 +779,10 @@
     <div id="share-button"></div>
     <div id="settings-button"></div>
     <div id="current-alerts-button"></div>
-    <div id="leaderboard-button"></div>
+    <div id="leaderboard-button" data-premium-feature="leaderboard"></div>
     <div id="admin-button"></div>
   </div>
+  <div id="debug-reset-button">🔄 Reset</div>
   <div id="tooltip"></div>
   <div class="report-container">
     <div id="report-box">
@@ -878,7 +883,7 @@
             </div>
             <div class="settings-option">
               <label for="traffic-camera-toggle">Show Traffic Camera Alerts</label>
-              <input type="checkbox" id="traffic-camera-toggle" checked>
+              <input type="checkbox" id="traffic-camera-toggle" data-premium-feature="traffic-camera" checked>
             </div>
             <div class="settings-option">
               <label for="hazard-alert-distance">Hazard Alert Distance (miles)</label>
@@ -940,7 +945,7 @@
             </div>
             <div class="settings-option">
               <label for="traffic-forecast-toggle">Enable Traffic Forecast</label>
-              <input type="checkbox" id="traffic-forecast-toggle" checked>
+              <input type="checkbox" id="traffic-forecast-toggle" data-premium-feature="traffic-forecast" checked>
             </div>
           </div>
         </div>
@@ -949,15 +954,15 @@
           <div class="accordion-content">
             <div class="settings-option">
               <label for="multi-stop-toggle">Enable Multi-Stop Planning</label>
-              <input type="checkbox" id="multi-stop-toggle">
+              <input type="checkbox" id="multi-stop-toggle" data-premium-feature="multi-stop">
             </div>
             <div class="settings-option">
               <label for="ev-charging-toggle">Integrate EV Charging</label>
-              <input type="checkbox" id="ev-charging-toggle">
+              <input type="checkbox" id="ev-charging-toggle" data-premium-feature="ev-charging">
             </div>
             <div class="settings-option">
               <label for="route-preset">Route Preset</label>
-              <select id="route-preset">
+              <select id="route-preset" data-premium-feature="route-preset">
                 <option value="default">Default</option>
                 <option value="scenic">Scenic</option>
                 <option value="avoid-toll">Avoid Tolls</option>
@@ -973,7 +978,7 @@
               <label>Downloaded Regions</label>
               <div id="offline-regions-list" style="display: flex; flex-direction: column; gap: 0.5vmin; width: 50%;"></div>
             </div>
-            <button id="offline-download-btn">Download Current Region</button>
+            <button id="offline-download-btn" data-premium-feature="offline-maps">Download Current Region</button>
           </div>
         </div>
         <div class="accordion-item">
@@ -984,7 +989,7 @@
               <div id="family-list" style="display: flex; flex-direction: column; gap: 0.5vmin; width: 50%;"></div>
             </div>
             <input id="add-family-input" type="text" placeholder="Add family member email">
-            <button id="add-family-btn">Add</button>
+            <button id="add-family-btn" data-premium-feature="family-sharing">Add</button>
             <button id="share-route-btn">Share Current Route</button>
           </div>
         </div>
@@ -1155,14 +1160,14 @@
   <div>Checking subscription status...</div>
 </div>
   <script>
-    // Updated code as of October 22, 2025
+    // Updated code as of October 24, 2025
     const CONFIG = Object.freeze({
       REROUTE_CHECK_INTERVAL: 2000,
       OFF_ROUTE_TOLERANCE: 50,
       MIN_REROUTE_DISTANCE: 100,
       MIN_ALERT_DISTANCE: 152.4,
       CAMERA_CHECK_INTERVAL: 10000,
-      ALERT_POLL_INTERVAL: 5000,
+      ALERT_POLL_INTERVAL: 15000,
       HEADING_SMOOTHING_WINDOW: 10,
       POSITION_HISTORY_WINDOW: 10,
       MIN_ZOOM: 16,
@@ -1193,7 +1198,6 @@
       NAV_STATE_SAVE_INTERVAL: 10000,
       NAV_STATE_EXPIRY: 300000
     });
-    const VAPID_PUBLIC_KEY = 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs';
     const mapId = '2666b5bd496d9c6026f43f82';
     const mapSkins = {
       default: [],
@@ -1227,6 +1231,7 @@
         {featureType: 'administrative', elementType: 'labels.text.fill', stylers: [{color: '#4a8a4a'}]}
       ]
     };
+    const isDebug = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     let map, userMarker, destMarker, directionsService, directionsRenderer, alternativeRenderer, trafficLayer, watchId, socket, speechRecognition, routePolyline, offRoadPolyline;
     let currentHeadingTween = null;
     let lastProgrammaticZoom = null;
@@ -1291,6 +1296,13 @@
     let tokenRefreshRetries = 0; // Counter for refreshToken
     const MAX_TOKEN_REFRESH_RETRIES = 3;
     let deletedAlertsBackup = new Map(); // For rollback in deleteAlert
+    let voiceRestartCount = 0;
+    const MAX_VOICE_RESTARTS = 5;
+    const VOICE_RESTART_WINDOW = 60000; // 1 min
+    let lastVoiceRestart = 0;
+    let isPostingAlert = false; // Guard for race condition in postAlert
+    let postingTimeout = null;
+    let isCheckingSubscription = false;
     // Replace existing ProgrammaticUpdateManager with this robust version:
 const ProgrammaticUpdateManager = {
   _isUpdating: false,
@@ -1391,7 +1403,8 @@ setInterval(() => {
       trafficForecast: localStorage.getItem('trafficForecast') === 'true',
       multiStop: localStorage.getItem('multiStop') === 'true',
       offlineRegions: JSON.parse(localStorage.getItem('offlineRegions')) || [],
-      familyMembers: JSON.parse(localStorage.getItem('familyMembers')) || []
+      familyMembers: JSON.parse(localStorage.getItem('familyMembers')) || [],
+      pendingUpgradeModal: null
     };
     let mockSimulationInterval = null;
     let isRegister = false;
@@ -1421,8 +1434,6 @@ setInterval(() => {
       averageDuration: 0,
       totalUpdates: 0
     };
-    let isPostingAlert = false; // Guard for race condition in postAlert
-    let postingTimeout = null;
     // TokenManager
     const TokenManager = {
       get() {
@@ -2096,14 +2107,8 @@ setInterval(() => {
         heading
       );
     }
-    // Reverse geocode via backend proxy
-    async function reverseGeocode(lat, lng) {
-      // Validate coordinates
-      if (isNaN(lat) || isNaN(lng) ||
-          lat < -90 || lat > 90 ||
-          lng < -180 || lng > 180) {
-        throw new Error('Invalid coordinates');
-      }
+    // Reverse geocode via backend proxy with fallback
+    async function backendGeocode(lat, lng) {
       const token = TokenManager.get();
       if (!TokenManager.isValid()) {
         throw new Error('Invalid token');
@@ -2128,6 +2133,37 @@ setInterval(() => {
       }
       return response.json();
     }
+    async function clientGeocode(lat, lng) {
+      // Note: Restrict Google Maps API key by HTTP referrer in Google Cloud Console
+      const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4`);
+      if (!response.ok) {
+        throw new Error('Client-side geocoding failed');
+      }
+      return response.json();
+    }
+    async function reverseGeocode(lat, lng) {
+      // Validate coordinates
+      if (isNaN(lat) || isNaN(lng) ||
+          lat < -90 || lat > 90 ||
+          lng < -180 || lng > 180) {
+        throw new Error('Invalid coordinates');
+      }
+      try {
+        // Use backend proxy (already implemented)
+        return await backendGeocode(lat, lng);
+      } catch (error) {
+        // Fallback to client-side (with rate limit awareness)
+        console.warn('Backend geocode failed, using client fallback');
+        return await clientGeocode(lat, lng);
+      }
+    }
+    async function getVapidPublicKey() {
+      const response = await fetch('/api/vapid/public');
+      if (!response.ok) {
+        throw new Error('Failed to fetch VAPID public key');
+      }
+      return response.text();
+    }
     function loadGoogleMaps() {
       if (googleMapsScriptLoaded) {
         console.log('Google Maps script already loaded, skipping');
@@ -2136,6 +2172,7 @@ setInterval(() => {
       console.log('Loading Google Maps API...');
       googleMapsScriptLoaded = true;
       const script = document.createElement('script');
+      // Note: Restrict this API key by HTTP referrer in Google Cloud Console
       script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
       script.async = true;
       script.defer = true;
@@ -2150,40 +2187,34 @@ setInterval(() => {
       document.head.appendChild(script);
     }
     window.initMap = function() {
-      console.log('initMap called');
-      if (!window.google || !google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
-        console.error('Google Maps libraries not loaded:', {
-          Map: !!google.maps?.Map,
-          AdvancedMarkerElement: !!google.maps?.marker,
-          Autocomplete: !!google.maps?.places,
-          DirectionsService: !!google.maps?.routes,
-          Geometry: !!google.maps?.geometry
-        });
-        showToast('Failed to load map libraries. Retrying...');
-        setTimeout(() => { googleMapsScriptLoaded = false; loadGoogleMaps(); }, 2000);
+      if (!google?.maps?.Map) {
+        console.error('Google Maps not loaded');
+        setTimeout(() => window.initMap(), 1000);
         return;
       }
-      console.log('Google Maps API loaded successfully');
-      placesService = new google.maps.places.PlacesService(map);
       initializeMap();
     };
     function initializeMap() {
-      console.log('Initializing map...');
-      // Add validation check
-      if (!document.getElementById('map')) {
-        console.error('Map container element not found!');
-        return;
-      }
-      if (!google || !google.maps) {
-        console.error('Google Maps not loaded yet, retrying...');
-        setTimeout(initializeMap, 500);
-        return;
-      }
-      if (map) {
-        console.warn('Map already initialized, skipping to prevent multiple instances');
-        return;
-      }
       try {
+        if (!google?.maps?.Map) {
+          throw new Error('Google Maps not loaded');
+        }
+        console.log('Initializing map...');
+        // Add validation check
+        if (!document.getElementById('map')) {
+          console.error('Map container not ready, retrying...');
+          setTimeout(initializeMap, 500);
+          return;
+        }
+        if (!google || !google.maps) {
+          console.error('Google Maps not loaded yet, retrying...');
+          setTimeout(initializeMap, 500);
+          return;
+        }
+        if (map) {
+          console.warn('Map already initialized, skipping to prevent multiple instances');
+          return;
+        }
         map = new google.maps.Map(document.getElementById('map'), {
           center: navState.userLocation,
           zoom: navState.navigationZoom,
@@ -2413,9 +2444,17 @@ setInterval(() => {
         map.addListener('idle', debouncedUpdateVisibleMarkers);
         console.log('Map initialization complete');
       } catch (error) {
-        console.error('Map initialization error:', error);
-        showToast('Failed to initialize map. Retrying...');
-        setTimeout(initializeMap, 2000);
+        console.error('Map init failed:', error);
+        showToast('Failed to load map. Please refresh the page.');
+        // Show fallback UI
+        document.getElementById('map').innerHTML = `
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;background:#f0f0f0;">
+            <div style="text-align:center;">
+              <h2>Map Failed to Load</h2>
+              <button onclick="location.reload()">Retry</button>
+            </div>
+          </div>
+        `;
       }
     }
     function updateVisibleMarkers() {
@@ -2460,7 +2499,10 @@ setInterval(() => {
         .onStart(() => {
           // Clear timeout if tween completes early, but since short, optional
         })
-        .onUpdate(obj => map.setHeading(obj.heading))
+        .onUpdate(obj => {
+          clearTimeout(tweenTimeoutId); // Add this
+          map.setHeading(obj.heading);
+        })
         .onComplete(() => {
           clearTimeout(tweenTimeoutId);
           currentHeadingTween = null;
@@ -2486,6 +2528,10 @@ setInterval(() => {
   return false;
 }
     function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
+  if (ProgrammaticUpdateManager.isActive) {
+    console.warn('Camera update already in progress, skipping');
+    return;
+  }
   if (!shouldUpdateCameraView(actualPos, heading, Date.now() - navState.lastCameraUpdateTime)) {
     return;
   }
@@ -3301,6 +3347,22 @@ setInterval(() => {
           // Simulate offline mode by using cached tiles (in real, SW handles)
         }
       });
+      // Add manual recovery button listener
+      document.getElementById('debug-reset-button').addEventListener('click', () => {
+        ProgrammaticUpdateManager.forceEnd();
+        TWEEN.removeAll();
+        if (currentHeadingTween) currentHeadingTween.stop();
+        showToast('Navigation state reset');
+      });
+      // Show button when stuck
+      setInterval(() => {
+        if (ProgrammaticUpdateManager.isActive && 
+            Date.now() - ProgrammaticUpdateManager._startTime > 3000) {
+          document.getElementById('debug-reset-button').style.display = 'block';
+        } else {
+          document.getElementById('debug-reset-button').style.display = 'none';
+        }
+      }, 1000);
     }
     // Updated OfflineQueue
     const OfflineQueue = {
@@ -3518,11 +3580,22 @@ setInterval(() => {
       };
       // FIXED: Update onend to prevent infinite loop
       wakeWordRecognizer.onend = () => {
-        if (voiceAssistantEnabled && !voiceRecognitionActive) {
-          voiceRecognitionActive = false;
-          setTimeout(() => {
-            if (voiceAssistantEnabled) startWakeWordDetection();
-          }, 500); // Longer delay
+        const now = Date.now();
+        if (now - lastVoiceRestart > VOICE_RESTART_WINDOW) {
+          voiceRestartCount = 0;
+        }
+        
+        if (voiceRestartCount >= MAX_VOICE_RESTARTS) {
+          console.error('Voice recognition restarting too frequently, disabling');
+          voiceAssistantEnabled = false;
+          showToast('Voice assistant disabled due to errors');
+          return;
+        }
+        
+        if (voiceAssistantEnabled) {
+          voiceRestartCount++;
+          lastVoiceRestart = now;
+          setTimeout(startWakeWordDetection, 1000 * voiceRestartCount); // Exponential backoff
         }
       };
       wakeWordRecognizer.start();
@@ -3543,6 +3616,26 @@ setInterval(() => {
     function stopWakeWordDetection() {
       voiceRecognitionActive = false;
       voiceErrorCount = 0;
+      
+      // Clean up all recognizer instances
+      [wakeWordRecognizer, commandSpeechRecognition].forEach(recognizer => {
+        if (recognizer) {
+          try {
+            recognizer.abort(); // Force stop
+            recognizer.onend = null;
+            recognizer.onerror = null;
+            recognizer.onresult = null;
+            // FIXED: Proper cleanup - set to null after abort
+            recognizer = null;
+          } catch (e) {
+            console.log('Recognizer cleanup error:', e);
+          }
+        }
+      });
+      
+      wakeWordRecognizer = null;
+      commandSpeechRecognition = null;
+      // ... rest of cleanup
       if (wakeWordRecognizer) {
         try {
           wakeWordRecognizer.stop();
@@ -3636,8 +3729,6 @@ setInterval(() => {
         if (!TokenManager.isValid()) {
           throw new Error('Invalid token format in storage');
         }
-        // FIXED: Use environment variable instead of hostname check
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching profile with token:', token.substring(0, 10) + '...');
         }
@@ -3729,17 +3820,16 @@ setInterval(() => {
       }
       try {
         const reg = await navigator.serviceWorker.ready;
+        const vapidKey = await getVapidPublicKey();
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY)
+          applicationServerKey: urlB64ToUint8Array(vapidKey)
         });
         const token = TokenManager.get();
         if (!TokenManager.isValid()) {
           console.error('Invalid token, cannot subscribe to push');
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Subscribing to push with token:', token.substring(0, 10) + '...');
         }
@@ -3772,8 +3862,6 @@ setInterval(() => {
             console.error('Invalid token, cannot unsubscribe from push');
             return;
           }
-          // FIXED: Use debug flag for token log
-          const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
           if (isDebug) {
             console.log('Unsubscribing from push with token:', token.substring(0, 10) + '...');
           }
@@ -3817,8 +3905,6 @@ setInterval(() => {
         return;
       }
       try {
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching leaderboard with token:', token.substring(0, 10) + '...');
         }
@@ -3899,7 +3985,8 @@ setInterval(() => {
     }
     // FIXED: Add CSRF token to all fetches
     function getCsrfToken() {
-      return document.cookie.split('; ').find(row => row.startsWith('csrfToken=')).split('=')[1] || '';
+      const match = document.cookie.match(/csrfToken=([^;]+)/);
+      return match ? match[1] : '';
     }
     // Add exponential backoff with jitter
     async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, backoff = CONFIG.FETCH_BACKOFF) {
@@ -3953,8 +4040,6 @@ setInterval(() => {
         if (!TokenManager.isValid()) {
           throw new Error('Invalid token format in storage');
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Refreshing token:', token.substring(0, 10) + '...');
         }
@@ -4007,6 +4092,7 @@ setInterval(() => {
       alertCache.set(key, { timestamp: now, id: alert._id });
       return false;
     }
+    const debouncedGeocode = debounce(reverseGeocode, 1000);
     async function confirmAlertLocation(location, alertType) {
       try {
         const token = TokenManager.get();
@@ -4016,8 +4102,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Checking nearby alerts with token:', token.substring(0, 10) + '...');
         }
@@ -4065,7 +4149,7 @@ setInterval(() => {
       };
       try {
         console.log('Reverse geocoding for alert location:', location);
-        const geocoded = await reverseGeocode(location.lat(), location.lng());
+        const geocoded = await debouncedGeocode(location.lat(), location.lng());
         if (geocoded.status === 'OK' && geocoded.results[0]) {
           navState.tempAlertData.address = geocoded.results[0].formatted_address;
           console.log('Reverse geocoding successful:', navState.tempAlertData.address);
@@ -4092,6 +4176,7 @@ setInterval(() => {
       reportBox.classList.add('active');
       console.log(`Confirming ${alertType} alert at`, navState.tempAlertData.location);
     }
+    const debouncedUpdateHUD = debounce(updateHUD, 200);
     async function postAlert() {
   // FIXED: Disable button to prevent double-clicks
   const postButton = document.getElementById('post-alert-button');
@@ -4130,8 +4215,6 @@ setInterval(() => {
       document.getElementById('auth-container').style.display = 'flex';
       return;
     }
-    // FIXED: Use debug flag for token log
-    const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
     if (isDebug) {
       console.log('Posting alert with token:', token.substring(0, 10) + '...');
     }
@@ -4273,8 +4356,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log(`Voting ${voteType} on alert ${alertId} with token:`, token.substring(0, 10) + '...');
         }
@@ -4326,11 +4407,17 @@ setInterval(() => {
     }
     async function deleteAlert(id, item) {
   console.log('deleteAlert called:', id);
-  // FIXED: Backup for rollback
   const alertToBackup = currentAlerts.find(a => a._id === id);
+  const itemParent = item?.parentElement; // Store parent reference
+  
   if (alertToBackup) {
-    deletedAlertsBackup.set(id, { ...alertToBackup, item });
+    deletedAlertsBackup.set(id, { 
+      alert: { ...alertToBackup }, 
+      itemHTML: item?.outerHTML, // Store HTML string
+      itemParent 
+    });
   }
+  
   // Optimistic UI update only if item provided
   if (item) item.remove();
   const marker = markers.get(id);
@@ -4363,28 +4450,26 @@ setInterval(() => {
       socket.emit('alertDeleted', id);
     }
  
-    // Backup sync after 1s
-    setTimeout(() => pollAlerts(), 1000);
- 
     showToast('Alert deleted successfully.');
   } catch (error) {
     console.error('Error deleting alert:', error);
-    // On error, rollback optimistic update
     const backup = deletedAlertsBackup.get(id);
     if (backup) {
-      currentAlerts.push(backup);
-      displayAlertsInHud(currentAlerts);
-      if (backup.item) {
-        // Re-insert the item if it was removed
-        const container = document.getElementById('information');
-        container.appendChild(backup.item);
+      currentAlerts.push(backup.alert);
+      displayAlertsInHud(currentAlerts); // This will recreate all items
+      if (backup.itemHTML && backup.itemParent) {
+        backup.itemParent.insertAdjacentHTML('beforeend', backup.itemHTML);
       }
       deletedAlertsBackup.delete(id);
     }
-    showToast('Failed to delete alert. Refreshing...');
+    showToast('Failed to delete alert. Restored.');
     setTimeout(() => pollAlerts(), 500);
+  } finally {
+    // FIXED: Moved setTimeout outside try-catch to avoid redundant display
+    setTimeout(() => pollAlerts(), 1000);
   }
 }
+    const debouncedCheckCamera = debounce(checkCameraProximity, 500);
     async function pollAlerts() {
       if (!navState.userLocation) return;
       try {
@@ -4393,8 +4478,6 @@ setInterval(() => {
           console.error('Invalid token, skipping alert poll');
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Polling alerts with token:', token.substring(0, 10) + '...');
         }
@@ -4435,8 +4518,6 @@ setInterval(() => {
           console.error('Invalid token, skipping marker fetch');
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching markers with token:', token.substring(0, 10) + '...');
         }
@@ -4499,8 +4580,6 @@ setInterval(() => {
         return;
       }
       try {
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching current alerts with token:', token.substring(0, 10) + '...');
         }
@@ -4899,10 +4978,10 @@ setInterval(() => {
           updateServerLocation(navState.userLocation);
           console.log('Emitted locationUpdate and sent to server:', navState.userLocation);
         }
-        updateHUD(navState.currentRoute, navState.userLocation);
+        debouncedUpdateHUD(navState.currentRoute, navState.userLocation);
         updateCompass();
         if (showTrafficCameras) {
-          checkCameraProximity();
+          debouncedCheckCamera();
         }
         if (navState.trafficForecast) {
           forecastTrafficAhead();
@@ -5040,7 +5119,7 @@ setInterval(() => {
         navState.ignoredHazards = [];
         navState.hazardCheckInterval = setInterval(checkHazardsAndOfferReroute, 5000);
         if (showTrafficCameras) {
-          cameraCheckInterval = setInterval(checkCameraProximity, CONFIG.CAMERA_CHECK_INTERVAL);
+          cameraCheckInterval = setInterval(debouncedCheckCamera, CONFIG.CAMERA_CHECK_INTERVAL);
         }
         // Call every 5s instead of separate intervals
         setInterval(batchUpdate, CONFIG.BATCH_UPDATE_INTERVAL);
@@ -5165,6 +5244,10 @@ setInterval(() => {
       navState.alertProximities.clear();
       cleanupResources();
       releaseWakeLock();
+      if (navState.pendingUpgradeModal) {
+        setTimeout(() => showUpgradeModal(navState.pendingUpgradeModal.source), 500);
+        navState.pendingUpgradeModal = null;
+      }
       if (watchId) {
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
@@ -5623,6 +5706,9 @@ setInterval(() => {
           console.error('Invalid token, skipping server location update');
           return;
         }
+        if (isDebug) {
+          console.log('Updating server location with token:', token.substring(0, 10) + '...');
+        }
         const response = await fetchWithRetry('/api/location', {
           method: 'POST',
           mode: 'cors',
@@ -5920,16 +6006,24 @@ setInterval(() => {
     }
     function processToastQueue() {
       if (toastQueue.length === 0) return;
-      const { message, duration } = toastQueue[0];
-      const toast = document.getElementById('toast');
-      toast.textContent = message;
-      toast.classList.add('visible-toast');
-      if (toastTimeout) clearTimeout(toastTimeout);
-      toastTimeout = setTimeout(() => {
-        toast.classList.remove('visible-toast');
-        toastQueue.shift();
-        setTimeout(processToastQueue, 100); // Small delay before next toast
-      }, duration);
+      
+      try {
+        const { message, duration } = toastQueue[0];
+        const toast = document.getElementById('toast');
+        toast.textContent = message;
+        toast.classList.add('visible-toast');
+        
+        if (toastTimeout) clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => {
+          toast.classList.remove('visible-toast');
+          toastQueue.shift();
+          setTimeout(processToastQueue, 100);
+        }, duration);
+      } catch (error) {
+        console.error('Toast error:', error);
+        toastQueue.shift(); // Remove problematic toast
+        processToastQueue(); // Continue with next
+      }
       console.log('Toast shown:', message);
     }
     function startPositionSimulation() {
@@ -6013,8 +6107,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching users with token:', token.substring(0, 10) + '...', 'Query:', query);
         }
@@ -6074,8 +6166,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching user activity with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
@@ -6108,8 +6198,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Promoting user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
@@ -6141,8 +6229,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Demoting user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
@@ -6174,8 +6260,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Deleting user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
@@ -6207,8 +6291,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Banning user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
@@ -6240,8 +6322,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('IP banning user with token:', token.substring(0, 10) + '...', 'User ID:', userId);
         }
@@ -6273,8 +6353,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching all users with token:', token.substring(0, 10) + '...');
         }
@@ -6301,8 +6379,6 @@ setInterval(() => {
           document.getElementById('auth-container').style.display = 'flex';
           return;
         }
-        // FIXED: Use debug flag for token log
-        const isDebug = process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost';
         if (isDebug) {
           console.log('Fetching user for activity with token:', token.substring(0, 10) + '...', 'Query:', query);
         }
@@ -6352,7 +6428,7 @@ function initSocket(token, userId) {
  
     // Restart camera checking if enabled
     if (showTrafficCameras && !cameraCheckInterval) {
-      cameraCheckInterval = setInterval(checkCameraProximity, CONFIG.CAMERA_CHECK_INTERVAL);
+      cameraCheckInterval = setInterval(debouncedCheckCamera, CONFIG.CAMERA_CHECK_INTERVAL);
     }
  
     // Restart hazard checking
@@ -6376,34 +6452,41 @@ function initSocket(token, userId) {
   const isTrafficCamera = alert.type === 'Traffic Camera';
   // Skip if filtered
   if (isTrafficCamera && !showTrafficCameras) return;
-  if (!isDuplicateAlert(alert)) {
-    // ✅ Dedupe in currentAlerts
-    if (!currentAlerts.some(a => a._id === alertId)) {
-      currentAlerts.push(alert);
-      displayAlertsInHud(currentAlerts);
-    }
-    // ✅ Dedupe marker creation
-    if (!markers.has(alertId)) {
-      const marker = getMarker({
-        map,
-        position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
-        content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
-        title: `${alert.type} Alert`
-      });
-      markers.set(alertId, marker);
-    }
-    if (isTrafficCamera) {
-      cameraPositions.push({
-        lat: alert.location.coordinates[1],
-        lng: alert.location.coordinates[0]
-      });
-    } else if (navState.isNavigating) {
-      checkHazardsAndOfferReroute();
-    }
-    showToast(`New ${alert.type} alert received.`);
+  if (isDuplicateAlert(alert)) {
+    console.log('Duplicate alert ignored via cache:', alert._id);
+    return;
   }
+  // ✅ Dedupe in currentAlerts
+  if (!currentAlerts.some(a => a._id === alertId)) {
+    currentAlerts.push(alert);
+    displayAlertsInHud(currentAlerts);
+  }
+  // ✅ Dedupe marker creation
+  if (!markers.has(alertId)) {
+    const marker = getMarker({
+      map,
+      position: { lat: alert.location.coordinates[1], lng: alert.location.coordinates[0] },
+      content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+      title: `${alert.type} Alert`
+    });
+    markers.set(alertId, marker);
+  } else {
+    if (markers.has(alertId)) {
+      markers.get(alertId).position = alert.location.coordinates;
+      return; // Update existing instead of creating new
+    }
+  }
+  if (isTrafficCamera) {
+    cameraPositions.push({
+      lat: alert.location.coordinates[1],
+      lng: alert.location.coordinates[0]
+    });
+  } else if (navState.isNavigating) {
+    checkHazardsAndOfferReroute();
+  }
+  showToast(`New ${alert.type} alert received.`);
   // ✅ Force sync as backup
-  setTimeout(() => pollAlerts(), 1000);
+  setTimeout(() => pollAlerts(), 2000);
 }, 500);
 socket.on('alert', debouncedAlertHandler);
       const debouncedLocationUpdate = debounce((data) => {
@@ -6528,6 +6611,9 @@ socket.on('alert', debouncedAlertHandler);
       } else {
         initSocket(token, userId);
         initSubscription();
+        if (navigator.onLine) {
+          OfflineQueue.process();
+        }
         syncOfflineRegions(); // Add this to sync regions on init
       }
     }
@@ -6628,6 +6714,11 @@ let subscriptionStatus = {
   trialEndsAt: null
 };
 async function checkSubscriptionStatus(retries = 3) {
+  if (isCheckingSubscription) {
+    console.log('Subscription check already in progress');
+    return;
+  }
+  isCheckingSubscription = true;
   const loadingDiv = document.getElementById('subscription-loading');
   const isFirstCheck = !subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive;
   if (isFirstCheck) {
@@ -6664,6 +6755,7 @@ async function checkSubscriptionStatus(retries = 3) {
       console.error('Error checking subscription:', error);
     }
   } finally {
+    isCheckingSubscription = false;
     loadingDiv.style.display = 'none';
   }
 }
@@ -6680,9 +6772,12 @@ function updateUIForSubscription() {
     trialBanner.style.display = 'flex';
     trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
     // Add click handler to banner
-    trialBanner.onclick =(e) => {
-      if (e.target.id !== 'trial-banner-close') {
+    let isModalShowing = false;
+    trialBanner.onclick = (e) => {
+      if (e.target.id !== 'trial-banner-close' && !isModalShowing) {
+        isModalShowing = true;
         showUpgradeModal('banner_click');
+        setTimeout(() => isModalShowing = false, 500);
       }
     };
   } else {
@@ -6724,6 +6819,11 @@ function updateUIForSubscription() {
   console.log('UI updated for subscription:', { hasAccess, isPremium: subscriptionStatus.isPremium, isTrialActive: subscriptionStatus.isTrialActive });
 }
 function showUpgradeModal(source) {
+  if (navState.isNavigating && navState.isFollowing) {
+    console.log('Delaying upgrade modal until navigation pauses');
+    navState.pendingUpgradeModal = { source };
+    return;
+  }
   const modal = document.getElementById('subscription-modal');
   const title = document.getElementById('modal-title');
   const message = document.getElementById('modal-message');
@@ -6746,36 +6846,6 @@ function showUpgradeModal(source) {
   });
   console.log('Upgrade modal shown, source:', source);
 }
-document.getElementById('upgrade-button').addEventListener('click', async () => {
-  const button = document.getElementById('upgrade-button');
-  button.disabled = true;
-  button.textContent = 'Processing...';
-  try {
-    const token = TokenManager.get();
-    if (!TokenManager.isValid()) {
-      showToast('Please log in to upgrade');
-      return;
-    }
-    showToast('Redirecting to payment...');
-    const response = await fetchWithRetry('/api/subscription/create-checkout', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': getCsrfToken()
-      }
-    });
-    if (!response.ok) throw new Error('Failed to create checkout session');
-    const { url } = await response.json();
-    window.location.href = url; // Redirect to Stripe Checkout
-  } catch (error) {
-    console.error('Error creating checkout:', error);
-    showToast('Failed to start checkout process. Please try again.');
-  } finally {
-    button.disabled = false;
-    button.textContent = 'Upgrade Now';
-  }
-});
 document.getElementById('maybe-later-button').addEventListener('click', () => {
   const modal = document.getElementById('subscription-modal');
   modal.classList.remove('show');
@@ -6879,24 +6949,6 @@ document.getElementById('manage-subscription-button').addEventListener('click', 
     showUpgradeModal('settings');
   }
 });
-async function cancelSubscription() {
-  try {
-    const token = TokenManager.get();
-    const response = await fetchWithRetry('/api/subscription/cancel', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'X-CSRF-Token': getCsrfToken()
-      }
-    });
-    if (!response.ok) throw new Error('Failed to cancel subscription');
-    showToast('Subscription cancelled. You\'ll have access until the end of your billing period.');
-    await checkSubscriptionStatus();
-  } catch (error) {
-    console.error('Error cancelling subscription:', error);
-    showToast('Failed to cancel subscription. Please try again.');
-  }
-}
 // Initialize subscription check on app load
 function initSubscription() {
   checkSubscriptionStatus();
