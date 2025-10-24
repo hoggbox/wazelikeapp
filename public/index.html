@@ -5218,7 +5218,6 @@ setInterval(() => {
           console.log('Initial navigation view set:', { center: lookaheadPoint.toJSON(), zoom, heading, tilt, orientation: navState.mapOrientation });
           ProgrammaticUpdateManager.end();
         });
-        // FIXED: Remove this self-call at the end of startGPS() - it creates infinite recursion.
       }
     }
     function handleGeolocationError(error, isInitial = false) {
