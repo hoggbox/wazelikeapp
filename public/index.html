@@ -1628,7 +1628,9 @@ setInterval(() => {
         return;
       }
       try {
-        wakeLock = await navigator.wakeLock.request('screen');
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
         wakeLock.addEventListener('release', () => {
           console.log('Wake Lock released');
           wakeLock = null;
@@ -2050,7 +2052,7 @@ setInterval(() => {
       // Use weighted average instead of simple average
       headingHistory.push({ heading: newHeading, weight: speed > 5 ? 1.0 : 0.5 });
       if (headingHistory.length > CONFIG.HEADING_SMOOTHING_WINDOW) {
-        headingHistory = headingHistory.slice(-CONFIG.HEADING_SMOOTHING_WINDOW);
+        headingHistory.shift(); // ✅ Removes oldest efficiently
       }
       let totalWeight = 0;
       let weightedSum = 0;
@@ -2085,6 +2087,9 @@ setInterval(() => {
       return smoothedHeading;
     }
     function smoothPosition(rawPos) {
+      if (!rawPos || isNaN(rawPos.lat) || isNaN(rawPos.lng)) {
+        return navState.lastKnownPosition || rawPos;
+      }
       positionHistory.push(rawPos);
       // FIXED: Use splice() for efficiency
       if (positionHistory.length > CONFIG.POSITION_HISTORY_WINDOW) {
@@ -3589,10 +3594,10 @@ setInterval(() => {
           showToast('Voice assistant disabled due to errors');
           return;
         }
-        if (voiceAssistantEnabled) {
+        if (voiceAssistantEnabled && !isCheckingSubscription) {
           voiceRestartCount++;
           lastVoiceRestart = now;
-          setTimeout(startWakeWordDetection, 1000 * voiceRestartCount); // Exponential backoff
+          setTimeout(startWakeWordDetection, 1000); // Add delay
         }
       };
       wakeWordRecognizer.start();
@@ -3690,7 +3695,10 @@ setInterval(() => {
       if (command.includes('go to') || command.includes('navigate to')) {
         const addressMatch = command.match(/go to\s+(.+)/i) || command.match(/navigate to\s+(.+)/i);
         if (addressMatch) {
-          const address = addressMatch[1].trim();
+          const sanitizeInput = (str) => {
+            return str.replace(/[<>'"]/g, '').slice(0, 200); // Remove dangerous chars, limit length
+          };
+          const address = sanitizeInput(addressMatch[1].trim());
           document.getElementById('search-input').value = address;
           console.log('Setting address for navigation:', address);
           const placeChangedEvent = new Event('place_changed');
@@ -4177,13 +4185,12 @@ setInterval(() => {
     async function postAlert() {
   // FIXED: Disable button to prevent double-clicks
   const postButton = document.getElementById('post-alert-button');
-  postButton.disabled = true;
+  if (isPostingAlert || postButton.disabled) {
+    return Promise.reject('Already posting');
+  }
+  postButton.disabled = true; // Do this FIRST
   postButton.textContent = 'Posting...';
   // Add mutex-style locking
-  if (isPostingAlert) {
-    console.warn('postAlert already in progress, ignoring duplicate call');
-    return Promise.resolve(); // Return early
-  }
   isPostingAlert = true;
   const timeoutId = setTimeout(() => {
     console.error('postAlert timeout, forcing release');
@@ -4287,11 +4294,11 @@ setInterval(() => {
       setTimeout(() => pollAlerts(), 1000);
     } else {
       console.error('Failed to save alert:', result.error || 'Unknown server error', 'Status:', response.status);
-      showToast(`Failed to save alert: ${result.error || 'Server error'}`);
+      showToast(`Unable to post alert. Please check your connection and try again.`);
     }
   } catch (error) {
     console.error('Error posting alert:', error);
-    showToast(`Error posting alert: ${error.message}`);
+    showToast(`Unable to post alert. Please check your connection and try again.`);
   } finally {
     clearTimeout(timeoutId);
     // FIXED: Move button re-enable to the very end, after all cleanup
@@ -4389,7 +4396,7 @@ setInterval(() => {
         showToast(`Voted ${voteType} on alert.`);
       } catch (error) {
         console.error('Error voting on alert:', error);
-        showToast(`Failed to vote on alert: ${error.message}`);
+        showToast(`Unable to vote on alert. Please check your connection and try again.`);
       }
     }
     function dismissVerificationHud() {
@@ -4497,7 +4504,7 @@ setInterval(() => {
         console.log(`Polling synced: ${serverAlerts.length} markers, removed ${removedCount} stale`);
       } catch (error) {
         console.error('Error polling alerts:', error);
-        showToast('Failed to sync alerts.');
+        showToast('Unable to sync alerts. Please check your connection and try again.');
       }
     }
     async function fetchAndDisplayMarkers(map, center) {
@@ -4556,7 +4563,7 @@ setInterval(() => {
         console.log('Fetched and displayed markers:', markersData.length);
       } catch (error) {
         console.error('Error fetching markers:', error);
-        showToast('Failed to load alerts.');
+        showToast('Unable to load alerts. Please check your connection and try again.');
       }
     }
     async function fetchCurrentAlerts() {
@@ -4594,7 +4601,7 @@ setInterval(() => {
         console.log('Fetched current alerts:', currentAlerts.length);
       } catch (error) {
         console.error('Error fetching alerts:', error);
-        showToast(`Failed to load current alerts: ${error.message}`);
+        showToast(`Unable to load current alerts. Please check your connection and try again.`);
       }
     }
     function formatDuration(ms) {
@@ -5036,7 +5043,7 @@ setInterval(() => {
         }
       } catch (error) {
         console.error('Error in position update:', error);
-        showToast('Error updating location. Please ensure GPS is enabled.');
+        showToast('Unable to update location. Please check your connection and try again.');
       }
     }
     function onPositionUpdate(position, isSimulation = false) {
@@ -5244,7 +5251,7 @@ setInterval(() => {
           }
           break;
         default:
-          message = 'Failed to get location. Please try again later.';
+          message = 'Unable to get location. Please try again later.';
       }
       console.error('Geolocation error:', { code: error.code, message: error.message });
       showToast(message);
@@ -5605,20 +5612,20 @@ setInterval(() => {
             });
           } else {
             console.error('Directions request failed:', status);
-            showToast('Directions request failed: ' + status);
+            showToast('Unable to calculate route. Please check your connection and try again.');
             if (status === 'REQUEST_DENIED') {
               showToast('API key invalid or restricted. Check Google Cloud Console.');
             }
           }
         } catch (error) {
           console.error('Route processing error:', error);
-          showToast('Failed to process route. Please try again.');
+          showToast('Unable to process route. Please check your connection and try again.');
         }
       });
     }
   } catch (error) {
     console.error('Route calculation error:', error);
-    showToast('Failed to calculate route.');
+    showToast('Unable to calculate route. Please check your connection and try again.');
   }
 }
     function updateBottomHUD(route) {
@@ -6185,7 +6192,7 @@ setInterval(() => {
         displayUsers(users);
       } catch (error) {
         console.error('Error fetching users:', error);
-        showToast('Failed to fetch users.');
+        showToast('Unable to fetch users. Please check your connection and try again.');
       }
     }
     function displayUsers(users) {
@@ -6249,7 +6256,7 @@ setInterval(() => {
         console.log('User activity displayed:', activities.length);
       } catch (error) {
         console.error('Error fetching user activity:', error);
-        showToast('Failed to fetch user activity.');
+        showToast('Unable to fetch user activity. Please check your connection and try again.');
       }
     }
     async function promoteUser(userId) {
@@ -6280,7 +6287,7 @@ setInterval(() => {
         }
       } catch (error) {
         console.error('Error promoting user:', error);
-        showToast('Failed to promote user.');
+        showToast('Unable to promote user. Please check your connection and try again.');
       }
     }
     async function demoteUser(userId) {
@@ -6311,7 +6318,7 @@ setInterval(() => {
         }
       } catch (error) {
         console.error('Error demoting user:', error);
-        showToast('Failed to demote user.');
+        showToast('Unable to demote user. Please check your connection and try again.');
       }
     }
     async function deleteUser(userId) {
@@ -6342,7 +6349,7 @@ setInterval(() => {
         }
       } catch (error) {
         console.error('Error deleting user:', error);
-        showToast('Failed to delete user.');
+        showToast('Unable to delete user. Please check your connection and try again.');
       }
     }
     async function banUser(userId) {
@@ -6373,7 +6380,7 @@ setInterval(() => {
         }
       } catch (error) {
         console.error('Error banning user:', error);
-        showToast('Failed to ban user.');
+        showToast('Unable to ban user. Please check your connection and try again.');
       }
     }
     async function ipBanUser(userId) {
@@ -6404,7 +6411,7 @@ setInterval(() => {
         }
       } catch (error) {
         console.error('Error IP banning user:', error);
-        showToast('Failed to IP ban user.');
+        showToast('Unable to IP ban user. Please check your connection and try again.');
       }
     }
     async function loadAllUsers() {
@@ -6430,7 +6437,7 @@ setInterval(() => {
         displayUsers(users);
       } catch (error) {
         console.error('Error fetching all users:', error);
-        showToast('Failed to fetch all users.');
+        showToast('Unable to fetch all users. Please check your connection and try again.');
       }
     }
     async function fetchUserForActivity(query) {
@@ -6460,7 +6467,7 @@ setInterval(() => {
         }
       } catch (error) {
         console.error('Error fetching user for activity:', error);
-        showToast('Failed to fetch user for activity.');
+        showToast('Unable to fetch user for activity. Please check your connection and try again.');
       }
     }
     // NEW: Extract socket initialization to separate function
@@ -6500,7 +6507,7 @@ function initSocket(token, userId) {
 });
   socket.on('connect_error', (error) => {
     console.error('Socket.IO connection error:', error);
-    showToast('Failed to connect to server.');
+    showToast('Unable to connect to server. Please check your connection and try again.');
   });
   const debouncedAlertHandler = debounce((alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
@@ -6549,14 +6556,22 @@ function initSocket(token, userId) {
   // ✅ Force sync as backup
   setTimeout(() => pollAlerts(), 2000);
 }, 500);
+// Remove old listener BEFORE adding new one
+if (socketListeners.has('alert')) {
+  socket.off('alert', socketListeners.get('alert'));
+}
 socketListeners.set('alert', debouncedAlertHandler);
 socket.on('alert', debouncedAlertHandler);
       const debouncedLocationUpdate = debounce((data) => {
     // Handle location update
     updateTrackedUserLocation(data);
   }, 200);
-  socketListeners.set('locationUpdate', debouncedLocationUpdate);
-  socket.on('locationUpdate', debouncedLocationUpdate);
+// Remove old listener BEFORE adding new one
+if (socketListeners.has('locationUpdate')) {
+  socket.off('locationUpdate', socketListeners.get('locationUpdate'));
+}
+socketListeners.set('locationUpdate', debouncedLocationUpdate);
+socket.on('locationUpdate', debouncedLocationUpdate);
   socket.on('familyLocation', (data) => {
     console.log('Received family location update:', data.userId);
     updateTrackedUserLocation(data);
@@ -6729,7 +6744,7 @@ socket.on('alert', debouncedAlertHandler);
         window.location.href = url;
       } catch (error) {
         console.error('Error creating checkout:', error);
-        showToast('Failed to start checkout process. Please try again.');
+        showToast('Unable to start checkout process. Please check your connection and try again.');
       } finally {
         button.disabled = false;
         button.textContent = 'Upgrade Now';
@@ -6756,7 +6771,7 @@ socket.on('alert', debouncedAlertHandler);
         await checkSubscriptionStatus();
       } catch (error) {
         console.error('Error cancelling subscription:', error);
-        showToast('Failed to cancel subscription. Please try again.');
+        showToast('Unable to cancel subscription. Please check your connection and try again.');
       }
     }
     // Call initApp on page load
@@ -6803,7 +6818,7 @@ async function checkSubscriptionStatus(retries = 3) {
         'X-CSRF-Token': getCsrfToken()
       }
     });
-    if (!response.ok) throw new Error('Failed to check subscription');
+    if (!response.ok) throw new Error('Unable to check subscription. Please check your connection and try again.');
     subscriptionStatus = await response.json();
     updateUIForSubscription();
     // Check if trial ended and should show upgrade modal
@@ -6943,7 +6958,7 @@ async function handlePaymentCallback() {
         },
         body: JSON.stringify({ sessionId })
       });
-      if (!response.ok) throw new Error('Payment verification failed');
+      if (!response.ok) throw new Error('Unable to verify payment. Please check your connection and try again.');
       const data = await response.json();
       if (data.success) {
         showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
@@ -6966,7 +6981,7 @@ async function handlePaymentCallback() {
       }
     } catch (error) {
       console.error('Error verifying payment:', error);
-      showToast('Payment verification failed. Please contact support.');
+      showToast('Unable to verify payment. Please contact support.');
     }
   } else if (paymentStatus === 'cancelled') {
     showToast('Payment cancelled. You can upgrade anytime from Settings.');

@@ -137,6 +137,25 @@ app.post('/api/geocode', authMiddleware, async (req, res) => {
   const data = await response.json();
   res.json(data);
 });
+// Maps Config Endpoint (for Service Worker)
+app.get('/api/maps-config', (req, res) => {
+  // Security: Validate origin
+  const allowedOrigins = [
+    process.env.CLIENT_URL || 'http://localhost:3000',
+    'http://localhost:3000',
+    'https://yourdomain.com' // Add your production domain
+  ];
+  const origin = req.headers.origin || req.headers.referer || '';
+  const isAllowed = allowedOrigins.some(allowed => origin.includes(allowed));
+  if (!isAllowed && process.env.NODE_ENV === 'production') {
+    console.error('Unauthorized maps-config request from:', origin);
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json({
+    apiKey: process.env.GOOGLE_MAPS_API_KEY,
+    mapId: process.env.GOOGLE_MAPS_MAP_ID || '2666b5bd496d9c6026f43f82'
+  });
+});
 // Stripe Webhook Handler
 app.post('/api/webhooks/stripe', express.raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'];
