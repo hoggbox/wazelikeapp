@@ -6015,31 +6015,31 @@ async function checkSubscriptionStatus() {
   }
 }
 function updateUIForSubscription() {
-  const hasAccess = subscriptionStatus.isPremium || subscriptionStatus.isTrialActive;
+  // ← FIX: hasAccess should only be true if premium OR trial is active
+  const hasAccess = subscriptionStatus.isPremium || 
+                    (subscriptionStatus.isTrialActive && subscriptionStatus.trialDaysRemaining > 0);
   
-  // Update trial banner
+  console.log('🔍 Access Check:', {
+    isPremium: subscriptionStatus.isPremium,
+    isTrialActive: subscriptionStatus.isTrialActive,
+    trialDaysRemaining: subscriptionStatus.trialDaysRemaining,
+    hasAccess
+  });
+  
+  // Update trial banner - only show if trial active AND not premium
   const trialBanner = document.getElementById('trial-banner');
   const trialDaysSpan = document.getElementById('trial-days-remaining');
   const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
   const now = Date.now();
   
-  // FIXED: Check premium status FIRST to prevent banner showing for premium users
-  const shouldShowBanner = !subscriptionStatus.isPremium && // ← This must be first
+  const shouldShowBanner = !subscriptionStatus.isPremium && 
                            subscriptionStatus.isTrialActive && 
                            subscriptionStatus.trialDaysRemaining > 0 &&
                            (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000);
   
-  console.log('🔍 Banner Logic:', {
-    isPremium: subscriptionStatus.isPremium,
-    isTrialActive: subscriptionStatus.isTrialActive,
-    trialDaysRemaining: subscriptionStatus.trialDaysRemaining,
-    shouldShowBanner
-  });
-  
   if (shouldShowBanner) {
     trialBanner.style.display = 'flex';
     trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
-    // Add click handler to banner
     trialBanner.onclick = (e) => {
       if (e.target.id !== 'trial-banner-close') {
         showUpgradeModal('banner_click');
@@ -6048,21 +6048,21 @@ function updateUIForSubscription() {
   } else {
     trialBanner.style.display = 'none';
   }
-  
-  // Rest of function...
+
+  // Lock/unlock features based on hasAccess
   PREMIUM_FEATURES.forEach(featureId => {
     const element = document.getElementById(featureId);
     if (!element) return;
-  
+   
     if (hasAccess) {
       element.classList.remove('locked-feature');
       element.disabled = false;
       element.style.pointerEvents = 'auto';
-      element.onclick = null; // Remove upgrade handler
+      element.onclick = null;
     } else {
       element.classList.add('locked-feature');
       element.disabled = true;
-      element.style.pointerEvents = 'auto'; // Allow click for modal
+      element.style.pointerEvents = 'auto';
       element.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -6071,11 +6071,12 @@ function updateUIForSubscription() {
       };
     }
   });
-  // Lock premium report types
+ 
+  // Lock premium report types for non-access users
   document.querySelectorAll('.report-button').forEach(btn => {
     const alertType = btn.getAttribute('data-alert-type');
     const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(alertType);
-  
+   
     if (isPremiumType && !hasAccess) {
       btn.classList.add('locked-feature');
       btn.style.pointerEvents = 'auto';
@@ -6087,10 +6088,11 @@ function updateUIForSubscription() {
       };
     } else {
       btn.classList.remove('locked-feature');
-      btn.onclick = null; // Use default handler
+      btn.onclick = null;
     }
   });
-  console.log('UI updated for subscription:', { hasAccess, isPremium: subscriptionStatus.isPremium, isTrialActive: subscriptionStatus.isTrialActive });
+  
+  console.log('✅ UI updated:', { hasAccess, isPremium: subscriptionStatus.isPremium });
 }
 function showUpgradeModal(source) {
   const modal = document.getElementById('subscription-modal');

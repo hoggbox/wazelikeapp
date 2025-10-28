@@ -58,8 +58,14 @@ router.post('/register', async (req, res) => {
       activeAlerts: 0,
       points: 0,
       achievements: [],
+      // ← ADD THESE: Initialize trial for new users
       subscriptionStatus: 'trial',
-      trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      trialStartedAt: new Date(),
+      trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
+      premiumActivatedAt: null,
+      stripeCustomerId: null,
+      stripeSubscriptionId: null,
+      lastReminderSent: null
     });
 
     await user.save();
@@ -85,7 +91,9 @@ router.post('/register', async (req, res) => {
         birthdate: user.birthdate,
         sex: user.sex,
         location: user.location,
-        achievements: user.achievements
+        achievements: user.achievements,
+        subscriptionStatus: user.subscriptionStatus, // ← Include this
+        trialEndsAt: user.trialEndsAt // ← Include this
       }
     });
   } catch (error) {

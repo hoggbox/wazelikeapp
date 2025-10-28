@@ -126,27 +126,38 @@ const userSchema = new mongoose.Schema({
       message: 'Maximum 10 offline regions allowed'
     }
   },
-  // Add these fields to the User schema
+  // Subscription fields with proper defaults
+  subscriptionStatus: {
+    type: String,
+    enum: ['trial', 'active', 'cancelled', 'expired', 'past_due'],
+    default: 'trial' // ← Default to trial for new users
+  },
+  trialStartedAt: {
+    type: Date,
+    default: Date.now
+  },
   trialEndsAt: {
     type: Date,
     default: function() {
-      // Check if document is being created (isNew is true during save)
-      // OR if trialEndsAt doesn't exist yet (for existing docs without trial)
-      if (this.isNew || !this.trialEndsAt) {
-        return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      }
-      return undefined; // Preserve existing value
+      return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from creation
     }
   },
-  subscriptionStatus: {
-    type: String,
-    enum: ['trial', 'active', 'past_due', 'cancelled', 'inactive'],
-    default: 'trial'
+  premiumActivatedAt: {
+    type: Date,
+    default: null
   },
-  stripeCustomerId: String,
-  stripeSubscriptionId: String,
-  premiumActivatedAt: Date,
-  lastReminderSent: Date,
+  stripeCustomerId: {
+    type: String,
+    default: null
+  },
+  stripeSubscriptionId: {
+    type: String,
+    default: null
+  },
+  lastReminderSent: {
+    type: Date,
+    default: null
+  },
   reminderCount: {
     type: Number,
     default: 0

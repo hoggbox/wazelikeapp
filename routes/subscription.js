@@ -15,26 +15,48 @@ const stripeLimit = rateLimit({
 // Check subscription status
 router.get('/status', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id)
-      .select('subscriptionStatus trialEndsAt premiumActivatedAt lastReminderSent');
-    
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     const now = new Date();
     const isPremium = user.subscriptionStatus === 'active';
-    const isTrialActive = user.trialEndsAt && user.trialEndsAt > now && user.subscriptionStatus === 'trial';
-    const trialDaysRemaining = isTrialActive 
-      ? Math.ceil((user.trialEndsAt - now) / (1000 * 60 * 60 * 24))
-      : 0;
+    
+    // Calculate trial status
+    let isTrialActive = false;
+    let trialDaysRemaining = 0;
+    
+    if (user.subscriptionStatus === 'trial' && user.trialEndsAt) {
+      isTrialActive = user.trialEndsAt > now;
+      if (isTrialActive) {
+        trialDaysRemaining = Math.ceil((user.trialEndsAt - now) / (24 * 60 * 60 * 1000));
+      } else {
+        // Trial expired - update user
+        user.subscriptionStatus = 'expired';
+        await user.save();
+      }
+    }
+
+    console.log('📊 Subscription Status Check:', {
+      userId: user._id,
+      email: user.email,
+      subscriptionStatus: user.subscriptionStatus,
+      isPremium,
+      isTrialActive,
+      trialDaysRemaining,
+      trialEndsAt: user.trialEndsAt
+    });
 
     res.json({
       isPremium,
       isTrialActive,
       trialDaysRemaining,
       trialEndsAt: user.trialEndsAt,
-      subscriptionStatus: user.subscriptionStatus,
-      lastReminderSent: user.lastReminderSent
+      subscriptionStatus: user.subscriptionStatus
     });
   } catch (error) {
-    console.error('Error checking subscription:', error);
+    console.error('Error checking subscription status:', error);
     res.status(500).json({ error: 'Failed to check subscription status' });
   }
 });
