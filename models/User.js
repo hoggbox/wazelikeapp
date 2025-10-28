@@ -130,7 +130,11 @@ const userSchema = new mongoose.Schema({
   trialEndsAt: {
     type: Date,
     default: function() {
-      return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+      // Only set trial for NEW users (no _id yet)
+      if (!this._id) {
+        return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      }
+      return undefined; // Preserve existing value on updates
     }
   },
   subscriptionStatus: {

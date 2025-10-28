@@ -1399,7 +1399,7 @@
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-       
+      
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1414,11 +1414,11 @@
               level: 'error'
             });
           }
-       
+      
           if (fallback) {
             return fallback(error);
           }
-       
+      
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -1906,12 +1906,12 @@
           lng < -180 || lng > 180) {
         throw new Error('Invalid coordinates');
       }
-   
+  
       const token = TokenManager.get();
       if (!TokenManager.isValid()) {
         throw new Error('Invalid token');
       }
-   
+  
       const response = await fetchWithRetry('/api/geocode', {
         method: 'POST',
         headers: {
@@ -1923,7 +1923,7 @@
           lng: parseFloat(lng.toFixed(6))
         })
       });
-   
+  
       if (!response.ok) {
         throw new Error('Geocoding failed');
       }
@@ -2988,11 +2988,11 @@
       },
       async process() {
         if (!navigator.onLine || this.queue.length === 0) return;
-   
+  
         const pending = [...this.queue];
         this.queue = [];
         this.save();
-   
+  
         for (const action of pending) {
           try {
             await this.executeAction(action);
@@ -3001,7 +3001,7 @@
             this.queue.push(action); // Re-queue
           }
         }
-   
+  
         this.save();
       },
       async executeAction(action) {
@@ -3023,23 +3023,23 @@
       check() {
         const now = Date.now();
         const issues = [];
-   
+  
         // Check GPS
         if (navState.isNavigating && now - this.lastGPSUpdate > 10000) {
           issues.push('GPS signal lost');
         }
-   
+  
         // Check Socket
         if (socket && !socket.connected) {
           issues.push('Server connection lost');
         }
-   
+  
         // Check token expiration
         if (!TokenManager.isValid()) {
           issues.push('Session expired');
           this.handleSessionExpired();
         }
-   
+  
         // Check memory usage (if available)
         if (performance.memory) {
           const usedMB = performance.memory.usedJSHeapSize / 1048576;
@@ -3048,12 +3048,12 @@
             console.warn('Memory usage:', usedMB.toFixed(2), 'MB');
           }
         }
-   
+  
         if (issues.length > 0) {
           console.warn('Health check issues:', issues);
           this.reportIssues(issues);
         }
-   
+  
         return issues.length === 0;
       },
       handleSessionExpired() {
@@ -3461,7 +3461,7 @@
             options.headers['Authorization'] = `Bearer ${token}`;
           }
           const response = await fetch(url, options);
-       
+      
           // Check for rate limiting
           if (response.status === 429) {
             const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
@@ -3470,7 +3470,7 @@
             await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
             continue;
           }
-       
+      
           if (response.ok) return response;
           if (response.status === 401) {
             const refreshed = await refreshToken();
@@ -3493,51 +3493,52 @@
       }
     }
     async function refreshToken() {
-      try {
-        const token = TokenManager.get();
-        if (!TokenManager.isValid()) {
-          throw new Error('Invalid token format in storage');
-        }
-        console.log('Refreshing token:', token.substring(0, 20) + '...');
-        const response = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          mode: 'cors',
-          credentials: 'include',
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        console.log('Token refresh response:', { status: response.status, ok: response.ok });
-        const data = await response.json();
-        if (response.ok) {
-          TokenManager.set(data.token);
-          console.log('Token refreshed:', data.token.substring(0, 20) + '...');
-          return true;
-        } else {
-          throw new Error('Token refresh failed: ' + (data.error || 'Unknown error'));
-        }
-      } catch (error) {
-        console.error('Token refresh failed:', error);
-        showToast('Session expired. Please log in again.');
-        TokenManager.clear();
-        document.getElementById('auth-container').style.display = 'flex';
-        return false;
-      }
+  try {
+    const token = TokenManager.get();
+    if (!token || !TokenManager.isValid()) {
+      throw new Error('No valid token to refresh');
     }
-    function isDuplicateAlert(alert) {
-      // Clean up expired items inline
-      const now = Date.now();
-      for (const [key, value] of alertCache.entries()) {
-        if (now - value.timestamp > CONFIG.ALERT_CACHE_TTL) {
-          alertCache.delete(key);
-        }
-      }
-      const key = `${alert.type}-${alert.location.coordinates[0].toFixed(4)}-${alert.location.coordinates[1].toFixed(4)}`;
-      const cached = alertCache.get(key);
-      if (cached && now - cached.timestamp < 5000) {
-        return true;
-      }
-      alertCache.set(key, { timestamp: now, id: alert._id });
+    
+    const response = await fetch('/api/auth/refresh', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      TokenManager.set(data.token);
+      return true;
+    } else if (response.status === 401) {
+      // Token can't be refreshed - log out
+      TokenManager.clear();
+      document.getElementById('auth-container').style.display = 'flex';
+      showToast('Session expired. Please log in again.');
       return false;
     }
+    throw new Error('Refresh failed');
+  } catch (error) {
+    console.error('Token refresh failed:', error);
+    TokenManager.clear();
+    document.getElementById('auth-container').style.display = 'flex';
+    return false;
+  }
+}
+    function isDuplicateAlert(alert) {
+  const now = Date.now();
+  
+  // Create fuzzy key (round to ~10m precision)
+  const lat = Math.round(alert.location.coordinates[1] * 1000) / 1000;
+  const lng = Math.round(alert.location.coordinates[0] * 1000) / 1000;
+  const key = `${alert.type}-${lat}-${lng}`;
+  
+  const cached = alertCache.get(key);
+  if (cached && now - cached.timestamp < 30000) { // 30s window
+    return true;
+  }
+  
+  alertCache.set(key, { timestamp: now, id: alert._id });
+  return false;
+}
     async function confirmAlertLocation(location, alertType) {
       try {
         const token = TokenManager.get();
@@ -5993,39 +5994,47 @@ function updateUIForSubscription() {
   } else {
     trialBanner.style.display = 'none';
   }
-  // Lock/unlock premium features
   PREMIUM_FEATURES.forEach(featureId => {
     const element = document.getElementById(featureId);
     if (!element) return;
+    
     if (hasAccess) {
       element.classList.remove('locked-feature');
       element.disabled = false;
+      element.style.pointerEvents = 'auto';
+      element.onclick = null; // Remove upgrade handler
     } else {
       element.classList.add('locked-feature');
       element.disabled = true;
-      // Add click handler to show upgrade modal
+      element.style.pointerEvents = 'auto'; // Allow click for modal
       element.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
         showUpgradeModal('feature_click');
+        return false;
       };
     }
   });
-  // Special handling for report button types
-  if (!hasAccess) {
-    document.querySelectorAll('.report-button').forEach(btn => {
-      const alertType = btn.getAttribute('data-alert-type');
-      if (['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(alertType)) {
-        btn.classList.add('locked-feature');
-        btn.onclick = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          showUpgradeModal('feature_click');
-          return false;
-        };
-      }
-    });
-  }
+  
+  // Lock premium report types
+  document.querySelectorAll('.report-button').forEach(btn => {
+    const alertType = btn.getAttribute('data-alert-type');
+    const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(alertType);
+    
+    if (isPremiumType && !hasAccess) {
+      btn.classList.add('locked-feature');
+      btn.style.pointerEvents = 'auto';
+      btn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showUpgradeModal('feature_click');
+        return false;
+      };
+    } else {
+      btn.classList.remove('locked-feature');
+      btn.onclick = null; // Use default handler
+    }
+  });
   console.log('UI updated for subscription:', { hasAccess, isPremium: subscriptionStatus.isPremium, isTrialActive: subscriptionStatus.isTrialActive });
 }
 function showUpgradeModal(source) {
@@ -6096,44 +6105,32 @@ async function handlePaymentCallback() {
   const urlParams = new URLSearchParams(window.location.search);
   const sessionId = urlParams.get('session_id');
   const paymentStatus = urlParams.get('payment');
+  
   if (sessionId && paymentStatus === 'success') {
-    try {
-      const token = TokenManager.get();
-      const response = await fetchWithRetry('/api/subscription/verify-payment', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ sessionId })
-      });
-      if (!response.ok) throw new Error('Payment verification failed');
-      const data = await response.json();
-      if (data.success) {
-        showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
-        subscriptionStatus.isPremium = true;
-        updateUIForSubscription();
- 
-        // Add confetti effect (optional - requires canvas-confetti library)
-        // Or create a simple celebration animation
+    showToast('🎉 Payment successful! Verifying subscription...', 5000);
+    
+    // Poll subscription status instead of verify-payment endpoint
+    let attempts = 0;
+    const checkStatus = async () => {
+      attempts++;
+      const status = await checkSubscriptionStatus(); // Existing function
+      
+      if (subscriptionStatus.isPremium) {
+        showToast('✅ Premium activated! Reloading...', 3000);
         createCelebration();
- 
-        // Clear caches and hard reload to ensure fresh content
-        if ('caches' in window) {
-          caches.keys().then((names) => {
-            names.forEach((name) => {
-              caches.delete(name);
-            });
-          });
-        }
-        // Clean URL and reload
+        setTimeout(() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+          window.location.reload();
+        }, 2000);
+      } else if (attempts < 10) {
+        setTimeout(checkStatus, 2000); // Poll every 2s for 20s max
+      } else {
+        showToast('Payment received. Refresh page if premium not activated.', 5000);
         window.history.replaceState({}, document.title, window.location.pathname);
-        window.location.reload();
       }
-    } catch (error) {
-      console.error('Error verifying payment:', error);
-      showToast('Payment verification failed. Please contact support.');
-    }
+    };
+    
+    checkStatus();
   } else if (paymentStatus === 'cancelled') {
     showToast('Payment cancelled. You can upgrade anytime from Settings.');
     window.history.replaceState({}, document.title, window.location.pathname);

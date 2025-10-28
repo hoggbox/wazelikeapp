@@ -1,4 +1,4 @@
-const CACHE_NAME = 'waze-gps-v1.0.3'; // Bump version on updates to invalidate cache
+const CACHE_NAME = 'waze-gps-v' + Date.now(); // Force bust on every deploy
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
@@ -150,22 +150,13 @@ self.addEventListener('fetch', event => {
   );
 });
 
-// On update, clean old caches (add to activate event if not present)
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(
-        cacheNames.map(cacheName => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
+        cacheNames.filter(name => name !== CACHE_NAME)
+          .map(name => caches.delete(name))
       );
-    })
+    }).then(() => self.clients.claim())
   );
-  // Force clients to reload for fresh content after SW update
-  event.waitUntil(clients.claim());
 });
-
-// Tip: On your server, add Cache-Control: no-cache to /index.html to encourage fresh fetches

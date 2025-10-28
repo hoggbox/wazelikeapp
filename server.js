@@ -26,7 +26,18 @@ const io = new Server(server, {
 app.set('trust proxy', 1);
 // Middleware
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      process.env.CLIENT_URL,
+      'http://localhost:3000',
+      'https://yourdomain.com' // Add your production domain
+    ];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('CORS not allowed'));
+    }
+  },
   credentials: true
 }));
 app.use(express.json());
@@ -44,6 +55,11 @@ const limiter = rateLimit({
   legacyHeaders: false
 });
 app.use(limiter);
+const stripeLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // 5 requests per minute
+  message: 'Too many payment requests, try again later'
+});
 // Serve index.html for root route
 app.get('/', (req, res) => {
   console.log('Serving index.html for root route');
@@ -111,7 +127,6 @@ async function connectDB() {
     }
   }
 }
-connectDB();
 // VAPID Keys
 const vapidKeys = {
   publicKey: process.env.VAPID_PUBLIC_KEY || 'BNclrc97FLwjMZNchCLjpVHHOMtP4FfxR9gvXZAT0tv0rzPREQ91v37M-Aa-D0hAygzmIKhMDeSLpmhG-NohTvs',
@@ -138,10 +153,10 @@ app.post('/api/geocode', authMiddleware, async (req, res) => {
   res.json(data);
 });
 // Stripe Webhook Handler
-app.post('/api/webhooks/stripe', express.raw({type: 'application/json'}), async (req, res) => {
+app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
- 
+  
   try {
     event = stripe.webhooks.constructEvent(
       req.body,
@@ -149,101 +164,51 @@ app.post('/api/webhooks/stripe', express.raw({type: 'application/json'}), async 
       process.env.STRIPE_WEBHOOK_SECRET
     );
   } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
+    console.error('⚠️ Webhook signature verification failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
- 
-  // Handle the event
-  switch (event.type) {
-    case 'checkout.session.completed':
-      const session = event.data.object;
-      await handleSuccessfulPayment(session);
-      break;
-   
-    case 'customer.subscription.deleted':
-      const subscription = event.data.object;
-      await handleCancellation(subscription);
-      break;
-   
-    case 'invoice.payment_failed':
-      await handleFailedPayment(event.data.object);
-      break;
+
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+        const session = event.data.object;
+        const userId = session.client_reference_id || session.metadata?.userId;
+        if (userId) {
+          await User.findByIdAndUpdate(userId, {
+            subscriptionStatus: 'active',
+            stripeSubscriptionId: session.subscription,
+            stripeCustomerId: session.customer,
+            premiumActivatedAt: new Date(),
+            trialEndsAt: null
+          });
+          console.log('✅ Premium activated via webhook:', userId);
+        }
+        break;
+      
+      case 'customer.subscription.deleted':
+      case 'customer.subscription.updated':
+        const sub = event.data.object;
+        await User.findOneAndUpdate(
+          { stripeSubscriptionId: sub.id },
+          { subscriptionStatus: sub.status === 'canceled' ? 'cancelled' : sub.status }
+        );
+        break;
+      
+      case 'invoice.payment_failed':
+        const invoice = event.data.object;
+        await User.findOneAndUpdate(
+          { stripeCustomerId: invoice.customer },
+          { subscriptionStatus: 'past_due' }
+        );
+        break;
+    }
+    
+    res.json({received: true});
+  } catch (error) {
+    console.error('Webhook handler error:', error);
+    res.status(400).send(`Webhook Error: ${error.message}`);
   }
- 
-  res.json({received: true});
 });
-
-async function handleSuccessfulPayment(session) {
-  try {
-    const userId = session.client_reference_id || session.metadata?.userId;
-    if (!userId) {
-      console.error('No userId in session:', session.id);
-      return;
-    }
-
-    await User.findByIdAndUpdate(userId, {
-      subscriptionStatus: 'active',
-      stripeSubscriptionId: session.subscription,
-      stripeCustomerId: session.customer,
-      premiumActivatedAt: new Date(),
-      trialEndsAt: null
-    });
-    
-    console.log('✅ Payment successful for user:', userId);
-  } catch (error) {
-    console.error('❌ Payment handler error:', error);
-  }
-}
-
-async function handleCancellation(subscription) {
-  try {
-    const userId = subscription.metadata?.userId;
-    if (!userId) {
-      // Fallback: find by Stripe subscription ID
-      const user = await User.findOne({ stripeSubscriptionId: subscription.id });
-      if (!user) {
-        console.error('No user found for cancelled subscription:', subscription.id);
-        return;
-      }
-      userId = user._id;
-    }
-
-    await User.findByIdAndUpdate(userId, {
-      subscriptionStatus: 'cancelled',
-      trialEndsAt: null
-    });
-    
-    console.log('✅ Subscription cancelled for user:', userId);
-  } catch (error) {
-    console.error('❌ Cancellation handler error:', error);
-  }
-}
-
-async function handleFailedPayment(invoice) {
-  try {
-    const subscriptionId = invoice.subscription;
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-    const userId = subscription.metadata?.userId;
-    if (!userId) {
-      // Fallback: find by Stripe subscription ID
-      const user = await User.findOne({ stripeSubscriptionId: subscriptionId });
-      if (!user) {
-        console.error('No user found for failed payment:', subscriptionId);
-        return;
-      }
-      userId = user._id;
-    }
-
-    await User.findByIdAndUpdate(userId, {
-      subscriptionStatus: 'inactive',
-      trialEndsAt: null
-    });
-    
-    console.log('❌ Payment failed for user:', userId);
-  } catch (error) {
-    console.error('❌ Failed payment handler error:', error);
-  }
-}
 // Alert Posting Endpoint
 app.post('/api/alerts', authMiddleware, async (req, res) => {
   try {
@@ -837,7 +802,7 @@ app.delete('/api/users/:id', authMiddleware, async (req, res) => {
 });
 
 // Stripe Subscription Routes
-app.post('/api/subscription/create-checkout', authMiddleware, async (req, res) => {
+app.post('/api/subscription/create-checkout', stripeLimit, authMiddleware, async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ error: 'User not found' });
@@ -873,28 +838,6 @@ app.post('/api/subscription/create-checkout', authMiddleware, async (req, res) =
   } catch (error) {
     console.error('Checkout creation error:', error);
     res.status(500).json({ error: 'Failed to create checkout session' });
-  }
-});
-
-app.post('/api/subscription/verify-payment', authMiddleware, async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
-    
-    if (session.payment_status === 'paid') {
-      await User.findByIdAndUpdate(req.user._id, {
-        subscriptionStatus: 'active',
-        stripeSubscriptionId: session.subscription,
-        premiumActivatedAt: new Date(),
-        trialEndsAt: null
-      });
-      return res.json({ success: true });
-    }
-    
-    res.status(400).json({ success: false, error: 'Payment not completed' });
-  } catch (error) {
-    console.error('Payment verification error:', error);
-    res.status(500).json({ error: 'Failed to verify payment' });
   }
 });
 
@@ -976,5 +919,13 @@ io.on('connection', (socket) => {
   });
 });
 // Start Server
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+connectDB().then(() => {
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`🔗 MongoDB: ${mongoose.connection.readyState === 1 ? 'Connected' : 'Disconnected'}`);
+  });
+}).catch(err => {
+  console.error('💀 Failed to start server:', err);
+  process.exit(1);
+});
