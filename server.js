@@ -15,30 +15,57 @@ const authRoutes = require('./routes/auth');
 const authMiddleware = require('./middleware/auth');
 const app = express();
 const server = http.createServer(app);
+// CORS Configuration - Allow all origins in production (or specify your Render URL)
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  'http://localhost:3000',
+  'https://your-app-name.onrender.com', // Replace with your actual Render URL
+  /\.onrender\.com$/ // Allow all Render subdomains (optional)
+];
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
-    methods: ['GET', 'POST', 'DELETE', 'PUT'],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const isAllowed = allowedOrigins.some(allowedOrigin => {
+        if (allowedOrigin instanceof RegExp) {
+          return allowedOrigin.test(origin);
+        }
+        return allowedOrigin === origin;
+      });
+      callback(null, isAllowed);
+    },
+    methods: ['GET', 'POST'],
     credentials: true
   }
 });
 // Enable trust proxy for hosting platforms
 app.set('trust proxy', 1);
-// Middleware
+
 app.use(cors({
   origin: (origin, callback) => {
-    const allowedOrigins = [
-      process.env.CLIENT_URL,
-      'http://localhost:3000',
-      'https://yourdomain.com' // Add your production domain
-    ];
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Allow requests with no origin (like mobile apps or Postman)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Check if origin matches any allowed pattern
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (allowedOrigin instanceof RegExp) {
+        return allowedOrigin.test(origin);
+      }
+      return allowedOrigin === origin;
+    });
+    
+    if (isAllowed) {
       callback(null, true);
     } else {
+      console.error('CORS blocked origin:', origin);
       callback(new Error('CORS not allowed'));
     }
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.raw({type: 'application/json'})); // For Stripe webhook
