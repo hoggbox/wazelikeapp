@@ -1,5 +1,23 @@
 // server.js (Updated)
 require('dotenv').config(); // Load environment variables
+
+// Environment Variables Validation
+const requiredEnvVars = [
+  'MONGODB_URI',
+  'JWT_SECRET',
+  'STRIPE_SECRET_KEY',
+  'STRIPE_WEBHOOK_SECRET',
+  'STRIPE_PRICE_ID',
+  'CLIENT_URL',
+  'GOOGLE_MAPS_API_KEY'
+];
+
+const missing = requiredEnvVars.filter(key => !process.env[key]);
+if (missing.length > 0) {
+  console.error('❌ Missing required environment variables:', missing);
+  process.exit(1);
+}
+
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -13,6 +31,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const User = require('./models/User');
 const authRoutes = require('./routes/auth');
 const authMiddleware = require('./middleware/auth');
+const subscriptionRoutes = require('./routes/subscription'); // ← NEW: Mount subscription routes
 const app = express();
 const server = http.createServer(app);
 const allowedOrigins = [
@@ -55,6 +74,17 @@ const io = new Server(server, {
 });
 // Enable trust proxy for hosting platforms
 app.set('trust proxy', 1);
+
+// Force HTTPS in production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    if (req.header('x-forwarded-proto') !== 'https') {
+      res.redirect(`https://${req.header('host')}${req.url}`);
+    } else {
+      next();
+    }
+  });
+}
 
 app.use(cors(corsOptions));
 app.use(express.json());
@@ -125,6 +155,26 @@ async function connectDB() {
         console.log('Created unique index on email');
       }
       console.log('=== MongoDB Connection Complete ===');
+
+      // Check for expired trials every hour
+      setInterval(async () => {
+        try {
+          const now = new Date();
+          const result = await User.updateMany(
+            { 
+              subscriptionStatus: 'trial',
+              trialEndsAt: { $lt: now }
+            },
+            { subscriptionStatus: 'expired' }
+          );
+          if (result.modifiedCount > 0) {
+            console.log(`Expired ${result.modifiedCount} trial subscriptions`);
+          }
+        } catch (error) {
+          console.error('Error expiring trials:', error);
+        }
+      }, 60 * 60 * 1000); // Every hour
+
       return;
     } catch (error) {
       console.error('❌ MongoDB connection error:', error.message, error.stack);
@@ -160,6 +210,7 @@ app.get('/api/vapid-public-key', (req, res) => {
   res.json({ publicKey: vapidKeys.publicKey });
 });
 app.use('/api/auth', authRoutes);
+app.use('/api/subscription', subscriptionRoutes); // ← NEW: Mounted subscription routes
 // Geocode Proxy Endpoint
 app.post('/api/geocode', authMiddleware, async (req, res) => {
   const { lat, lng } = req.body;
@@ -183,21 +234,45 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
 
   try {
     switch (event.type) {
-      case 'checkout.session.completed': // ← THIS IS CRITICAL
+      case 'checkout.session.completed':
         const session = event.data.object;
         const userId = session.client_reference_id || session.metadata?.userId;
-        if (userId && mongoose.Types.ObjectId.isValid(userId)) {
-          const user = await User.findByIdAndUpdate(userId, {
-            subscriptionStatus: 'active',
-            stripeSubscriptionId: session.subscription,
-            stripeCustomerId: session.customer,
-            premiumActivatedAt: new Date(),
-            trialEndsAt: new Date() // Mark trial as ended
-          }, { new: true });
-          console.log('✅ Premium activated via webhook:', userId, user?.email);
-        } else {
+        
+        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
           console.error('❌ Invalid userId in webhook:', userId);
+          return res.status(400).send('Invalid userId');
         }
+
+        // Add 3-second delay to ensure client redirect completes
+        setTimeout(async () => {
+          try {
+            const user = await User.findByIdAndUpdate(userId, {
+              subscriptionStatus: 'active',
+              stripeSubscriptionId: session.subscription,
+              stripeCustomerId: session.customer,
+              premiumActivatedAt: new Date(),
+              trialEndsAt: null,
+              lastReminderSent: null
+            }, { new: true });
+            
+            if (!user) {
+              console.error('❌ User not found for webhook:', userId);
+              return;
+            }
+            
+            console.log('✅ Premium activated (delayed):', userId, user.email);
+            
+            // Emit real-time update via Socket.IO
+            io.to(userId).emit('premiumActivated', {
+              isPremium: true,
+              activatedAt: new Date()
+            });
+          } catch (error) {
+            console.error('❌ Webhook update failed:', error);
+          }
+        }, 3000); // 3 second delay
+        
+        // Respond immediately to Stripe
         break;
       
       case 'customer.subscription.deleted':
@@ -820,89 +895,6 @@ app.delete('/api/users/:id', authMiddleware, async (req, res) => {
   } catch (error) {
     console.error('Error deleting user:', error.message, error.stack);
     res.status(error.name === 'TokenExpiredError' ? 401 : 500).json({ error: 'Failed to delete user', details: error.message });
-  }
-});
-
-// Stripe Subscription Routes
-app.post('/api/subscription/create-checkout', stripeLimit, authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user) return res.status(404).json({ error: 'User not found' });
-
-    // Create or retrieve Stripe customer
-    let customerId = user.stripeCustomerId;
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: { userId: user._id.toString() }
-      });
-      customerId = customer.id;
-      user.stripeCustomerId = customerId;
-      await user.save();
-    }
-
-    // Create checkout session
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      client_reference_id: user._id.toString(),
-      payment_method_types: ['card'],
-      line_items: [{
-        price: process.env.STRIPE_PRICE_ID, // Set in .env
-        quantity: 1
-      }],
-      mode: 'subscription',
-      success_url: `${process.env.CLIENT_URL}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.CLIENT_URL}/?payment=cancelled`,
-      metadata: { userId: user._id.toString() }
-    });
-
-    res.json({ url: session.url });
-  } catch (error) {
-    console.error('Checkout creation error:', error);
-    res.status(500).json({ error: 'Failed to create checkout session' });
-  }
-});
-
-app.get('/api/subscription/status', authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id)
-      .select('subscriptionStatus trialEndsAt premiumActivatedAt');
-    
-    const now = new Date();
-    const isPremium = user.subscriptionStatus === 'active';
-    const isTrialActive = user.trialEndsAt && user.trialEndsAt > now && user.subscriptionStatus === 'trial';
-    const trialDaysRemaining = isTrialActive 
-      ? Math.ceil((user.trialEndsAt - now) / (24 * 60 * 60 * 1000))
-      : 0;
-
-    res.json({
-      isPremium,
-      isTrialActive,
-      trialDaysRemaining,
-      trialEndsAt: user.trialEndsAt,
-      subscriptionStatus: user.subscriptionStatus
-    });
-  } catch (error) {
-    console.error('Subscription status error:', error);
-    res.status(500).json({ error: 'Failed to get subscription status' });
-  }
-});
-
-app.post('/api/subscription/cancel', authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-    if (!user.stripeSubscriptionId) {
-      return res.status(400).json({ error: 'No active subscription' });
-    }
-
-    await stripe.subscriptions.update(user.stripeSubscriptionId, {
-      cancel_at_period_end: true
-    });
-
-    res.json({ message: 'Subscription will cancel at period end' });
-  } catch (error) {
-    console.error('Subscription cancellation error:', error);
-    res.status(500).json({ error: 'Failed to cancel subscription' });
   }
 });
 // Error Handling Middleware

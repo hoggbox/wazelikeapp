@@ -5894,6 +5894,11 @@ function initSocket(token, userId) {
           }
         }
       });
+      socket.on('premiumActivated', (data) => {
+        console.log('Premium activated via Socket.IO:', data);
+        checkSubscriptionStatus(); // Refresh status
+        showToast('🎉 Premium activated! Welcome!');
+      });
 }
     function initApp() {
       console.log('Initializing app...');
@@ -6014,7 +6019,10 @@ function updateUIForSubscription() {
   const trialDaysSpan = document.getElementById('trial-days-remaining');
   const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
   const now = Date.now();
-  const shouldShowBanner = subscriptionStatus.isTrialActive && !subscriptionStatus.isPremium && (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000);
+  const shouldShowBanner = subscriptionStatus.isTrialActive && 
+                           !subscriptionStatus.isPremium && // ← Ensure not premium
+                           subscriptionStatus.trialDaysRemaining > 0 && // ← Add days check
+                           (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000);
   if (shouldShowBanner) {
     trialBanner.style.display = 'flex';
     trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;

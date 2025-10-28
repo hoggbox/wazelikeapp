@@ -1,4 +1,3 @@
-// sw.js - Replace entire file
 const CACHE_VERSION = 'v1.0.5'; // ← Increment this on every deploy
 const CACHE_NAME = `waze-gps-${CACHE_VERSION}`;
 const ASSETS_TO_CACHE = [

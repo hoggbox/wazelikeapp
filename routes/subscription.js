@@ -2,23 +2,34 @@ const express = require('express');
 const router = express.Router();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const User = require('../models/User');
-const auth = require('../middleware/auth');
+const authMiddleware = require('../middleware/auth'); // Standardized to match server.js
+const rateLimit = require('express-rate-limit');
+
+// Rate limit for Stripe operations
+const stripeLimit = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // 5 requests per minute
+  message: 'Too many payment requests, try again later'
+});
 
 // Check subscription status
-router.get('/status', auth, async (req, res) => {
+router.get('/status', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.userId);
+    const user = await User.findById(req.user._id)
+      .select('subscriptionStatus trialEndsAt premiumActivatedAt lastReminderSent');
     
     const now = new Date();
-    const trialEnd = user.trialEndsAt;
-    const isTrialActive = trialEnd && now < trialEnd;
     const isPremium = user.subscriptionStatus === 'active';
-    
+    const isTrialActive = user.trialEndsAt && user.trialEndsAt > now && user.subscriptionStatus === 'trial';
+    const trialDaysRemaining = isTrialActive 
+      ? Math.ceil((user.trialEndsAt - now) / (1000 * 60 * 60 * 24))
+      : 0;
+
     res.json({
       isPremium,
       isTrialActive,
+      trialDaysRemaining,
       trialEndsAt: user.trialEndsAt,
-      trialDaysRemaining: isTrialActive ? Math.ceil((trialEnd - now) / (1000 * 60 * 60 * 24)) : 0,
       subscriptionStatus: user.subscriptionStatus,
       lastReminderSent: user.lastReminderSent
     });
@@ -29,150 +40,61 @@ router.get('/status', auth, async (req, res) => {
 });
 
 // Create Stripe checkout session
-router.post('/create-checkout', auth, async (req, res) => {
+router.post('/create-checkout', stripeLimit, authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.userId);
-    
+    const user = await User.findById(req.user._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // Create or retrieve Stripe customer
+    let customerId = user.stripeCustomerId;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { userId: user._id.toString() }
+      });
+      customerId = customer.id;
+      user.stripeCustomerId = customerId;
+      await user.save();
+    }
+
+    // Create checkout session
     const session = await stripe.checkout.sessions.create({
-      customer_email: user.email,
+      customer: customerId,
+      client_reference_id: user._id.toString(), // For webhook identification
       payment_method_types: ['card'],
-      line_items: [
-        {
-          price: process.env.STRIPE_PRICE_ID, // Your Stripe price ID
-          quantity: 1,
-        },
-      ],
+      line_items: [{
+        price: process.env.STRIPE_PRICE_ID, // Set in .env
+        quantity: 1
+      }],
       mode: 'subscription',
-      success_url: `${process.env.CLIENT_URL}?session_id={CHECKOUT_SESSION_ID}&payment=success`,
-      cancel_url: `${process.env.CLIENT_URL}?payment=cancelled`,
-      metadata: {
-        userId: req.userId
-      }
+      success_url: `${process.env.CLIENT_URL}/?payment=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.CLIENT_URL}/?payment=cancelled`,
+      metadata: { userId: user._id.toString() }
     });
 
-    res.json({ sessionId: session.id, url: session.url });
+    res.json({ url: session.url });
   } catch (error) {
-    console.error('Error creating checkout session:', error.code || error.message, { userId: req.userId });
-    res.status(500).json({ error: 'Failed to create checkout session', code: error.code });
+    console.error('Checkout creation error:', error);
+    res.status(500).json({ error: 'Failed to create checkout session' });
   }
 });
 
-// Verify payment and activate subscription (idempotent: safe to call multiple times)
-router.post('/verify-payment', auth, async (req, res) => {
+// Cancel subscription (set to cancel at period end)
+router.post('/cancel', authMiddleware, async (req, res) => {
   try {
-    const { sessionId } = req.body;
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Session ID required' });
+    const user = await User.findById(req.user._id);
+    if (!user.stripeSubscriptionId) {
+      return res.status(400).json({ error: 'No active subscription' });
     }
 
-    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['subscription'] });
+    await stripe.subscriptions.update(user.stripeSubscriptionId, {
+      cancel_at_period_end: true
+    });
 
-    if (session.payment_status === 'paid' && session.subscription) {
-      const user = await User.findById(req.userId);
-      if (user.subscriptionStatus !== 'active') { // Idempotent: only update if needed
-        user.subscriptionStatus = 'active';
-        user.stripeCustomerId = session.customer;
-        user.stripeSubscriptionId = session.subscription.id;
-        user.premiumActivatedAt = new Date();
-        // End trial if active
-        if (user.trialEndsAt && new Date() < user.trialEndsAt) {
-          user.trialEndsAt = new Date(); // Mark as ended
-        }
-        await user.save();
-
-        console.log(`Subscription activated for user ${req.userId} via session ${sessionId}`);
-      }
-      res.json({ success: true, isPremium: true });
-    } else {
-      res.status(400).json({ error: 'Payment not completed or no subscription' });
-    }
+    res.json({ message: 'Subscription will cancel at period end' });
   } catch (error) {
-    console.error('Error verifying payment:', error.code || error.message, { sessionId: req.body.sessionId, userId: req.userId });
-    res.status(500).json({ error: 'Failed to verify payment', code: error.code });
-  }
-});
-
-// Webhook for Stripe events (expanded with created event)
-router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    console.error('Webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  // Handle the event
-  try {
-    switch (event.type) {
-      case 'customer.subscription.created':
-        const createdSub = event.data.object;
-        await User.findOneAndUpdate(
-          { stripeSubscriptionId: createdSub.id },
-          { 
-            subscriptionStatus: 'active',
-            stripeCustomerId: createdSub.customer,
-            premiumActivatedAt: new Date()
-          }
-        );
-        console.log(`Subscription created via webhook: ${createdSub.id}`);
-        break;
-      case 'customer.subscription.deleted':
-        const deletedSub = event.data.object;
-        await User.findOneAndUpdate(
-          { stripeSubscriptionId: deletedSub.id },
-          { subscriptionStatus: 'cancelled' }
-        );
-        console.log(`Subscription deleted via webhook: ${deletedSub.id}`);
-        break;
-      case 'customer.subscription.updated':
-        const updatedSub = event.data.object;
-        await User.findOneAndUpdate(
-          { stripeSubscriptionId: updatedSub.id },
-          { subscriptionStatus: updatedSub.status }
-        );
-        console.log(`Subscription updated via webhook: ${updatedSub.id} to ${updatedSub.status}`);
-        break;
-      case 'invoice.payment_failed':
-        const failedInvoice = event.data.object;
-        await User.findOneAndUpdate(
-          { stripeCustomerId: failedInvoice.customer },
-          { subscriptionStatus: 'past_due' }
-        );
-        console.log(`Payment failed for invoice: ${failedInvoice.id}`);
-        break;
-      default:
-        console.log(`Unhandled webhook event: ${event.type}`);
-    }
-    res.json({ received: true });
-  } catch (error) {
-    console.error('Error handling webhook event:', error, { eventType: event.type });
-    res.status(400).send(`Webhook Error: ${error.message}`);
-  }
-});
-
-// Cancel subscription (idempotent)
-router.post('/cancel', auth, async (req, res) => {
-  try {
-    const user = await User.findById(req.userId);
-    
-    if (user.stripeSubscriptionId && user.subscriptionStatus === 'active') {
-      await stripe.subscriptions.cancel(user.stripeSubscriptionId);
-      user.subscriptionStatus = 'cancelled';
-      await user.save();
-      console.log(`Subscription cancelled for user ${req.userId}`);
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error cancelling subscription:', error.code || error.message, { userId: req.userId });
-    res.status(500).json({ error: 'Failed to cancel subscription', code: error.code });
+    console.error('Subscription cancellation error:', error);
+    res.status(500).json({ error: 'Failed to cancel subscription' });
   }
 });
 
