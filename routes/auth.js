@@ -57,7 +57,9 @@ router.post('/register', async (req, res) => {
       totalAlerts: 0,
       activeAlerts: 0,
       points: 0,
-      achievements: []
+      achievements: [],
+      subscriptionStatus: 'trial',
+      trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
 
     await user.save();

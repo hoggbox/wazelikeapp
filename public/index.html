@@ -33,6 +33,28 @@
       });
     }
   </script>
+  <script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    // Check for updates every 5 minutes
+    setInterval(() => reg.update(), 5 * 60 * 1000);
+    
+    // Listen for new SW waiting
+    reg.addEventListener('updatefound', () => {
+      const newWorker = reg.installing;
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          // New SW ready - prompt user or auto-reload
+          if (confirm('New version available! Reload to update?')) {
+            newWorker.postMessage({ type: 'SKIP_WAITING' });
+            window.location.reload();
+          }
+        }
+      });
+    });
+  });
+}
+</script>
   <style>
     * { box-sizing: border-box; }
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; font-family: Arial, sans-serif; }
@@ -1244,27 +1266,29 @@
     const BOUNDS_CHECK_INTERVAL = 1000;
     let lastHeadingUpdate = 0;
     const ProgrammaticUpdateManager = {
-      _isUpdating: false,
-      _callbacks: [],
-      start() {
-        this._isUpdating = true;
-        this._callbacks = [];
-      },
-      end(callback = null) {
-        if (callback) {
-          this._callbacks.push(callback);
-        }
-        // Use requestAnimationFrame for next frame callback instead of setTimeout
-        requestAnimationFrame(() => {
-          this._isUpdating = false;
-          this._callbacks.forEach(cb => cb());
-          this._callbacks = [];
-        });
-      },
-      get isActive() {
-        return this._isUpdating;
-      }
-    };
+  _isUpdating: false,
+  _callbacks: [],
+  _startTime: 0, // ← Add this
+  start() {
+    this._isUpdating = true;
+    this._startTime = Date.now(); // ← Track when started
+    this._callbacks = [];
+  },
+  end(callback = null) {
+    if (callback) {
+      this._callbacks.push(callback);
+    }
+    // Use requestAnimationFrame for next frame callback instead of setTimeout
+    requestAnimationFrame(() => {
+      this._isUpdating = false;
+      this._callbacks.forEach(cb => cb());
+      this._callbacks = [];
+    });
+  },
+  get isActive() {
+    return this._isUpdating;
+  }
+};
     let navState = {
       currentRoute: null,
       isNavigating: false,
@@ -2179,10 +2203,14 @@
         // FIXED: Log ProgrammaticUpdateManager state
         setInterval(() => {
           if (ProgrammaticUpdateManager.isActive) {
-            console.warn('ProgrammaticUpdateManager stuck in active state');
-            ProgrammaticUpdateManager._isUpdating = false;
+            const now = Date.now();
+            if (now - ProgrammaticUpdateManager._startTime > 5000) { // Stuck for 5s
+              console.error('ProgrammaticUpdateManager stuck, force resetting');
+              ProgrammaticUpdateManager._isUpdating = false;
+              ProgrammaticUpdateManager._callbacks = [];
+            }
           }
-        }, 10000);
+        }, 5000);
         // Viewport-based marker culling
         const debouncedUpdateVisibleMarkers = debounce(updateVisibleMarkers, 500);
         map.addListener('idle', debouncedUpdateVisibleMarkers);
@@ -2210,39 +2238,44 @@
       console.log(`Visible markers: ${visible.size}/${markers.size}`);
     }
     function updateMapHeading(targetHeading) {
-      console.log('updateMapHeading called:', { targetHeading });
-      if (navState.mapOrientation !== 'heading-up') return;
-      // Cancel existing tween
-      if (currentHeadingTween) {
-        currentHeadingTween.stop();
-        currentHeadingTween = null;
-      }
-      const currentHeading = map.getHeading() || 0;
-      const delta = normalizeHeadingDelta(currentHeading, targetHeading);
-      // Skip if change is tiny
-      if (Math.abs(delta) < 3) return;
-      // FIXED: Add failsafe for infinite tweens
-      const tweenTimeoutId = setTimeout(() => {
-        if (currentHeadingTween) {
-          currentHeadingTween.stop();
-          ProgrammaticUpdateManager.end();
-          console.error('Heading tween timeout, force stopping');
-        }
-      }, 5000);
-      currentHeadingTween = new TWEEN.Tween({ heading: currentHeading })
-        .to({ heading: currentHeading + delta }, 300)
-        .easing(TWEEN.Easing.Quadratic.Out)
-        .onStart(() => {
-          // Clear timeout if tween completes early, but since short, optional
-        })
-        .onUpdate(obj => map.setHeading(obj.heading))
-        .onComplete(() => {
-          clearTimeout(tweenTimeoutId);
-          currentHeadingTween = null;
-        })
-        .start();
-      console.log('Heading tween started:', { current: currentHeading, target: targetHeading, delta });
+  if (navState.mapOrientation !== 'heading-up') return;
+  
+  // Cancel existing tween
+  if (currentHeadingTween) {
+    currentHeadingTween.stop();
+    TWEEN.remove(currentHeadingTween);
+    currentHeadingTween = null;
+  }
+  
+  const currentHeading = map.getHeading() || 0;
+  const delta = normalizeHeadingDelta(currentHeading, targetHeading);
+  
+  if (Math.abs(delta) < 3) return; // Skip tiny changes
+  
+  const tweenObj = { heading: currentHeading };
+  currentHeadingTween = new TWEEN.Tween(tweenObj)
+    .to({ heading: currentHeading + delta }, 300)
+    .easing(TWEEN.Easing.Quadratic.Out)
+    .onUpdate(() => map.setHeading(tweenObj.heading))
+    .onComplete(() => {
+      currentHeadingTween = null;
+      TWEEN.remove(currentHeadingTween); // ← Ensure cleanup
+    })
+    .onStop(() => { // ← Handle manual stops
+      currentHeadingTween = null;
+      TWEEN.remove(currentHeadingTween);
+    })
+    .start();
+  
+  // Safety timeout - force cleanup after 2 seconds (not 5)
+  setTimeout(() => {
+    if (currentHeadingTween) {
+      currentHeadingTween.stop();
+      TWEEN.remove(currentHeadingTween);
+      currentHeadingTween = null;
     }
+  }, 2000);
+}
     const debouncedCameraUpdate = debounce(updateNavigationCamera, CONFIG.DEBOUNCE_DELAY);
     function shouldUpdateCameraView(newPos, newHeading, timeSinceLastUpdate) {
       if (!navState.isFollowing || !navState.isNavigating) return false;
@@ -6107,36 +6140,38 @@ async function handlePaymentCallback() {
   const paymentStatus = urlParams.get('payment');
   
   if (sessionId && paymentStatus === 'success') {
-    showToast('🎉 Payment successful! Verifying subscription...', 5000);
+    // Show immediate celebration (don't wait for verification)
+    createCelebration();
+    showToast('🎉 Payment successful! Activating premium...', 5000);
     
-    // Poll subscription status instead of verify-payment endpoint
+    // Poll subscription status (existing code)
     let attempts = 0;
     const checkStatus = async () => {
       attempts++;
-      const status = await checkSubscriptionStatus(); // Existing function
+      await checkSubscriptionStatus();
       
       if (subscriptionStatus.isPremium) {
         showToast('✅ Premium activated! Reloading...', 3000);
-        createCelebration();
         setTimeout(() => {
           window.history.replaceState({}, document.title, window.location.pathname);
           window.location.reload();
         }, 2000);
       } else if (attempts < 10) {
-        setTimeout(checkStatus, 2000); // Poll every 2s for 20s max
+        setTimeout(checkStatus, 2000);
       } else {
-        showToast('Payment received. Refresh page if premium not activated.', 5000);
+        showToast('Premium activation pending. Refresh if not active.', 5000);
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     };
     
     checkStatus();
   } else if (paymentStatus === 'cancelled') {
-    showToast('Payment cancelled. You can upgrade anytime from Settings.');
+    showToast('Payment cancelled. Upgrade anytime from Settings.');
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
-// Simple celebration function (no external library needed)
+
+// Ensure celebration function exists (add if missing around line 3550)
 function createCelebration() {
   const celebration = document.createElement('div');
   celebration.style.cssText = `
@@ -6149,7 +6184,8 @@ function createCelebration() {
     animation: celebrate 2s ease-out forwards;
     pointer-events: none;
   `;
-  celebration.textContent = '🎉';
+  celebration.innerHTML = '🎉<br><span style="font-size:2rem">Premium Unlocked!</span>';
+  
   const style = document.createElement('style');
   style.textContent = `
     @keyframes celebrate {
@@ -6160,27 +6196,12 @@ function createCelebration() {
   `;
   document.head.appendChild(style);
   document.body.appendChild(celebration);
+  
   setTimeout(() => {
     celebration.remove();
     style.remove();
   }, 2000);
 }
-// Add upgrade button to settings
-document.getElementById('edit-profile-button').insertAdjacentHTML('afterend', `
-  <button id="manage-subscription-button" style="margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem; cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #FFD700;">
-    Manage Subscription
-  </button>
-`);
-document.getElementById('manage-subscription-button').addEventListener('click', () => {
-  if (subscriptionStatus.isPremium) {
-    // Show manage options
-    if (confirm('Do you want to cancel your premium subscription?')) {
-      cancelSubscription();
-    }
-  } else {
-    showUpgradeModal('settings');
-  }
-});
 async function cancelSubscription() {
   try {
     const token = TokenManager.get();
@@ -6209,6 +6230,22 @@ document.getElementById('trial-banner-close').addEventListener('click', (e) => {
   document.getElementById('trial-banner').style.display = 'none';
   localStorage.setItem('trialBannerHiddenAt', Date.now().toString());
   console.log('Trial banner hidden');
+});
+// Add upgrade button to settings
+document.getElementById('edit-profile-button').insertAdjacentHTML('afterend', `
+  <button id="manage-subscription-button" style="margin: 0.5vmin; padding: 0.8vmin 1.5vmin; border: none; border-radius: 0.4rem; cursor: pointer; font-size: clamp(10px, 2vmin, 14px); color: white; background-color: #FFD700;">
+    Manage Subscription
+  </button>
+`);
+document.getElementById('manage-subscription-button').addEventListener('click', () => {
+  if (subscriptionStatus.isPremium) {
+    // Show manage options
+    if (confirm('Do you want to cancel your premium subscription?')) {
+      cancelSubscription();
+    }
+  } else {
+    showUpgradeModal('settings');
+  }
 });
   </script>
 </body>

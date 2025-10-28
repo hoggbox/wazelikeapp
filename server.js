@@ -15,58 +15,48 @@ const authRoutes = require('./routes/auth');
 const authMiddleware = require('./middleware/auth');
 const app = express();
 const server = http.createServer(app);
-// CORS Configuration - Allow all origins in production (or specify your Render URL)
 const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:3000',
-  'https://your-app-name.onrender.com', // Replace with your actual Render URL
-  /\.onrender\.com$/ // Allow all Render subdomains (optional)
+  'https://wazegps-g6j8.onrender.com', // ← Your actual Render URL
 ];
-const io = new Server(server, {
-  cors: {
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const isAllowed = allowedOrigins.some(allowedOrigin => {
-        if (allowedOrigin instanceof RegExp) {
-          return allowedOrigin.test(origin);
-        }
-        return allowedOrigin === origin;
-      });
-      callback(null, isAllowed);
-    },
-    methods: ['GET', 'POST'],
-    credentials: true
-  }
-});
-// Enable trust proxy for hosting platforms
-app.set('trust proxy', 1);
 
-app.use(cors({
+// Allow all Render subdomains via regex separately
+const allowedPatterns = [
+  /\.onrender\.com$/,
+  /^https:\/\/[a-z0-9-]+\.onrender\.com$/
+];
+
+const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or Postman)
-    if (!origin) {
+    // Allow requests with no origin (mobile apps, Postman)
+    if (!origin) return callback(null, true);
+    
+    // Check exact matches first
+    if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     
-    // Check if origin matches any allowed pattern
-    const isAllowed = allowedOrigins.some(allowedOrigin => {
-      if (allowedOrigin instanceof RegExp) {
-        return allowedOrigin.test(origin);
-      }
-      return allowedOrigin === origin;
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.error('CORS blocked origin:', origin);
-      callback(new Error('CORS not allowed'));
+    // Check regex patterns
+    if (allowedPatterns.some(pattern => pattern.test(origin))) {
+      return callback(null, true);
     }
+    
+    console.error('❌ CORS blocked origin:', origin);
+    callback(new Error('CORS not allowed'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
+
+const io = new Server(server, {
+  cors: corsOptions
+});
+// Enable trust proxy for hosting platforms
+app.set('trust proxy', 1);
+
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.raw({type: 'application/json'})); // For Stripe webhook
 app.use(express.static(path.join(__dirname, 'public')));
@@ -185,39 +175,44 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
   let event;
   
   try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('⚠️ Webhook signature verification failed:', err.message);
+    console.error('⚠️ Webhook signature failed:', err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
     switch (event.type) {
-      case 'checkout.session.completed':
+      case 'checkout.session.completed': // ← THIS IS CRITICAL
         const session = event.data.object;
         const userId = session.client_reference_id || session.metadata?.userId;
-        if (userId) {
-          await User.findByIdAndUpdate(userId, {
+        if (userId && mongoose.Types.ObjectId.isValid(userId)) {
+          const user = await User.findByIdAndUpdate(userId, {
             subscriptionStatus: 'active',
             stripeSubscriptionId: session.subscription,
             stripeCustomerId: session.customer,
             premiumActivatedAt: new Date(),
-            trialEndsAt: null
-          });
-          console.log('✅ Premium activated via webhook:', userId);
+            trialEndsAt: new Date() // Mark trial as ended
+          }, { new: true });
+          console.log('✅ Premium activated via webhook:', userId, user?.email);
+        } else {
+          console.error('❌ Invalid userId in webhook:', userId);
         }
         break;
       
       case 'customer.subscription.deleted':
-      case 'customer.subscription.updated':
-        const sub = event.data.object;
+        const deletedSub = event.data.object;
         await User.findOneAndUpdate(
-          { stripeSubscriptionId: sub.id },
-          { subscriptionStatus: sub.status === 'canceled' ? 'cancelled' : sub.status }
+          { stripeSubscriptionId: deletedSub.id },
+          { subscriptionStatus: 'cancelled' }
+        );
+        break;
+      
+      case 'customer.subscription.updated':
+        const updatedSub = event.data.object;
+        await User.findOneAndUpdate(
+          { stripeSubscriptionId: updatedSub.id },
+          { subscriptionStatus: updatedSub.status }
         );
         break;
       
@@ -232,7 +227,7 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
     
     res.json({received: true});
   } catch (error) {
-    console.error('Webhook handler error:', error);
+    console.error('❌ Webhook handler error:', error);
     res.status(400).send(`Webhook Error: ${error.message}`);
   }
 });

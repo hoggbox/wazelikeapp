@@ -130,11 +130,12 @@ const userSchema = new mongoose.Schema({
   trialEndsAt: {
     type: Date,
     default: function() {
-      // Only set trial for NEW users (no _id yet)
-      if (!this._id) {
+      // Check if document is being created (isNew is true during save)
+      // OR if trialEndsAt doesn't exist yet (for existing docs without trial)
+      if (this.isNew || !this.trialEndsAt) {
         return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
       }
-      return undefined; // Preserve existing value on updates
+      return undefined; // Preserve existing value
     }
   },
   subscriptionStatus: {
