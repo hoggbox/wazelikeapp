@@ -13,7 +13,8 @@
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js?v=1.0.3"></script>
   <script src="https://browser.sentry-cdn.com/7.x.x/bundle.min.js"></script>
   <script>
-    if (window.location.hostname !== 'localhost') {
+    // Only initialize Sentry if it's loaded AND not localhost
+    if (typeof Sentry !== 'undefined' && window.location.hostname !== 'localhost') {
       Sentry.init({
         dsn: 'YOUR_SENTRY_DSN',
         environment: 'production',
@@ -38,7 +39,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(reg => {
     // Check for updates every 5 minutes
     setInterval(() => reg.update(), 5 * 60 * 1000);
-    
+   
     // Listen for new SW waiting
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
@@ -1423,7 +1424,7 @@ if ('serviceWorker' in navigator) {
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-      
+     
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1438,11 +1439,11 @@ if ('serviceWorker' in navigator) {
               level: 'error'
             });
           }
-      
+     
           if (fallback) {
             return fallback(error);
           }
-      
+     
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -1930,12 +1931,12 @@ if ('serviceWorker' in navigator) {
           lng < -180 || lng > 180) {
         throw new Error('Invalid coordinates');
       }
-  
+ 
       const token = TokenManager.get();
       if (!TokenManager.isValid()) {
         throw new Error('Invalid token');
       }
-  
+ 
       const response = await fetchWithRetry('/api/geocode', {
         method: 'POST',
         headers: {
@@ -1947,7 +1948,7 @@ if ('serviceWorker' in navigator) {
           lng: parseFloat(lng.toFixed(6))
         })
       });
-  
+ 
       if (!response.ok) {
         throw new Error('Geocoding failed');
       }
@@ -2239,19 +2240,19 @@ if ('serviceWorker' in navigator) {
     }
     function updateMapHeading(targetHeading) {
   if (navState.mapOrientation !== 'heading-up') return;
-  
+ 
   // Cancel existing tween
   if (currentHeadingTween) {
     currentHeadingTween.stop();
     TWEEN.remove(currentHeadingTween);
     currentHeadingTween = null;
   }
-  
+ 
   const currentHeading = map.getHeading() || 0;
   const delta = normalizeHeadingDelta(currentHeading, targetHeading);
-  
+ 
   if (Math.abs(delta) < 3) return; // Skip tiny changes
-  
+ 
   const tweenObj = { heading: currentHeading };
   currentHeadingTween = new TWEEN.Tween(tweenObj)
     .to({ heading: currentHeading + delta }, 300)
@@ -2266,7 +2267,7 @@ if ('serviceWorker' in navigator) {
       TWEEN.remove(currentHeadingTween);
     })
     .start();
-  
+ 
   // Safety timeout - force cleanup after 2 seconds (not 5)
   setTimeout(() => {
     if (currentHeadingTween) {
@@ -3021,11 +3022,11 @@ if ('serviceWorker' in navigator) {
       },
       async process() {
         if (!navigator.onLine || this.queue.length === 0) return;
-  
+ 
         const pending = [...this.queue];
         this.queue = [];
         this.save();
-  
+ 
         for (const action of pending) {
           try {
             await this.executeAction(action);
@@ -3034,7 +3035,7 @@ if ('serviceWorker' in navigator) {
             this.queue.push(action); // Re-queue
           }
         }
-  
+ 
         this.save();
       },
       async executeAction(action) {
@@ -3056,23 +3057,23 @@ if ('serviceWorker' in navigator) {
       check() {
         const now = Date.now();
         const issues = [];
-  
+ 
         // Check GPS
         if (navState.isNavigating && now - this.lastGPSUpdate > 10000) {
           issues.push('GPS signal lost');
         }
-  
+ 
         // Check Socket
         if (socket && !socket.connected) {
           issues.push('Server connection lost');
         }
-  
+ 
         // Check token expiration
         if (!TokenManager.isValid()) {
           issues.push('Session expired');
           this.handleSessionExpired();
         }
-  
+ 
         // Check memory usage (if available)
         if (performance.memory) {
           const usedMB = performance.memory.usedJSHeapSize / 1048576;
@@ -3081,12 +3082,12 @@ if ('serviceWorker' in navigator) {
             console.warn('Memory usage:', usedMB.toFixed(2), 'MB');
           }
         }
-  
+ 
         if (issues.length > 0) {
           console.warn('Health check issues:', issues);
           this.reportIssues(issues);
         }
-  
+ 
         return issues.length === 0;
       },
       handleSessionExpired() {
@@ -3494,7 +3495,7 @@ if ('serviceWorker' in navigator) {
             options.headers['Authorization'] = `Bearer ${token}`;
           }
           const response = await fetch(url, options);
-      
+     
           // Check for rate limiting
           if (response.status === 429) {
             const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
@@ -3503,7 +3504,7 @@ if ('serviceWorker' in navigator) {
             await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
             continue;
           }
-      
+     
           if (response.ok) return response;
           if (response.status === 401) {
             const refreshed = await refreshToken();
@@ -3531,12 +3532,12 @@ if ('serviceWorker' in navigator) {
     if (!token || !TokenManager.isValid()) {
       throw new Error('No valid token to refresh');
     }
-    
+   
     const response = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    
+   
     if (response.ok) {
       const data = await response.json();
       TokenManager.set(data.token);
@@ -3558,17 +3559,17 @@ if ('serviceWorker' in navigator) {
 }
     function isDuplicateAlert(alert) {
   const now = Date.now();
-  
+ 
   // Create fuzzy key (round to ~10m precision)
   const lat = Math.round(alert.location.coordinates[1] * 1000) / 1000;
   const lng = Math.round(alert.location.coordinates[0] * 1000) / 1000;
   const key = `${alert.type}-${lat}-${lng}`;
-  
+ 
   const cached = alertCache.get(key);
   if (cached && now - cached.timestamp < 30000) { // 30s window
     return true;
   }
-  
+ 
   alertCache.set(key, { timestamp: now, id: alert._id });
   return false;
 }
@@ -5995,6 +5996,12 @@ async function checkSubscriptionStatus() {
     });
     if (!response.ok) throw new Error('Failed to check subscription');
     subscriptionStatus = await response.json();
+    console.log('🔍 Subscription Debug:', {
+      isPremium: subscriptionStatus.isPremium,
+      isTrialActive: subscriptionStatus.isTrialActive,
+      trialDaysRemaining: subscriptionStatus.trialDaysRemaining,
+      shouldShowBanner: !subscriptionStatus.isPremium && subscriptionStatus.isTrialActive
+    });
     updateUIForSubscription();
     // Check if trial ended and should show upgrade modal
     if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
@@ -6019,10 +6026,13 @@ function updateUIForSubscription() {
   const trialDaysSpan = document.getElementById('trial-days-remaining');
   const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
   const now = Date.now();
-  const shouldShowBanner = subscriptionStatus.isTrialActive && 
-                           !subscriptionStatus.isPremium && // ← Ensure not premium
-                           subscriptionStatus.trialDaysRemaining > 0 && // ← Add days check
+  
+  // FIXED: Never show banner if premium
+  const shouldShowBanner = !subscriptionStatus.isPremium && // ← Check premium FIRST
+                           subscriptionStatus.isTrialActive && 
+                           subscriptionStatus.trialDaysRemaining > 0 &&
                            (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000);
+  
   if (shouldShowBanner) {
     trialBanner.style.display = 'flex';
     trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
@@ -6038,7 +6048,7 @@ function updateUIForSubscription() {
   PREMIUM_FEATURES.forEach(featureId => {
     const element = document.getElementById(featureId);
     if (!element) return;
-    
+   
     if (hasAccess) {
       element.classList.remove('locked-feature');
       element.disabled = false;
@@ -6056,12 +6066,12 @@ function updateUIForSubscription() {
       };
     }
   });
-  
+ 
   // Lock premium report types
   document.querySelectorAll('.report-button').forEach(btn => {
     const alertType = btn.getAttribute('data-alert-type');
     const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(alertType);
-    
+   
     if (isPremiumType && !hasAccess) {
       btn.classList.add('locked-feature');
       btn.style.pointerEvents = 'auto';
@@ -6146,19 +6156,25 @@ async function handlePaymentCallback() {
   const urlParams = new URLSearchParams(window.location.search);
   const sessionId = urlParams.get('session_id');
   const paymentStatus = urlParams.get('payment');
-  
+ 
   if (sessionId && paymentStatus === 'success') {
     // Show immediate celebration (don't wait for verification)
     createCelebration();
     showToast('🎉 Payment successful! Activating premium...', 5000);
-    
+   
     // Poll subscription status (existing code)
     let attempts = 0;
     const checkStatus = async () => {
       attempts++;
       await checkSubscriptionStatus();
-      
+     
       if (subscriptionStatus.isPremium) {
+        // Force hide trial banner immediately
+        const trialBanner = document.getElementById('trial-banner');
+        if (trialBanner) {
+          trialBanner.style.display = 'none';
+        }
+        
         showToast('✅ Premium activated! Reloading...', 3000);
         setTimeout(() => {
           window.history.replaceState({}, document.title, window.location.pathname);
@@ -6171,14 +6187,13 @@ async function handlePaymentCallback() {
         window.history.replaceState({}, document.title, window.location.pathname);
       }
     };
-    
+   
     checkStatus();
   } else if (paymentStatus === 'cancelled') {
     showToast('Payment cancelled. Upgrade anytime from Settings.');
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 }
-
 // Ensure celebration function exists (add if missing around line 3550)
 function createCelebration() {
   const celebration = document.createElement('div');
@@ -6193,7 +6208,7 @@ function createCelebration() {
     pointer-events: none;
   `;
   celebration.innerHTML = '🎉<br><span style="font-size:2rem">Premium Unlocked!</span>';
-  
+ 
   const style = document.createElement('style');
   style.textContent = `
     @keyframes celebrate {
@@ -6204,7 +6219,7 @@ function createCelebration() {
   `;
   document.head.appendChild(style);
   document.body.appendChild(celebration);
-  
+ 
   setTimeout(() => {
     celebration.remove();
     style.remove();
