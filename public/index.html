@@ -1144,6 +1144,9 @@ if ('serviceWorker' in navigator) {
 <div id="subscription-loading" style="display: none;">
   <div>Checking subscription status...</div>
 </div>
+<div id="map-loading" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); color: white; padding: 2rem; border-radius: 0.5rem; z-index: 10000; display: none;">
+  Loading Map...
+</div>
   <script>
     const CONFIG = Object.freeze({
       REROUTE_CHECK_INTERVAL: 2000,
@@ -1952,21 +1955,24 @@ if ('serviceWorker' in navigator) {
       return response.json();
     }
     function loadGoogleMaps() {
-      console.log('Loading Google Maps API...');
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
-      script.async = true;
-      script.defer = true;
-      script.onerror = () => {
-        console.error('Failed to load Google Maps script');
-        showToast('Failed to load map. Check network or API key.');
-        setTimeout(loadGoogleMaps, 2000);
-      };
-      script.onload = () => {
-        console.log('Google Maps script loaded successfully');
-      };
-      document.head.appendChild(script);
-    }
+  document.getElementById('map-loading').style.display = 'block'; // ← Show loader
+  console.log('Loading Google Maps API...');
+  const script = document.createElement('script');
+  script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
+  script.async = true;
+  script.defer = true;
+  script.onerror = () => {
+    console.error('Failed to load Google Maps script');
+    document.getElementById('map-loading').style.display = 'none'; // ← Hide loader
+    showToast('Failed to load map. Check network or API key.');
+    setTimeout(loadGoogleMaps, 2000);
+  };
+  script.onload = () => {
+    console.log('Google Maps script loaded successfully');
+    document.getElementById('map-loading').style.display = 'none'; // ← Hide loader
+  };
+  document.head.appendChild(script);
+}
     window.initMap = function() {
       console.log('initMap called');
       if (!window.google || !google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
@@ -3470,45 +3476,47 @@ if ('serviceWorker' in navigator) {
       }
     }
     // Add exponential backoff with jitter
-    async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, backoff = CONFIG.FETCH_BACKOFF) {
-      for (let i = 0; i < retries; i++) {
-        try {
-          const token = TokenManager.get();
-          if (options?.headers && token) {
-            options.headers['Authorization'] = `Bearer ${token}`;
+async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, backoff = CONFIG.FETCH_BACKOFF) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const token = TokenManager.get();
+      if (options?.headers && token) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+      const response = await fetch(url, options);
+
+      // Check for rate limiting
+      if (response.status === 429) {
+        const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
+        console.warn(`Rate limited. Retrying after ${retryAfter}s`);
+        showToast(`Too many requests. Retrying in ${retryAfter} seconds...`);
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        continue;
+      }
+
+      if (response.ok) return response;
+      
+      if (response.status === 401) {
+        const refreshed = await refreshToken();
+        if (refreshed) {
+          const newToken = TokenManager.get();
+          if (options.headers) {
+            options.headers['Authorization'] = `Bearer ${newToken}`;
           }
-          const response = await fetch(url, options);
-    
-          // Check for rate limiting
-          if (response.status === 429) {
-            const retryAfter = parseInt(response.headers.get('Retry-After') || '60');
-            console.warn(`Rate limited. Retrying after ${retryAfter}s`);
-            showToast(`Too many requests. Retrying in ${retryAfter} seconds...`);
-            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
-            continue;
-          }
-    
-          if (response.ok) return response;
-          if (response.status === 401) {
-            const refreshed = await refreshToken();
-            if (refreshed) {
-              const newToken = TokenManager.get();
-              if (options.headers) {
-                options.headers['Authorization'] = `Bearer ${newToken}`;
-              }
-              return await fetch(url, options);
-            }
-          }
-          throw new Error(`HTTP ${response.status}`);
-        } catch (error) {
-          if (i === retries - 1) throw error;
-          // Exponential backoff with jitter
-          const jitter = Math.random() * 500;
-          const delay = backoff * Math.pow(2, i) + jitter;
-          await new Promise(resolve => setTimeout(resolve, delay));
+          return await fetch(url, options);
         }
       }
+      throw new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      if (i === retries - 1) throw error;
+      // Exponential backoff with jitter AND ceiling
+      const jitter = Math.random() * 500;
+      const delay = Math.min(backoff * Math.pow(2, i) + jitter, 30000); // ← MAX 30s delay
+      console.warn(`Retry ${i + 1}/${retries} after ${delay}ms for ${url}`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
+  }
+}
     async function refreshToken() {
   try {
     const token = TokenManager.get();
@@ -4533,8 +4541,7 @@ if ('serviceWorker' in navigator) {
         if (showTrafficCameras) {
           cameraCheckInterval = setInterval(checkCameraProximity, CONFIG.CAMERA_CHECK_INTERVAL);
         }
-        // Call every 5s instead of separate intervals
-        setInterval(batchUpdate, CONFIG.BATCH_UPDATE_INTERVAL);
+        // Keep ONLY the existing hazard/camera intervals
         if (watchId) {
           navigator.geolocation.clearWatch(watchId);
         }
@@ -5882,63 +5889,66 @@ function initSocket(token, userId) {
       });
 }
     function initApp() {
-      console.log('Initializing app...');
-      const token = TokenManager.get();
-      const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-      // Initialize map FIRST, regardless of auth status
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            navState.userLocation = {
-              lat: position.coords.latitude,
-              lng: position.coords.longitude
-            };
-            rawUserLocation = navState.userLocation;
-            console.log('Initial location:', navState.userLocation);
-            requestDeviceOrientationPermission();
-            loadGoogleMaps(); // ← Map loads here
-          },
-          (error) => {
-            console.error('Initial geolocation error:', error);
-            handleGeolocationError(error, true);
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 5000,
-            maximumAge: 0
-          }
-        );
-      } else {
-        console.error('Geolocation not supported');
-        showToast('Geolocation not supported by this browser.');
-        navState.userLocation = { lat: 33.083270, lng: -83.233040 };
+  console.log('Initializing app...');
+  const token = TokenManager.get();
+  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+
+  // ← FIX: Initialize map FIRST, regardless of auth status
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        navState.userLocation = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
         rawUserLocation = navState.userLocation;
-        loadGoogleMaps(); // ← Fallback map load
+        console.log('Initial location:', navState.userLocation);
+        requestDeviceOrientationPermission();
+        loadGoogleMaps(); // ← Map loads here
+      },
+      (error) => {
+        console.error('Initial geolocation error:', error);
+        handleGeolocationError(error, true);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
       }
-      // Check auth AFTER starting map load
-      if (!TokenManager.isValid() || !userId) {
-        console.log('No valid token or userId, showing auth form');
-        TokenManager.clear();
-        document.getElementById('auth-container').style.display = 'flex';
-        // Don't return early - let map still load
-      } else {
-        // Only initialize socket and subscription if authenticated
-        initSocket(token, userId);
-        initSubscription();
+    );
+  } else {
+    console.error('Geolocation not supported');
+    showToast('Geolocation not supported by this browser.');
+    navState.userLocation = { lat: 33.083270, lng: -83.233040 };
+    rawUserLocation = navState.userLocation;
+    loadGoogleMaps(); // ← Fallback map load
+  }
+
+  // Check auth AFTER starting map load
+  if (!TokenManager.isValid() || !userId) {
+    console.log('No valid token or userId, showing auth form');
+    TokenManager.clear();
+    document.getElementById('auth-container').style.display = 'flex';
+    // Don't return early - let map still load
+  } else {
+    // Only initialize socket and subscription if authenticated
+    initSocket(token, userId);
+    initSubscription();
+  }
+
+  // Service Worker registration
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+      console.log('Service Worker registered:', reg);
+      if (pushNotificationsEnabled) {
+        requestPushPermission();
       }
-      // Service Worker registration
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').then(reg => {
-          console.log('Service Worker registered:', reg);
-          if (pushNotificationsEnabled) {
-            requestPushPermission();
-          }
-        }).catch(err => {
-          console.error('Service Worker registration failed:', err);
-        });
-      }
-      console.log('App initialization complete');
-    }
+    }).catch(err => {
+      console.error('Service Worker registration failed:', err);
+    });
+  }
+  console.log('App initialization complete');
+}
     // Call initApp on page load
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', initApp);
@@ -6015,7 +6025,7 @@ async function checkSubscriptionStatus() {
   }
 }
 function updateUIForSubscription() {
-  // ← FIX: hasAccess should only be true if premium OR trial is active
+  // ← FIX: hasAccess should only be true if premium OR trial is active AND has days remaining
   const hasAccess = subscriptionStatus.isPremium || 
                     (subscriptionStatus.isTrialActive && subscriptionStatus.trialDaysRemaining > 0);
   
