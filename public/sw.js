@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1.0.5'; // ← Increment this on every deploy
+const CACHE_VERSION = 'v1.0.6'; // ← Increment this on every deploy
 const CACHE_NAME = `waze-gps-${CACHE_VERSION}`;
 const ASSETS_TO_CACHE = [
   '/',
@@ -88,3 +88,19 @@ self.addEventListener('message', event => {
     self.skipWaiting();
   }
 });
+
+async function checkSubscriptionStatus() {
+  // ... existing fetch logic
+  
+  subscriptionStatus = await response.json();
+  
+  // ✅ Debug log
+  console.log('🔍 Subscription Check:', {
+    isPremium: subscriptionStatus.isPremium,
+    isTrialActive: subscriptionStatus.isTrialActive,
+    trialDays: subscriptionStatus.trialDaysRemaining,
+    premiumActivated: subscriptionStatus.premiumActivatedAt
+  });
+  
+  updateUIForSubscription();
+}

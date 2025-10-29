@@ -93,7 +93,8 @@ router.post('/register', async (req, res) => {
         location: user.location,
         achievements: user.achievements,
         subscriptionStatus: user.subscriptionStatus, // ← Include this
-        trialEndsAt: user.trialEndsAt // ← Include this
+        trialEndsAt: user.trialEndsAt, // ← Include this
+        premiumActivatedAt: user.premiumActivatedAt
       }
     });
   } catch (error) {
@@ -129,7 +130,7 @@ router.post('/login', async (req, res) => {
 
     // Find user
     const user = await User.findOne({ email: email.toLowerCase() }).select(
-      '_id username email password isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions firstName lastName birthdate sex location achievements'
+      '_id username email password isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions firstName lastName birthdate sex location achievements subscriptionStatus premiumActivatedAt trialEndsAt'
     );
     if (!user || user.isBanned) {
       console.error('Login failed:', { email, reason: !user ? 'User not found' : 'User banned' });
@@ -164,7 +165,10 @@ router.post('/login', async (req, res) => {
         birthdate: user.birthdate,
         sex: user.sex,
         location: user.location,
-        achievements: user.achievements
+        achievements: user.achievements,
+        subscriptionStatus: user.subscriptionStatus,
+        premiumActivatedAt: user.premiumActivatedAt,
+        trialEndsAt: user.trialEndsAt
       }
     });
   } catch (error) {
@@ -201,7 +205,7 @@ router.post('/refresh', async (req, res) => {
 
     // Find user
     const user = await User.findById(decoded.id).select(
-      '_id username email isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions firstName lastName birthdate sex location achievements'
+      '_id username email isAdmin isBanned totalAlerts activeAlerts points joinDate familyMembers offlineRegions firstName lastName birthdate sex location achievements subscriptionStatus premiumActivatedAt trialEndsAt'
     );
     if (!user || user.isBanned) {
       console.error('Refresh failed:', { id: decoded.id, reason: !user ? 'User not found' : 'User banned' });
@@ -229,7 +233,10 @@ router.post('/refresh', async (req, res) => {
         birthdate: user.birthdate,
         sex: user.sex,
         location: user.location,
-        achievements: user.achievements
+        achievements: user.achievements,
+        subscriptionStatus: user.subscriptionStatus,
+        premiumActivatedAt: user.premiumActivatedAt,
+        trialEndsAt: user.trialEndsAt
       }
     });
   } catch (error) {
@@ -279,7 +286,7 @@ router.get('/profile/:id', async (req, res) => {
 
     // Fetch target user
     const targetUser = await User.findById(req.params.id).select(
-      'username email firstName lastName birthdate sex location joinDate totalAlerts activeAlerts points achievements isAdmin familyMembers offlineRegions'
+      'username email firstName lastName birthdate sex location joinDate totalAlerts activeAlerts points achievements isAdmin familyMembers offlineRegions subscriptionStatus premiumActivatedAt trialEndsAt'
     );
     if (!targetUser) {
       console.error('Target user not found:', req.params.id);
@@ -303,7 +310,10 @@ router.get('/profile/:id', async (req, res) => {
       achievements: targetUser.achievements || [],
       isAdmin: targetUser.isAdmin,
       familyMembers: targetUser.familyMembers || [],
-      offlineRegions: targetUser.offlineRegions || []
+      offlineRegions: targetUser.offlineRegions || [],
+      subscriptionStatus: targetUser.subscriptionStatus,
+      premiumActivatedAt: targetUser.premiumActivatedAt,
+      trialEndsAt: targetUser.trialEndsAt
     });
   } catch (error) {
     console.error('Profile fetch error:', {
@@ -383,7 +393,7 @@ router.put('/profile', async (req, res) => {
       new: true,
       runValidators: true
     }).select(
-      'username email firstName lastName birthdate sex location joinDate totalAlerts activeAlerts points achievements isAdmin familyMembers offlineRegions'
+      'username email firstName lastName birthdate sex location joinDate totalAlerts activeAlerts points achievements isAdmin familyMembers offlineRegions subscriptionStatus premiumActivatedAt trialEndsAt'
     );
     if (!user) {
       console.error('User not found for update:', decoded.id);
@@ -407,7 +417,10 @@ router.put('/profile', async (req, res) => {
       achievements: user.achievements || [],
       isAdmin: user.isAdmin,
       familyMembers: user.familyMembers || [],
-      offlineRegions: user.offlineRegions || []
+      offlineRegions: user.offlineRegions || [],
+      subscriptionStatus: user.subscriptionStatus,
+      premiumActivatedAt: user.premiumActivatedAt,
+      trialEndsAt: user.trialEndsAt
     });
   } catch (error) {
     console.error('Profile update error:', {

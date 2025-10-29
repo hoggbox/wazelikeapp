@@ -243,36 +243,32 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
           return res.status(400).send('Invalid userId');
         }
 
-        // Add 3-second delay to ensure client redirect completes
-        setTimeout(async () => {
-          try {
-            const user = await User.findByIdAndUpdate(userId, {
-              subscriptionStatus: 'active',
-              stripeSubscriptionId: session.subscription,
-              stripeCustomerId: session.customer,
-              premiumActivatedAt: new Date(),
-              trialEndsAt: null,
-              lastReminderSent: null
-            }, { new: true });
-            
-            if (!user) {
-              console.error('❌ User not found for webhook:', userId);
-              return;
-            }
-            
-            console.log('✅ Premium activated (delayed):', userId, user.email);
-            
-            // Emit real-time update via Socket.IO
-            io.to(userId).emit('premiumActivated', {
-              isPremium: true,
-              activatedAt: new Date()
-            });
-          } catch (error) {
-            console.error('❌ Webhook update failed:', error);
+        try {
+          const user = await User.findByIdAndUpdate(userId, {
+            subscriptionStatus: 'active',
+            stripeSubscriptionId: session.subscription,
+            stripeCustomerId: session.customer,
+            premiumActivatedAt: new Date(),
+            trialEndsAt: null,
+            trialStartedAt: null,
+            lastReminderSent: null
+          }, { new: true });
+          
+          if (!user) {
+            console.error('❌ User not found for webhook:', userId);
+          } else {
+            console.log('✅ Premium activated:', userId, user.email);
           }
-        }, 3000); // 3 second delay
+          
+          // Emit real-time update via Socket.IO
+          io.to(userId).emit('premiumActivated', {
+            isPremium: true,
+            activatedAt: new Date()
+          });
+        } catch (error) {
+          console.error('❌ Webhook update failed:', error);
+        }
         
-        // Respond immediately to Stripe
         break;
       
       case 'customer.subscription.deleted':
