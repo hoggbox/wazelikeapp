@@ -1426,7 +1426,6 @@ if ('serviceWorker' in navigator) {
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
- 
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1441,11 +1440,9 @@ if ('serviceWorker' in navigator) {
               level: 'error'
             });
           }
- 
           if (fallback) {
             return fallback(error);
           }
- 
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -2442,7 +2439,13 @@ if ('serviceWorker' in navigator) {
         map.setCenter(position);
         map.setZoom(15);
         console.log('Centered map on alert from URL:', { alertId, lat, lng });
-        window.history.replaceState({}, document.title, window.location.pathname);
+        try {
+          const cleanUrl = window.location.origin + window.location.pathname;
+          window.history.replaceState({}, document.title, cleanUrl);
+          console.log('✅ URL cleaned:', cleanUrl);
+        } catch (historyError) {
+          console.warn('Could not clean URL:', historyError);
+        }
         const token = TokenManager.get();
         fetchWithRetry(`/api/markers?lat=${lat}&lng=${lng}&maxDistance=100`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -3492,7 +3495,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         continue;
       }
       if (response.ok) return response;
-   
+  
       if (response.status === 401) {
         const refreshed = await refreshToken();
         if (refreshed) {
@@ -5953,7 +5956,7 @@ function updateUIForSubscription() {
     const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
     const now = Date.now();
     const shouldShow = (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000); // 48hr cooldown
-  
+ 
     if (shouldShow) {
       trialBanner.style.display = 'flex';
       trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
@@ -5975,7 +5978,7 @@ function updateUIForSubscription() {
   PREMIUM_FEATURES.forEach(featureId => {
     const el = document.getElementById(featureId);
     if (!el) return;
-  
+ 
     if (hasAccess) {
       el.classList.remove('locked-feature');
       el.disabled = false;
@@ -5997,7 +6000,7 @@ function updateUIForSubscription() {
   document.querySelectorAll('.report-button').forEach(btn => {
     const type = btn.getAttribute('data-alert-type');
     const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(type);
-  
+ 
     if (isPremiumType && !hasAccess) {
       btn.classList.add('locked-feature');
       btn.style.pointerEvents = 'auto';
@@ -6082,17 +6085,14 @@ async function handlePaymentCallback() {
   const urlParams = new URLSearchParams(window.location.search);
   const sessionId = urlParams.get('session_id');
   const paymentStatus = urlParams.get('payment');
-
   if (sessionId && paymentStatus === 'success') {
     // ✅ IMMEDIATELY hide banner
     const trialBanner = document.getElementById('trial-banner');
     if (trialBanner) {
       trialBanner.style.display = 'none';
     }
-
     createCelebration();
     showToast('🎉 Payment successful! Activating premium...', 5000);
-
     // ✅ Cache token ONCE
     const token = TokenManager.get();
     if (!token) {
@@ -6100,10 +6100,8 @@ async function handlePaymentCallback() {
       window.history.replaceState({}, '', window.location.pathname);
       return;
     }
-
     let attempts = 0;
     const MAX_ATTEMPTS = 30;
-
     const checkStatus = async () => {
       attempts++;
       console.log(`Polling (${attempts}/${MAX_ATTEMPTS})...`);
@@ -6124,7 +6122,16 @@ async function handlePaymentCallback() {
         if (status.isPremium) {
           // ✅ SUCCESS: Clear URL BEFORE reload
           showToast('✅ Premium activated! Reloading...', 3000);
-          window.history.replaceState({}, '', window.location.pathname);
+          
+          // ✅ FIX: Use complete URL, not just pathname
+          try {
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+            console.log('✅ URL cleaned:', cleanUrl);
+          } catch (historyError) {
+            console.warn('Could not clean URL:', historyError);
+            // Fallback: just reload with query params
+          }
           
           setTimeout(() => {
             window.location.reload(true);
@@ -6136,24 +6143,42 @@ async function handlePaymentCallback() {
         if (attempts < MAX_ATTEMPTS) {
           setTimeout(checkStatus, 1000);
         } else {
-          // Timeout: clear URL
-          window.history.replaceState({}, '', window.location.pathname);
+          // ✅ Timeout: clear URL with same fix
+          try {
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+          } catch (historyError) {
+            console.warn('Could not clean URL on timeout:', historyError);
+          }
           showToast('⚠️ Activation pending. Refresh manually.', 8000);
         }
       } catch (error) {
         console.error('Polling error:', error);
+        
+        // ✅ Also fix error handler
+        if (attempts >= MAX_ATTEMPTS) {
+          try {
+            const cleanUrl = window.location.origin + window.location.pathname;
+            window.history.replaceState({}, document.title, cleanUrl);
+          } catch (historyError) {
+            console.warn('Could not clean URL on error:', historyError);
+          }
+        }
+        
         if (attempts < MAX_ATTEMPTS) {
           setTimeout(checkStatus, 1000);
-        } else {
-          window.history.replaceState({}, '', window.location.pathname);
         }
       }
     };
-
     checkStatus(); // Start polling
   } else if (paymentStatus === 'cancelled') {
     showToast('Payment cancelled.');
-    window.history.replaceState({}, '', window.location.pathname);
+    try {
+      const cleanUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, cleanUrl);
+    } catch (error) {
+      console.warn('Could not clean URL:', error);
+    }
   }
 }
 // Ensure celebration function exists (add if missing around line 3550)
@@ -6245,7 +6270,7 @@ async function requestStorageAccess() {
 }
 async function initApp() {
   console.log('Initializing app...');
-  
+ 
   // ✅ Request storage access first
   const hasStorageAccess = await requestStorageAccess();
   if (!hasStorageAccess && window.location.search.includes('payment=success')) {
@@ -6253,7 +6278,6 @@ async function initApp() {
     showToast('Storage access required. Please allow and refresh.');
     return;
   }
-
   const token = TokenManager.get();
   const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
   // ← FIX: Initialize map FIRST, regardless of auth status
@@ -6294,7 +6318,7 @@ async function initApp() {
     // Don't return early - let map still load
   } else {
     initSocket(token, userId);
-    
+   
     // ✅ FIX: Only init subscription if NOT in payment callback
     if (!window.location.search.includes('payment=success')) {
       initSubscription();
