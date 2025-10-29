@@ -1281,7 +1281,7 @@ if ('serviceWorker' in navigator) {
     this._isUpdating = true;
     this._startTime = Date.now();
     this._callbacks = [];
-  
+ 
     // Auto-reset after 5 seconds
     clearTimeout(this._timeoutId);
     this._timeoutId = setTimeout(() => {
@@ -1294,7 +1294,7 @@ if ('serviceWorker' in navigator) {
   end(callback = null) {
     clearTimeout(this._timeoutId);
     if (callback) this._callbacks.push(callback);
-  
+ 
     requestAnimationFrame(() => {
       this._isUpdating = false;
       this._callbacks.forEach(cb => cb());
@@ -3132,7 +3132,7 @@ if ('serviceWorker' in navigator) {
         voiceAssistantEnabled = false;
         return;
       });
-  
+ 
     // ... rest of wake word setup ...
   } catch (err) {
     console.error('Wake word init failed:', err);
@@ -3835,7 +3835,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
   const removedFromUI = item;
   const markerBackup = markers.get(id);
   const alertBackup = currentAlerts.find(a => a._id === id);
-  
+ 
   // Remove from UI immediately
   item?.remove();
   const marker = markers.get(id);
@@ -3843,7 +3843,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
     releaseMarker(marker);
     markers.delete(id);
   }
-  
+ 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -3896,7 +3896,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
     if (removedFromUI && alertBackup) {
       currentAlerts.push(alertBackup);
       displayAlertsInHud(currentAlerts); // Re-render
-      
+     
       if (markerBackup) {
         markers.set(id, markerBackup);
         markerBackup.map = map; // Re-show marker
@@ -3911,13 +3911,13 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) return;
-    
+   
     const response = await fetchWithRetry(/* ... */);
     const serverAlerts = await response.json();
-    
+   
     // ✅ Dedupe first
     const serverAlertIds = new Set(serverAlerts.map(a => a._id));
-    
+   
     // ✅ THEN remove stale markers
     markers.forEach((marker, id) => {
       if (!serverAlertIds.has(id)) {
@@ -3926,7 +3926,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         console.log('Removed stale marker:', id);
       }
     });
-    
+   
     // ✅ Update currentAlerts
     currentAlerts = [...new Map(serverAlerts.map(a => [a._id, a])).values()];
     displayAlertsInHud(currentAlerts);
@@ -4423,7 +4423,25 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
       localStorage.setItem('isFollowing', navState.isFollowing);
       sessionStorage.setItem('isFollowing', navState.isFollowing);
       map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
-      restoreNavigationView();
+      
+      // ✅ FIX: Force immediate camera update instead of just calling restoreNavigationView
+      if (navState.userLocation) {
+        const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+        const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+        const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+        
+        ProgrammaticUpdateManager.start();
+        requestAnimationFrame(() => {
+          map.setCenter(lookaheadPoint);
+          map.setZoom(zoom);
+          map.setHeading(heading);
+          map.setTilt(tilt);
+          userMarker.position = navState.userLocation;
+          console.log('Navigation locked with camera update:', { zoom, heading, tilt });
+          ProgrammaticUpdateManager.end();
+        });
+      }
+      
       console.log('Navigation locked');
     }
     function unlockNavigation() {
@@ -5259,7 +5277,8 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
       }
       navState.currentRoute = navState.alternativeRoute;
       navState.routePolyline = navState.alternativeRoute.routes[0].overview_path;
-      // FIXED: Recompute detailed path for alternative route
+      
+      // Recompute detailed path for alternative route
       navState.detailedPath = [];
       const legs = navState.currentRoute.routes[0].legs;
       for (const leg of legs) {
@@ -5267,28 +5286,49 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
           step.path.forEach(point => navState.detailedPath.push(point));
         }
       }
-      // Dedupe to prevent overlapping
       navState.detailedPath = navState.detailedPath.filter((point, index, self) =>
         index === self.findIndex(p => Math.abs(p.lat() - point.lat()) < 1e-6 && Math.abs(p.lng() - point.lng()) < 1e-6)
       );
-      console.log('Detailed path recomputed for alternative route:', navState.detailedPath.length, 'points');
+      
       directionsRenderer.setDirections(navState.currentRoute);
       directionsRenderer.setMap(map);
       alternativeRenderer.setMap(null);
       updateRouteAhead(navState.userLocation);
       updateHUD(navState.currentRoute, navState.userLocation);
       updateBottomHUD(navState.currentRoute);
+      
       navState.ignoredHazards.push(navState.currentHazard._id);
       navState.currentHazard = null;
       navState.alternativeRoute = null;
+      
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.alertState = 'IDLE';
-      if (navState.isFollowing) {
-        lockNavigation();
-      }
+      
+      // ✅ FIX: Force camera update before locking
+      const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+      const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+      const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+      
+      ProgrammaticUpdateManager.start();
+      requestAnimationFrame(() => {
+        map.setCenter(lookaheadPoint);
+        map.setZoom(zoom);
+        map.setHeading(heading);
+        map.setTilt(tilt);
+        userMarker.position = navState.userLocation;
+        userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+        console.log('Camera restored after reroute accept:', { zoom, heading, tilt });
+        ProgrammaticUpdateManager.end(() => {
+          // Now lock navigation after camera is set
+          if (navState.isFollowing) {
+            lockNavigation();
+          }
+        });
+      });
+      
       showToast('Reroute accepted.');
       console.log('Reroute accepted, navigation updated');
     }
@@ -5297,17 +5337,39 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         navState.ignoredHazards.push(navState.currentHazard._id);
         console.log('Hazard ignored:', navState.currentHazard._id);
       }
+      
       alternativeRenderer.setMap(null);
       navState.alternativeRoute = null;
       navState.currentHazard = null;
+      
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.alertState = 'IDLE';
-      if (navState.isFollowing) {
-        lockNavigation();
-      }
+      
+      // ✅ FIX: Force camera update before locking
+      const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+      const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+      const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+      
+      ProgrammaticUpdateManager.start();
+      requestAnimationFrame(() => {
+        map.setCenter(lookaheadPoint);
+        map.setZoom(zoom);
+        map.setHeading(heading);
+        map.setTilt(tilt);
+        userMarker.position = navState.userLocation;
+        userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+        console.log('Camera restored after reroute reject:', { zoom, heading, tilt });
+        ProgrammaticUpdateManager.end(() => {
+          // Now lock navigation after camera is set
+          if (navState.isFollowing) {
+            lockNavigation();
+          }
+        });
+      });
+      
       showToast('Reroute rejected.');
       console.log('Reroute rejected, continuing on original route');
     }
@@ -6079,7 +6141,7 @@ async function handlePaymentCallback() {
     let attempts = 0;
     const MAX_ATTEMPTS = 40; // Increase to 40 seconds
     let pollTimeoutId = null;
-  
+ 
     const checkStatus = async () => {
       attempts++;
       try {
@@ -6095,15 +6157,15 @@ async function handlePaymentCallback() {
         if (status.isPremium) {
           clearTimeout(pollTimeoutId); // ✅ Cancel polling
           showToast('✅ Premium activated! Reloading...', 3000);
-        
+       
           // Clear URL cleanly
           const cleanUrl = window.location.origin + window.location.pathname;
           window.history.replaceState({}, document.title, cleanUrl);
-        
+       
           setTimeout(() => window.location.reload(true), 2000);
           return;
         }
-        
+       
         if (attempts < MAX_ATTEMPTS) {
           pollTimeoutId = setTimeout(checkStatus, 1000);
         } else {
@@ -6118,7 +6180,7 @@ async function handlePaymentCallback() {
         }
       }
     };
-  
+ 
     checkStatus();
   }
 }
