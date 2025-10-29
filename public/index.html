@@ -1426,7 +1426,7 @@ if ('serviceWorker' in navigator) {
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-  
+ 
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1441,11 +1441,11 @@ if ('serviceWorker' in navigator) {
               level: 'error'
             });
           }
-  
+ 
           if (fallback) {
             return fallback(error);
           }
-  
+ 
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -3492,7 +3492,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         continue;
       }
       if (response.ok) return response;
-    
+   
       if (response.status === 401) {
         const refreshed = await refreshToken();
         if (refreshed) {
@@ -5883,70 +5883,6 @@ function initSocket(token, userId) {
         showToast('🎉 Premium activated! Welcome!');
       });
 }
-    function initApp() {
-  console.log('Initializing app...');
-  const token = TokenManager.get();
-  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-  // ← FIX: Initialize map FIRST, regardless of auth status
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        navState.userLocation = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
-        };
-        rawUserLocation = navState.userLocation;
-        console.log('Initial location:', navState.userLocation);
-        requestDeviceOrientationPermission();
-        loadGoogleMaps(); // ← Map loads here
-      },
-      (error) => {
-        console.error('Initial geolocation error:', error);
-        handleGeolocationError(error, true);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0
-      }
-    );
-  } else {
-    console.error('Geolocation not supported');
-    showToast('Geolocation not supported by this browser.');
-    navState.userLocation = { lat: 33.083270, lng: -83.233040 };
-    rawUserLocation = navState.userLocation;
-    loadGoogleMaps(); // ← Fallback map load
-  }
-  // Check auth AFTER starting map load
-  if (!TokenManager.isValid() || !userId) {
-    console.log('No valid token or userId, showing auth form');
-    TokenManager.clear();
-    document.getElementById('auth-container').style.display = 'flex';
-    // Don't return early - let map still load
-  } else {
-    // Only initialize socket and subscription if authenticated
-    initSocket(token, userId);
-    initSubscription();
-  }
-  // Service Worker registration
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js').then(reg => {
-      console.log('Service Worker registered:', reg);
-      if (pushNotificationsEnabled) {
-        requestPushPermission();
-      }
-    }).catch(err => {
-      console.error('Service Worker registration failed:', err);
-    });
-  }
-  console.log('App initialization complete');
-}
-    // Call initApp on page load
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', initApp);
-    } else {
-      initApp();
-    }
     // Subscription & Trial Management
 const PREMIUM_FEATURES = [
   'traffic-camera-toggle',
@@ -5968,26 +5904,20 @@ async function checkSubscriptionStatus() {
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) return;
-
     // ✅ Force cache bypass with timestamp
     const cacheBuster = Date.now();
     const response = await fetch(`/api/subscription/status?_=${cacheBuster}`, {
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         'Cache-Control': 'no-cache, no-store, must-revalidate',
         'Pragma': 'no-cache'
       },
       cache: 'no-store' // ← Force fresh fetch
     });
-
     if (!response.ok) throw new Error('Failed to check subscription');
-
     subscriptionStatus = await response.json();
-
     console.log('🔍 Subscription Check:', subscriptionStatus);
-
     updateUIForSubscription();
-
     // ✅ Show upgrade modal if trial ended
     if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
       const lastShown = localStorage.getItem('lastUpgradePrompt');
@@ -6005,7 +5935,6 @@ function updateUIForSubscription() {
   // === FIXED: Always calculate hasAccess FIRST ===
   const hasAccess = subscriptionStatus.isPremium ||
                     (subscriptionStatus.isTrialActive && subscriptionStatus.trialDaysRemaining > 0);
- 
   console.log('🔍 Access Check:', {
     isPremium: subscriptionStatus.isPremium,
     isTrialActive: subscriptionStatus.isTrialActive,
@@ -6013,7 +5942,6 @@ function updateUIForSubscription() {
     hasAccess
   });
   const trialBanner = document.getElementById('trial-banner');
- 
   // === Hide banner ONLY if premium OR no active trial ===
   if (subscriptionStatus.isPremium) {
     trialBanner.style.display = 'none';
@@ -6025,7 +5953,7 @@ function updateUIForSubscription() {
     const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
     const now = Date.now();
     const shouldShow = (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000); // 48hr cooldown
-   
+  
     if (shouldShow) {
       trialBanner.style.display = 'flex';
       trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
@@ -6047,7 +5975,7 @@ function updateUIForSubscription() {
   PREMIUM_FEATURES.forEach(featureId => {
     const el = document.getElementById(featureId);
     if (!el) return;
-   
+  
     if (hasAccess) {
       el.classList.remove('locked-feature');
       el.disabled = false;
@@ -6069,7 +5997,7 @@ function updateUIForSubscription() {
   document.querySelectorAll('.report-button').forEach(btn => {
     const type = btn.getAttribute('data-alert-type');
     const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(type);
-   
+  
     if (isPremiumType && !hasAccess) {
       btn.classList.add('locked-feature');
       btn.style.pointerEvents = 'auto';
@@ -6084,7 +6012,6 @@ function updateUIForSubscription() {
       btn.onclick = null; // Restore original onclick if it exists
     }
   });
- 
   console.log('✅ UI updated - hasAccess:', hasAccess);
 }
 function showUpgradeModal(source) {
@@ -6157,69 +6084,76 @@ async function handlePaymentCallback() {
   const paymentStatus = urlParams.get('payment');
 
   if (sessionId && paymentStatus === 'success') {
-    // ✅ IMMEDIATELY hide banner (don't wait for API)
+    // ✅ IMMEDIATELY hide banner
     const trialBanner = document.getElementById('trial-banner');
     if (trialBanner) {
       trialBanner.style.display = 'none';
     }
-    localStorage.removeItem('trialBannerHiddenAt'); // ← Clear old dismissal
 
     createCelebration();
     showToast('🎉 Payment successful! Activating premium...', 5000);
 
-    // ✅ AGGRESSIVE POLLING: Check every 1s for 30s
+    // ✅ Cache token ONCE
+    const token = TokenManager.get();
+    if (!token) {
+      showToast('Authentication error. Please log in.');
+      window.history.replaceState({}, '', window.location.pathname);
+      return;
+    }
+
     let attempts = 0;
     const MAX_ATTEMPTS = 30;
 
     const checkStatus = async () => {
       attempts++;
-      console.log(`Polling subscription status (${attempts}/${MAX_ATTEMPTS})...`);
+      console.log(`Polling (${attempts}/${MAX_ATTEMPTS})...`);
 
       try {
-        const token = TokenManager.get();
+        // Use cached token
         const response = await fetch('/api/subscription/status', {
-          headers: { 'Authorization': `Bearer ${token}` },
-          cache: 'no-store' // ← Force bypass cache
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Cache-Control': 'no-cache'
+          },
+          cache: 'no-store'
         });
 
         if (!response.ok) throw new Error('Status check failed');
-
         const status = await response.json();
-        console.log('Poll result:', status);
 
         if (status.isPremium) {
-          // ✅ SUCCESS: Premium activated
+          // ✅ SUCCESS: Clear URL BEFORE reload
           showToast('✅ Premium activated! Reloading...', 3000);
-          
-          // Clear URL params BEFORE reload
-          window.history.replaceState({}, document.title, window.location.pathname);
+          window.history.replaceState({}, '', window.location.pathname);
           
           setTimeout(() => {
-            window.location.reload(true); // ← Hard reload (bypass cache)
+            window.location.reload(true);
           }, 2000);
-          return; // ← Stop polling
+          return; // Stop polling
         }
 
-        // ✅ Keep polling if not premium yet
+        // Continue polling
         if (attempts < MAX_ATTEMPTS) {
-          setTimeout(checkStatus, 1000); // ← Check every 1 second
+          setTimeout(checkStatus, 1000);
         } else {
-          // ✅ TIMEOUT: Fallback to manual refresh
-          showToast('⚠️ Activation pending. Please refresh manually.', 8000);
-          window.history.replaceState({}, document.title, window.location.pathname);
+          // Timeout: clear URL
+          window.history.replaceState({}, '', window.location.pathname);
+          showToast('⚠️ Activation pending. Refresh manually.', 8000);
         }
       } catch (error) {
         console.error('Polling error:', error);
         if (attempts < MAX_ATTEMPTS) {
-          setTimeout(checkStatus, 1000); // ← Retry on error
+          setTimeout(checkStatus, 1000);
+        } else {
+          window.history.replaceState({}, '', window.location.pathname);
         }
       }
     };
 
-    checkStatus(); // ← Start polling loop
+    checkStatus(); // Start polling
   } else if (paymentStatus === 'cancelled') {
-    showToast('Payment cancelled. Upgrade anytime from Settings.');
-    window.history.replaceState({}, document.title, window.location.pathname);
+    showToast('Payment cancelled.');
+    window.history.replaceState({}, '', window.location.pathname);
   }
 }
 // Ensure celebration function exists (add if missing around line 3550)
@@ -6269,7 +6203,6 @@ async function cancelSubscription() {
 // Initialize subscription check on app load
 function initSubscription() {
   checkSubscriptionStatus();
-  handlePaymentCallback();
   // Check subscription status periodically (every hour)
   setInterval(checkSubscriptionStatus, 60 * 60 * 1000);
 }
@@ -6296,6 +6229,99 @@ document.getElementById('manage-subscription-button').addEventListener('click', 
     showUpgradeModal('settings');
   }
 });
+async function requestStorageAccess() {
+  if ('requestStorageAccess' in document) {
+    try {
+      await document.requestStorageAccess();
+      console.log('✅ Storage access granted');
+      return true;
+    } catch (error) {
+      console.warn('❌ Storage access denied:', error);
+      showToast('Please disable Strict Tracking Protection for this site');
+      return false;
+    }
+  }
+  return true; // Not Firefox or already permitted
+}
+async function initApp() {
+  console.log('Initializing app...');
+  
+  // ✅ Request storage access first
+  const hasStorageAccess = await requestStorageAccess();
+  if (!hasStorageAccess && window.location.search.includes('payment=success')) {
+    // Can't proceed with payment callback without storage
+    showToast('Storage access required. Please allow and refresh.');
+    return;
+  }
+
+  const token = TokenManager.get();
+  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+  // ← FIX: Initialize map FIRST, regardless of auth status
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        navState.userLocation = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+        rawUserLocation = navState.userLocation;
+        console.log('Initial location:', navState.userLocation);
+        requestDeviceOrientationPermission();
+        loadGoogleMaps(); // ← Map loads here
+      },
+      (error) => {
+        console.error('Initial geolocation error:', error);
+        handleGeolocationError(error, true);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+      }
+    );
+  } else {
+    console.error('Geolocation not supported');
+    showToast('Geolocation not supported by this browser.');
+    navState.userLocation = { lat: 33.083270, lng: -83.233040 };
+    rawUserLocation = navState.userLocation;
+    loadGoogleMaps(); // ← Fallback map load
+  }
+  // Check auth AFTER starting map load
+  if (!TokenManager.isValid() || !userId) {
+    console.log('No valid token or userId, showing auth form');
+    TokenManager.clear();
+    document.getElementById('auth-container').style.display = 'flex';
+    // Don't return early - let map still load
+  } else {
+    initSocket(token, userId);
+    
+    // ✅ FIX: Only init subscription if NOT in payment callback
+    if (!window.location.search.includes('payment=success')) {
+      initSubscription();
+    } else {
+      // Let handlePaymentCallback() handle it
+      handlePaymentCallback();
+    }
+  }
+  // Service Worker registration
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').then(reg => {
+      console.log('Service Worker registered:', reg);
+      if (pushNotificationsEnabled) {
+        requestPushPermission();
+      }
+    }).catch(err => {
+      console.error('Service Worker registration failed:', err);
+    });
+  }
+  console.log('App initialization complete');
+}
+    // Call initApp on page load
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initApp);
+    } else {
+      initApp();
+    }
   </script>
 </body>
 </html>
