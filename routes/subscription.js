@@ -2,45 +2,50 @@ const express = require('express');
 const router = express.Router();
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const User = require('../models/User');
-const authMiddleware = require('../middleware/auth'); // Standardized to match server.js
+const authMiddleware = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
 
 // Rate limit for Stripe operations
 const stripeLimit = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 5, // 5 requests per minute
+  max: 5,
   message: 'Too many payment requests, try again later'
 });
 
 // Check subscription status
 router.get('/status', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id);
+    const user = await User.findById(req.user._id)
+      .select('subscriptionStatus trialEndsAt premiumActivatedAt')
+      .lean(); // Faster, no Mongoose doc overhead
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
     const now = new Date();
     const isPremium = user.subscriptionStatus === 'active';
-    
+
     // Calculate trial status
     let isTrialActive = false;
     let trialDaysRemaining = 0;
-    
+
     if (user.subscriptionStatus === 'trial' && user.trialEndsAt) {
-      isTrialActive = user.trialEndsAt > now;
+      const trialEndDate = new Date(user.trialEndsAt);
+      isTrialActive = trialEndDate > now;
+
       if (isTrialActive) {
-        trialDaysRemaining = Math.ceil((user.trialEndsAt - now) / (24 * 60 * 60 * 1000));
+        trialDaysRemaining = Math.max(0, Math.ceil((trialEndDate - now) / (24 * 60 * 60 * 1000)));
       } else {
-        // Trial expired - update user
-        user.subscriptionStatus = 'expired';
-        await user.save();
+        // Auto-expire trial if past due
+        await User.findByIdAndUpdate(req.user._id, { subscriptionStatus: 'expired' });
+        console.log(`Trial expired for user: ${user._id}`);
       }
     }
 
-    console.log('📊 Subscription Status Check:', {
+    console.log('Subscription Status Check:', {
       userId: user._id,
-      email: user.email,
+      email: user.email || 'N/A',
       subscriptionStatus: user.subscriptionStatus,
       isPremium,
       isTrialActive,
@@ -52,7 +57,7 @@ router.get('/status', authMiddleware, async (req, res) => {
       isPremium,
       isTrialActive,
       trialDaysRemaining,
-      trialEndsAt: user.trialEndsAt,
+      trialEndsAt: user.trialEndsAt ? new Date(user.trialEndsAt).toISOString() : null,
       subscriptionStatus: user.subscriptionStatus
     });
   } catch (error) {
@@ -82,10 +87,10 @@ router.post('/create-checkout', stripeLimit, authMiddleware, async (req, res) =>
     // Create checkout session
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
-      client_reference_id: user._id.toString(), // For webhook identification
+      client_reference_id: user._id.toString(),
       payment_method_types: ['card'],
       line_items: [{
-        price: process.env.STRIPE_PRICE_ID, // Set in .env
+        price: process.env.STRIPE_PRICE_ID,
         quantity: 1
       }],
       mode: 'subscription',
