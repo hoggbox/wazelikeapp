@@ -87,7 +87,10 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use(cors(corsOptions));
-app.use(express.json());
+// ← MUST come BEFORE bodyParser for raw body access
+app.use('/api', require('./routes/webhooks'));
+
+app.use(express.json()); // ← bodyParser comes AFTER
 app.use(express.raw({type: 'application/json'})); // For Stripe webhook
 app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => {

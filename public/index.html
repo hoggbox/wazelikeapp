@@ -39,7 +39,6 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(reg => {
     // Check for updates every 5 minutes
     setInterval(() => reg.update(), 5 * 60 * 1000);
- 
     // Listen for new SW waiting
     reg.addEventListener('updatefound', () => {
       const newWorker = reg.installing;
@@ -1427,7 +1426,7 @@ if ('serviceWorker' in navigator) {
           return await fn.apply(this, args);
         } catch (error) {
           console.error(`Error in ${context}:`, error);
-   
+  
           // Log to Sentry in production
           if (window.Sentry && window.location.hostname !== 'localhost') {
             Sentry.captureException(error, {
@@ -1442,11 +1441,11 @@ if ('serviceWorker' in navigator) {
               level: 'error'
             });
           }
-   
+  
           if (fallback) {
             return fallback(error);
           }
-   
+  
           showToast(`An error occurred. Please refresh the page.`);
         }
       };
@@ -3493,7 +3492,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         continue;
       }
       if (response.ok) return response;
-     
+    
       if (response.status === 401) {
         const refreshed = await refreshToken();
         if (refreshed) {
@@ -3521,12 +3520,10 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
     if (!token || !TokenManager.isValid()) {
       throw new Error('No valid token to refresh');
     }
- 
     const response = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}` }
     });
- 
     if (response.ok) {
       const data = await response.json();
       TokenManager.set(data.token);
@@ -5968,42 +5965,30 @@ let subscriptionStatus = {
   trialEndsAt: null
 };
 async function checkSubscriptionStatus() {
-  const loadingDiv = document.getElementById('subscription-loading');
-  const isFirstCheck = !subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive;
- 
-  if (isFirstCheck) {
-    loadingDiv.style.display = 'flex';
-  }
- 
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) return;
-   
-    const response = await fetchWithRetry('/api/subscription/status', {
-      headers: { 'Authorization': `Bearer ${token}` }
+
+    // ✅ Force cache bypass with timestamp
+    const cacheBuster = Date.now();
+    const response = await fetch(`/api/subscription/status?_=${cacheBuster}`, {
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
+      cache: 'no-store' // ← Force fresh fetch
     });
-   
+
     if (!response.ok) throw new Error('Failed to check subscription');
-   
+
     subscriptionStatus = await response.json();
-   
-    console.log('🔍 Subscription Debug:', {
-      isPremium: subscriptionStatus.isPremium,
-      isTrialActive: subscriptionStatus.isTrialActive,
-      trialDaysRemaining: subscriptionStatus.trialDaysRemaining
-    });
-   
-    // ← ADD THIS: Force hide banner immediately if premium
-    if (subscriptionStatus.isPremium) {
-      const trialBanner = document.getElementById('trial-banner');
-      if (trialBanner) {
-        trialBanner.style.display = 'none';
-      }
-    }
-   
+
+    console.log('🔍 Subscription Check:', subscriptionStatus);
+
     updateUIForSubscription();
-   
-    // Check if trial ended and should show upgrade modal
+
+    // ✅ Show upgrade modal if trial ended
     if (!subscriptionStatus.isPremium && !subscriptionStatus.isTrialActive) {
       const lastShown = localStorage.getItem('lastUpgradePrompt');
       const now = Date.now();
@@ -6012,27 +5997,23 @@ async function checkSubscriptionStatus() {
         localStorage.setItem('lastUpgradePrompt', now.toString());
       }
     }
-    console.log('Subscription status:', subscriptionStatus);
   } catch (error) {
-    console.error('Error checking subscription:', error);
-  } finally {
-    loadingDiv.style.display = 'none';
+    console.error('Subscription status error:', error);
   }
 }
 function updateUIForSubscription() {
   // === FIXED: Always calculate hasAccess FIRST ===
-  const hasAccess = subscriptionStatus.isPremium || 
+  const hasAccess = subscriptionStatus.isPremium ||
                     (subscriptionStatus.isTrialActive && subscriptionStatus.trialDaysRemaining > 0);
-  
+ 
   console.log('🔍 Access Check:', {
     isPremium: subscriptionStatus.isPremium,
     isTrialActive: subscriptionStatus.isTrialActive,
     trialDaysRemaining: subscriptionStatus.trialDaysRemaining,
     hasAccess
   });
-
   const trialBanner = document.getElementById('trial-banner');
-  
+ 
   // === Hide banner ONLY if premium OR no active trial ===
   if (subscriptionStatus.isPremium) {
     trialBanner.style.display = 'none';
@@ -6044,7 +6025,7 @@ function updateUIForSubscription() {
     const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
     const now = Date.now();
     const shouldShow = (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000); // 48hr cooldown
-    
+   
     if (shouldShow) {
       trialBanner.style.display = 'flex';
       trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
@@ -6062,12 +6043,11 @@ function updateUIForSubscription() {
     trialBanner.style.display = 'none';
     console.log('Banner hidden - no premium or active trial');
   }
-
   // === Lock/Unlock Features ===
   PREMIUM_FEATURES.forEach(featureId => {
     const el = document.getElementById(featureId);
     if (!el) return;
-    
+   
     if (hasAccess) {
       el.classList.remove('locked-feature');
       el.disabled = false;
@@ -6085,12 +6065,11 @@ function updateUIForSubscription() {
       };
     }
   });
-
   // === Lock Premium Report Buttons ===
   document.querySelectorAll('.report-button').forEach(btn => {
     const type = btn.getAttribute('data-alert-type');
     const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(type);
-    
+   
     if (isPremiumType && !hasAccess) {
       btn.classList.add('locked-feature');
       btn.style.pointerEvents = 'auto';
@@ -6105,10 +6084,9 @@ function updateUIForSubscription() {
       btn.onclick = null; // Restore original onclick if it exists
     }
   });
-  
+ 
   console.log('✅ UI updated - hasAccess:', hasAccess);
 }
-
 function showUpgradeModal(source) {
   const modal = document.getElementById('subscription-modal');
   const title = document.getElementById('modal-title');
@@ -6177,42 +6155,68 @@ async function handlePaymentCallback() {
   const urlParams = new URLSearchParams(window.location.search);
   const sessionId = urlParams.get('session_id');
   const paymentStatus = urlParams.get('payment');
+
   if (sessionId && paymentStatus === 'success') {
-    // ← ADD THIS: Hide banner immediately on payment success
+    // ✅ IMMEDIATELY hide banner (don't wait for API)
     const trialBanner = document.getElementById('trial-banner');
     if (trialBanner) {
       trialBanner.style.display = 'none';
     }
-   
+    localStorage.removeItem('trialBannerHiddenAt'); // ← Clear old dismissal
+
     createCelebration();
     showToast('🎉 Payment successful! Activating premium...', 5000);
-  
-    // Poll subscription status...
+
+    // ✅ AGGRESSIVE POLLING: Check every 1s for 30s
     let attempts = 0;
+    const MAX_ATTEMPTS = 30;
+
     const checkStatus = async () => {
       attempts++;
-      await checkSubscriptionStatus();
-    
-      if (subscriptionStatus.isPremium) {
-        // Banner already hidden above, but ensure it stays hidden
-        if (trialBanner) {
-          trialBanner.style.display = 'none';
-        }
-       
-        showToast('✅ Premium activated! Reloading...', 3000);
-        setTimeout(() => {
+      console.log(`Polling subscription status (${attempts}/${MAX_ATTEMPTS})...`);
+
+      try {
+        const token = TokenManager.get();
+        const response = await fetch('/api/subscription/status', {
+          headers: { 'Authorization': `Bearer ${token}` },
+          cache: 'no-store' // ← Force bypass cache
+        });
+
+        if (!response.ok) throw new Error('Status check failed');
+
+        const status = await response.json();
+        console.log('Poll result:', status);
+
+        if (status.isPremium) {
+          // ✅ SUCCESS: Premium activated
+          showToast('✅ Premium activated! Reloading...', 3000);
+          
+          // Clear URL params BEFORE reload
           window.history.replaceState({}, document.title, window.location.pathname);
-          window.location.reload();
-        }, 2000);
-      } else if (attempts < 10) {
-        setTimeout(checkStatus, 2000);
-      } else {
-        showToast('Premium activation pending. Refresh if not active.', 5000);
-        window.history.replaceState({}, document.title, window.location.pathname);
+          
+          setTimeout(() => {
+            window.location.reload(true); // ← Hard reload (bypass cache)
+          }, 2000);
+          return; // ← Stop polling
+        }
+
+        // ✅ Keep polling if not premium yet
+        if (attempts < MAX_ATTEMPTS) {
+          setTimeout(checkStatus, 1000); // ← Check every 1 second
+        } else {
+          // ✅ TIMEOUT: Fallback to manual refresh
+          showToast('⚠️ Activation pending. Please refresh manually.', 8000);
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+        if (attempts < MAX_ATTEMPTS) {
+          setTimeout(checkStatus, 1000); // ← Retry on error
+        }
       }
     };
-  
-    checkStatus();
+
+    checkStatus(); // ← Start polling loop
   } else if (paymentStatus === 'cancelled') {
     showToast('Payment cancelled. Upgrade anytime from Settings.');
     window.history.replaceState({}, document.title, window.location.pathname);
