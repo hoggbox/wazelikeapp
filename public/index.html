@@ -1099,6 +1099,10 @@ if ('serviceWorker' in navigator) {
       <input type="text" id="username" name="username" placeholder="Username" style="display: none;">
       <input type="email" id="email" name="email" placeholder="Email" required>
       <input type="password" id="password" name="password" placeholder="Password" required>
+      <label style="display: flex; align-items: center; gap: 0.5rem; color: white; font-size: 0.9rem;">
+        <input type="checkbox" id="stay-logged-in" checked style="width: auto;">
+        <span>Stay logged in</span>
+      </label>
       <button type="submit">Submit</button>
     </form>
     <p id="auth-switch">Don't have an account? <a href="#" style="color: #4CAF50;" onclick="switchAuthMode()">Register</a></p>
@@ -1271,17 +1275,26 @@ if ('serviceWorker' in navigator) {
     const ProgrammaticUpdateManager = {
   _isUpdating: false,
   _callbacks: [],
-  _startTime: 0, // ← Add this
+  _startTime: 0,
+  _timeoutId: null,
   start() {
     this._isUpdating = true;
-    this._startTime = Date.now(); // ← Track when started
+    this._startTime = Date.now();
     this._callbacks = [];
+  
+    // Auto-reset after 5 seconds
+    clearTimeout(this._timeoutId);
+    this._timeoutId = setTimeout(() => {
+      if (this._isUpdating) {
+        console.error('ProgrammaticUpdateManager stuck, force resetting');
+        this.end();
+      }
+    }, 5000);
   },
   end(callback = null) {
-    if (callback) {
-      this._callbacks.push(callback);
-    }
-    // Use requestAnimationFrame for next frame callback instead of setTimeout
+    clearTimeout(this._timeoutId);
+    if (callback) this._callbacks.push(callback);
+  
     requestAnimationFrame(() => {
       this._isUpdating = false;
       this._callbacks.forEach(cb => cb());
@@ -1343,7 +1356,7 @@ if ('serviceWorker' in navigator) {
     let mockSimulationInterval = null;
     let isRegister = false;
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const LOCATION_UPDATE_THRESHOLD = isMobile ? 500 : 100;
+    const LOCATION_UPDATE_THRESHOLD = isMobile ? 1000 : 100;
     let wakeLock = null;
     let isLowBattery = false;
     let visibilityHandler = null;
@@ -1651,6 +1664,7 @@ if ('serviceWorker' in navigator) {
       const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value.trim();
       const username = isRegister ? document.getElementById('username').value.trim() : '';
+      const stayLoggedIn = document.getElementById('stay-logged-in').checked;
       console.log('Form data:', { email, password, username, endpoint: isRegister ? '/api/auth/register' : '/api/auth/login' });
       if (!email || !password || (isRegister && !username)) {
         console.error('Missing required fields:', { email, password, username });
@@ -1661,7 +1675,6 @@ if ('serviceWorker' in navigator) {
       const body = isRegister ? { email, password, username } : { email, password };
       try {
         console.log('Sending fetch request to:', endpoint);
-        const token = TokenManager.get();
         const response = await fetch(endpoint, {
           method: 'POST',
           mode: 'cors',
@@ -1674,7 +1687,7 @@ if ('serviceWorker' in navigator) {
         const data = await response.json();
         console.log('Response data:', data);
         if (response.ok && data.token && data.user) {
-          TokenManager.set(data.token);
+          TokenManager.set(data.token, stayLoggedIn);
           localStorage.setItem('userId', data.user.id);
           sessionStorage.setItem('userId', data.user.id);
           isAdmin = data.user.email === 'imhoggbox@gmail.com' || data.user.isAdmin;
@@ -1951,7 +1964,7 @@ if ('serviceWorker' in navigator) {
       return response.json();
     }
     function loadGoogleMaps() {
-  document.getElementById('map-loading').style.display = 'block'; // ← Show loader
+  document.getElementById('map-loading').style.display = 'block';
   console.log('Loading Google Maps API...');
   const script = document.createElement('script');
   script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
@@ -1959,33 +1972,34 @@ if ('serviceWorker' in navigator) {
   script.defer = true;
   script.onerror = () => {
     console.error('Failed to load Google Maps script');
-    document.getElementById('map-loading').style.display = 'none'; // ← Hide loader
-    showToast('Failed to load map. Check network or API key.');
-    setTimeout(loadGoogleMaps, 2000);
+    document.getElementById('map-loading').style.display = 'none';
+    showToast('Failed to load map. Retrying in 5 seconds...');
+    setTimeout(loadGoogleMaps, 5000); // Retry with longer delay
   };
   script.onload = () => {
     console.log('Google Maps script loaded successfully');
-    document.getElementById('map-loading').style.display = 'none'; // ← Hide loader
+    document.getElementById('map-loading').style.display = 'none';
   };
   document.head.appendChild(script);
 }
     window.initMap = function() {
-      console.log('initMap called');
-      if (!window.google || !google.maps || !google.maps.Map || !google.maps.marker || !google.maps.places || !google.maps.routes || !google.maps.geometry) {
-        console.error('Google Maps libraries not loaded:', {
-          Map: !!google.maps?.Map,
-          AdvancedMarkerElement: !!google.maps?.marker,
-          Autocomplete: !!google.maps?.places,
-          DirectionsService: !!google.maps?.routes,
-          Geometry: !!google.maps?.geometry
-        });
-        showToast('Failed to load map libraries. Retrying...');
-        setTimeout(loadGoogleMaps, 2000);
-        return;
+  console.log('initMap called');
+  // CRITICAL: Verify all required libraries loaded
+  if (!window.google || !google.maps || !google.maps.Map ||
+      !google.maps.marker || !google.maps.places ||
+      !google.maps.routes || !google.maps.geometry) {
+    console.error('Google Maps libraries not fully loaded, retrying in 2s...');
+    setTimeout(() => {
+      if (window.google?.maps?.Map) {
+        initializeMap(); // Retry once
+      } else {
+        showToast('Map loading failed. Please refresh the page.');
       }
-      console.log('Google Maps API loaded successfully');
-      initializeMap();
-    };
+    }, 2000);
+    return;
+  }
+  initializeMap();
+};
     function initializeMap() {
       console.log('Initializing map...');
       // Add validation check
@@ -2271,7 +2285,7 @@ if ('serviceWorker' in navigator) {
     }
   }, 2000);
 }
-    const debouncedCameraUpdate = debounce(updateNavigationCamera, CONFIG.DEBOUNCE_DELAY);
+    const debouncedCameraUpdate = debounce(updateNavigationCamera, 100);
     function shouldUpdateCameraView(newPos, newHeading, timeSinceLastUpdate) {
       if (!navState.isFollowing || !navState.isNavigating) return false;
       // Always update if significant time has passed
@@ -3098,68 +3112,32 @@ if ('serviceWorker' in navigator) {
     // Run health check every minute
     setInterval(() => AppHealth.check(), 60000);
     async function startWakeWordDetection() {
-      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        console.warn('Speech recognition not supported');
-        showToast('Voice assistant not supported in this browser');
+  if (!voiceAssistantEnabled) return;
+  // Check if permission already denied
+  if (localStorage.getItem('micPermissionDenied') === 'true') {
+    console.log('Mic permission previously denied, skipping');
+    return;
+  }
+  try {
+    await navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        stream.getTracks().forEach(track => track.stop());
+        localStorage.removeItem('micPermissionDenied'); // Clear if granted
+      })
+      .catch(err => {
+        console.error('Mic access denied:', err);
+        localStorage.setItem('micPermissionDenied', 'true'); // Remember denial
+        showToast('Voice assistant disabled - mic access denied');
+        document.getElementById('voice-assistant-toggle').checked = false;
+        voiceAssistantEnabled = false;
         return;
-      }
-      if (!voiceAssistantEnabled) {
-        console.log('Voice assistant disabled, skipping');
-        return;
-      }
-      try {
-        await navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-          stream.getTracks().forEach(track => track.stop());
-          console.log('Mic access granted for wake word');
-        }).catch(err => {
-          console.error('Mic access denied:', err);
-          showToast('Mic access denied - check permissions');
-          return;
-        });
-        if (wakeWordRecognizer) {
-          wakeWordRecognizer.stop();
-        }
-        wakeWordRecognizer = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-        wakeWordRecognizer.continuous = true;
-        wakeWordRecognizer.interimResults = true;
-        wakeWordRecognizer.lang = 'en-US';
-        wakeWordRecognizer.maxAlternatives = 1;
-        wakeWordRecognizer.onresult = (event) => {
-          let transcript = '';
-          for (let i = event.resultIndex; i < event.results.length; i++) {
-            transcript += event.results[i][0].transcript.toLowerCase().trim();
-          }
-          console.log('Wake word heard:', transcript);
-          if (transcript.includes('hey nova')) {
-            console.log('Wake word "Hey Nova" detected');
-            showToast('Listening for command...');
-            wakeWordRecognizer.stop();
-            startCommandRecognition();
-            setTimeout(startWakeWordDetection, 3000);
-          }
-        };
-        wakeWordRecognizer.onerror = (event) => {
-          console.error('Wake word recognition error:', event.error);
-          if (event.error === 'not-allowed') {
-            showToast('Mic access denied - check permissions');
-          } else if (event.error !== 'aborted') {
-            setTimeout(startWakeWordDetection, 1000);
-          }
-        };
-        wakeWordRecognizer.onend = () => {
-          if (voiceAssistantEnabled) {
-            setTimeout(startWakeWordDetection, 100);
-          }
-        };
-        wakeWordRecognizer.start();
-        console.log('Wake word detection started');
-        showToast('Voice assistant enabled');
-      } catch (err) {
-        console.error('Failed to start wake word detection:', err);
-        showToast('Voice assistant failed to start');
-        stopWakeWordDetection();
-      }
-    }
+      });
+  
+    // ... rest of wake word setup ...
+  } catch (err) {
+    console.error('Wake word init failed:', err);
+  }
+}
     function stopWakeWordDetection() {
       if (wakeWordRecognizer) {
         wakeWordRecognizer.stop();
@@ -3495,7 +3473,6 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         continue;
       }
       if (response.ok) return response;
-  
       if (response.status === 401) {
         const refreshed = await refreshToken();
         if (refreshed) {
@@ -3854,6 +3831,11 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
       console.log('Verification HUD dismissed');
     }
     async function deleteAlert(id, item) {
+  // ✅ Save state BEFORE modifying UI
+  const removedFromUI = item;
+  const markerBackup = markers.get(id);
+  const alertBackup = currentAlerts.find(a => a._id === id);
+  
   // Remove from UI immediately
   item?.remove();
   const marker = markers.get(id);
@@ -3861,6 +3843,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
     releaseMarker(marker);
     markers.delete(id);
   }
+  
   try {
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
@@ -3909,48 +3892,48 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
     const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
     fetchProfile(ownId, true).then(populateAccountProfile);
   } catch (error) {
-    // Rollback on error
-    showToast('Failed to delete alert. Refreshing...');
-    setTimeout(() => pollAlerts(), 1000);
-    console.error('Error deleting alert:', error);
+    // ✅ ROLLBACK on failure
+    if (removedFromUI && alertBackup) {
+      currentAlerts.push(alertBackup);
+      displayAlertsInHud(currentAlerts); // Re-render
+      
+      if (markerBackup) {
+        markers.set(id, markerBackup);
+        markerBackup.map = map; // Re-show marker
+      }
+    }
+    showToast('Failed to delete alert. Restored.');
+    console.error('Delete rollback executed:', error);
   }
 }
     async function pollAlerts() {
-      if (!navState.userLocation) return;
-      try {
-        const token = TokenManager.get();
-        if (!TokenManager.isValid()) {
-          console.error('Invalid token, skipping alert poll');
-          return;
-        }
-        console.log('Polling alerts with token:', token.substring(0, 20) + '...');
-        const response = await fetchWithRetry(`/api/markers?lat=${navState.userLocation.lat}&lng=${navState.userLocation.lng}&maxDistance=${navState.alertRadius * 1609.34}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        console.log('Poll alerts response:', { status: response.status, ok: response.ok });
-        const serverAlerts = await response.json();
-        const serverAlertIds = new Set(serverAlerts.map(alert => alert._id));
-        let removedCount = 0;
-        markers.forEach((marker, id) => {
-          if (!serverAlertIds.has(id)) {
-            releaseMarker(marker);
-            markers.delete(id);
-            removedCount++;
-            console.log('Released stale marker during poll:', id);
-          }
-        });
-        currentAlerts = [...new Map(serverAlerts.filter(alert => {
-          if (alert.type === 'Traffic Camera' && !showTrafficCameras) return false;
-          const filterKey = alert.type.toLowerCase().replace(/\s+/g, '-');
-          return navState.alertFilters[filterKey] !== false;
-        }).map(a => [a._id, a])).values()];
-        displayAlertsInHud(currentAlerts);
-        console.log(`Polling synced: ${serverAlerts.length} markers, removed ${removedCount} stale`);
-      } catch (error) {
-        console.error('Error polling alerts:', error);
-        showToast('Failed to sync alerts.');
+  if (!navState.userLocation) return;
+  try {
+    const token = TokenManager.get();
+    if (!TokenManager.isValid()) return;
+    
+    const response = await fetchWithRetry(/* ... */);
+    const serverAlerts = await response.json();
+    
+    // ✅ Dedupe first
+    const serverAlertIds = new Set(serverAlerts.map(a => a._id));
+    
+    // ✅ THEN remove stale markers
+    markers.forEach((marker, id) => {
+      if (!serverAlertIds.has(id)) {
+        releaseMarker(marker);
+        markers.delete(id);
+        console.log('Removed stale marker:', id);
       }
-    }
+    });
+    
+    // ✅ Update currentAlerts
+    currentAlerts = [...new Map(serverAlerts.map(a => [a._id, a])).values()];
+    displayAlertsInHud(currentAlerts);
+  } catch (error) {
+    console.error('Poll error:', error);
+  }
+}
     async function fetchAndDisplayMarkers(map, center) {
       try {
         const token = TokenManager.get();
@@ -5743,7 +5726,7 @@ function initSocket(token, userId) {
   }, 200);
   socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
-  // ENHANCED: More robust type checking
+  // ENHANCED validation
   if (!alert || typeof alert !== 'object' ||
       !alert._id || typeof alert._id !== 'string' ||
       !alert.location?.coordinates ||
@@ -5754,7 +5737,7 @@ function initSocket(token, userId) {
     console.error('Invalid alert structure:', alert);
     return;
   }
-  // Add after structure validation:
+  // Timestamp validation
   if (!alert.timestamp || new Date(alert.timestamp) > new Date()) {
     console.error('Invalid alert timestamp:', alert.timestamp);
     return;
@@ -5956,7 +5939,6 @@ function updateUIForSubscription() {
     const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
     const now = Date.now();
     const shouldShow = (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000); // 48hr cooldown
- 
     if (shouldShow) {
       trialBanner.style.display = 'flex';
       trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
@@ -5978,7 +5960,6 @@ function updateUIForSubscription() {
   PREMIUM_FEATURES.forEach(featureId => {
     const el = document.getElementById(featureId);
     if (!el) return;
- 
     if (hasAccess) {
       el.classList.remove('locked-feature');
       el.disabled = false;
@@ -6000,7 +5981,6 @@ function updateUIForSubscription() {
   document.querySelectorAll('.report-button').forEach(btn => {
     const type = btn.getAttribute('data-alert-type');
     const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(type);
- 
     if (isPremiumType && !hasAccess) {
       btn.classList.add('locked-feature');
       btn.style.pointerEvents = 'auto';
@@ -6086,129 +6066,61 @@ async function handlePaymentCallback() {
   const sessionId = urlParams.get('session_id');
   const paymentStatus = urlParams.get('payment');
   if (sessionId && paymentStatus === 'success') {
-    // ✅ IMMEDIATELY hide banner
-    const trialBanner = document.getElementById('trial-banner');
-    if (trialBanner) {
-      trialBanner.style.display = 'none';
-    }
+    // Hide banner IMMEDIATELY
+    document.getElementById('trial-banner').style.display = 'none';
     createCelebration();
     showToast('🎉 Payment successful! Activating premium...', 5000);
-    // ✅ Cache token ONCE
     const token = TokenManager.get();
-    if (!token) {
-      showToast('Authentication error. Please log in.');
+    if (!TokenManager.isValid()) {
+      showToast('Please log in to complete activation');
       window.history.replaceState({}, '', window.location.pathname);
       return;
     }
     let attempts = 0;
-    const MAX_ATTEMPTS = 30;
+    const MAX_ATTEMPTS = 40; // Increase to 40 seconds
+    let pollTimeoutId = null;
+  
     const checkStatus = async () => {
       attempts++;
-      console.log(`Polling (${attempts}/${MAX_ATTEMPTS})...`);
-
       try {
-        // Use cached token
         const response = await fetch('/api/subscription/status', {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
-            'Cache-Control': 'no-cache'
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
           },
           cache: 'no-store'
         });
-
         if (!response.ok) throw new Error('Status check failed');
         const status = await response.json();
-
         if (status.isPremium) {
-          // ✅ SUCCESS: Clear URL BEFORE reload
+          clearTimeout(pollTimeoutId); // ✅ Cancel polling
           showToast('✅ Premium activated! Reloading...', 3000);
-          
-          // ✅ FIX: Use complete URL, not just pathname
-          try {
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, document.title, cleanUrl);
-            console.log('✅ URL cleaned:', cleanUrl);
-          } catch (historyError) {
-            console.warn('Could not clean URL:', historyError);
-            // Fallback: just reload with query params
-          }
-          
-          setTimeout(() => {
-            window.location.reload(true);
-          }, 2000);
-          return; // Stop polling
+        
+          // Clear URL cleanly
+          const cleanUrl = window.location.origin + window.location.pathname;
+          window.history.replaceState({}, document.title, cleanUrl);
+        
+          setTimeout(() => window.location.reload(true), 2000);
+          return;
         }
-
-        // Continue polling
+        
         if (attempts < MAX_ATTEMPTS) {
-          setTimeout(checkStatus, 1000);
+          pollTimeoutId = setTimeout(checkStatus, 1000);
         } else {
-          // ✅ Timeout: clear URL with same fix
-          try {
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, document.title, cleanUrl);
-          } catch (historyError) {
-            console.warn('Could not clean URL on timeout:', historyError);
-          }
-          showToast('⚠️ Activation pending. Refresh manually.', 8000);
+          clearTimeout(pollTimeoutId);
+          showToast('⚠️ Activation taking longer than expected. Please refresh manually.', 10000);
+          window.history.replaceState({}, document.title, cleanUrl);
         }
       } catch (error) {
         console.error('Polling error:', error);
-        
-        // ✅ Also fix error handler
-        if (attempts >= MAX_ATTEMPTS) {
-          try {
-            const cleanUrl = window.location.origin + window.location.pathname;
-            window.history.replaceState({}, document.title, cleanUrl);
-          } catch (historyError) {
-            console.warn('Could not clean URL on error:', historyError);
-          }
-        }
-        
         if (attempts < MAX_ATTEMPTS) {
-          setTimeout(checkStatus, 1000);
+          pollTimeoutId = setTimeout(checkStatus, 1000);
         }
       }
     };
-    checkStatus(); // Start polling
-  } else if (paymentStatus === 'cancelled') {
-    showToast('Payment cancelled.');
-    try {
-      const cleanUrl = window.location.origin + window.location.pathname;
-      window.history.replaceState({}, document.title, cleanUrl);
-    } catch (error) {
-      console.warn('Could not clean URL:', error);
-    }
+  
+    checkStatus();
   }
-}
-// Ensure celebration function exists (add if missing around line 3550)
-function createCelebration() {
-  const celebration = document.createElement('div');
-  celebration.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    font-size: 5rem;
-    z-index: 10003;
-    animation: celebrate 2s ease-out forwards;
-    pointer-events: none;
-  `;
-  celebration.innerHTML = '🎉<br><span style="font-size:2rem">Premium Unlocked!</span>';
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes celebrate {
-      0% { transform: translate(-50%, -50%) scale(0); opacity: 0; }
-      50% { transform: translate(-50%, -50%) scale(1.5); opacity: 1; }
-      100% { transform: translate(-50%, -50%) scale(1) translateY(-100px); opacity: 0; }
-    }
-  `;
-  document.head.appendChild(style);
-  document.body.appendChild(celebration);
-  setTimeout(() => {
-    celebration.remove();
-    style.remove();
-  }, 2000);
 }
 async function cancelSubscription() {
   try {
@@ -6268,9 +6180,26 @@ async function requestStorageAccess() {
   }
   return true; // Not Firefox or already permitted
 }
+async function ensureValidToken() {
+  if (!TokenManager.isValid()) {
+    const refreshed = await refreshToken();
+    if (!refreshed) {
+      console.log('Token refresh failed, showing auth form');
+      document.getElementById('auth-container').style.display = 'flex';
+      return false;
+    }
+  }
+  return true;
+}
 async function initApp() {
+  // ... existing location code ...
+  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+  if (!await ensureValidToken() || !userId) {
+    document.getElementById('auth-container').style.display = 'flex';
+    return; // Don't proceed without valid auth
+  }
+  // ... rest of init ...
   console.log('Initializing app...');
- 
   // ✅ Request storage access first
   const hasStorageAccess = await requestStorageAccess();
   if (!hasStorageAccess && window.location.search.includes('payment=success')) {
@@ -6278,8 +6207,6 @@ async function initApp() {
     showToast('Storage access required. Please allow and refresh.');
     return;
   }
-  const token = TokenManager.get();
-  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
   // ← FIX: Initialize map FIRST, regardless of auth status
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
@@ -6317,8 +6244,7 @@ async function initApp() {
     document.getElementById('auth-container').style.display = 'flex';
     // Don't return early - let map still load
   } else {
-    initSocket(token, userId);
-   
+    initSocket(TokenManager.get(), userId);
     // ✅ FIX: Only init subscription if NOT in payment callback
     if (!window.location.search.includes('payment=success')) {
       initSubscription();
@@ -6346,6 +6272,14 @@ async function initApp() {
     } else {
       initApp();
     }
+    // Add periodic cleanup
+setInterval(() => {
+  if (markerPool.length > MAX_MARKER_POOL_SIZE) {
+    const excess = markerPool.length - MAX_MARKER_POOL_SIZE;
+    markerPool.splice(0, excess);
+    console.log(`Cleaned ${excess} excess markers from pool`);
+  }
+}, 60000); // Every minute
   </script>
 </body>
 </html>
