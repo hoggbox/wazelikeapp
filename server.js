@@ -72,6 +72,10 @@ const corsOptions = {
 const io = new Server(server, {
   cors: corsOptions
 });
+
+// ✅ Make Socket.IO available to webhook route
+app.set('io', io);
+
 // Enable trust proxy for hosting platforms
 app.set('trust proxy', 1);
 
@@ -87,11 +91,14 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use(cors(corsOptions));
-// ← MUST come BEFORE bodyParser for raw body access
-app.use('/api', require('./routes/webhooks'));
 
-app.use(express.json()); // ← bodyParser comes AFTER
-app.use(express.raw({type: 'application/json'})); // For Stripe webhook
+// ✅ CRITICAL: Webhook route BEFORE bodyParser (needs raw body)
+app.use('/api/stripe', require('./routes/webhooks'));
+
+// ✅ THEN add bodyParser for other routes
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use((req, res, next) => {
   req.io = io;
@@ -222,88 +229,6 @@ app.post('/api/geocode', authMiddleware, async (req, res) => {
   );
   const data = await response.json();
   res.json(data);
-});
-// Stripe Webhook Handler
-app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-  
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch (err) {
-    console.error('⚠️ Webhook signature failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  try {
-    switch (event.type) {
-      case 'checkout.session.completed':
-        const session = event.data.object;
-        const userId = session.client_reference_id || session.metadata?.userId;
-        
-        if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-          console.error('❌ Invalid userId in webhook:', userId);
-          return res.status(400).send('Invalid userId');
-        }
-
-        try {
-          const user = await User.findByIdAndUpdate(userId, {
-            subscriptionStatus: 'active',
-            stripeSubscriptionId: session.subscription,
-            stripeCustomerId: session.customer,
-            premiumActivatedAt: new Date(),
-            trialEndsAt: null,
-            trialStartedAt: null,
-            lastReminderSent: null
-          }, { new: true });
-          
-          if (!user) {
-            console.error('❌ User not found for webhook:', userId);
-          } else {
-            console.log('✅ Premium activated:', userId, user.email);
-          }
-          
-          // Emit real-time update via Socket.IO
-          io.to(userId).emit('premiumActivated', {
-            isPremium: true,
-            activatedAt: new Date()
-          });
-        } catch (error) {
-          console.error('❌ Webhook update failed:', error);
-        }
-        
-        break;
-      
-      case 'customer.subscription.deleted':
-        const deletedSub = event.data.object;
-        await User.findOneAndUpdate(
-          { stripeSubscriptionId: deletedSub.id },
-          { subscriptionStatus: 'cancelled' }
-        );
-        break;
-      
-      case 'customer.subscription.updated':
-        const updatedSub = event.data.object;
-        await User.findOneAndUpdate(
-          { stripeSubscriptionId: updatedSub.id },
-          { subscriptionStatus: updatedSub.status }
-        );
-        break;
-      
-      case 'invoice.payment_failed':
-        const invoice = event.data.object;
-        await User.findOneAndUpdate(
-          { stripeCustomerId: invoice.customer },
-          { subscriptionStatus: 'past_due' }
-        );
-        break;
-    }
-    
-    res.json({received: true});
-  } catch (error) {
-    console.error('❌ Webhook handler error:', error);
-    res.status(400).send(`Webhook Error: ${error.message}`);
-  }
 });
 // Alert Posting Endpoint
 app.post('/api/alerts', authMiddleware, async (req, res) => {
