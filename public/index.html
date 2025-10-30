@@ -1404,17 +1404,22 @@ let pendingRouteRequest = null;
     let postingTimeout = null;
     // Add to top of file
 let lastRealGPSTime = 0;
+let reconnectCount = 0;
+let pendingAlerts = [];
+let alertBatchTimeout = null;
     // FIXED: Alert Placement System - Moved to setupEventListeners()
     // FIXED: Alert Location Confirmation
 async function confirmAlertLocation(location, alertType) {
   try {
-    // Check token BEFORE doing anything else
-    if (!TokenManager.isValid()) {
-      console.error('Invalid token, showing auth form');
-      cancelAlert(); // Clean up first
-      TokenManager.clear();
-      document.getElementById('auth-container').style.display = 'flex';
-      return;
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      return; // Auth modal already shown
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
     }
     const token = TokenManager.get();
     // Check for nearby alerts
@@ -1422,9 +1427,7 @@ async function confirmAlertLocation(location, alertType) {
       `/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=100`,
       { headers: { 'Authorization': `Bearer ${token}` }}
     );
- 
     const nearbyAlerts = await response.json();
- 
     if (nearbyAlerts.length > 0) {
       const nearestDistance = Math.min(...nearbyAlerts.map(a =>
         google.maps.geometry.spherical.computeDistanceBetween(
@@ -1432,7 +1435,6 @@ async function confirmAlertLocation(location, alertType) {
           new google.maps.LatLng(a.location.coordinates[1], a.location.coordinates[0])
         )
       ));
-   
       if (nearestDistance < 100) {
         showToast(
           `⚠️ Alert ${Math.round(nearestDistance)}m away. Place at least 100m apart.`,
@@ -1509,12 +1511,15 @@ async function postAlert() {
     showToast('No alert data available. Please try again.');
     return;
   }
-  if (!TokenManager.isValid()) {
-    console.error('Invalid token, showing auth form');
-    cancelAlert(); // Clean up
-    TokenManager.clear();
-    document.getElementById('auth-container').style.display = 'flex';
-    return;
+  // ✅ NEW WAY
+  const tokenStatus = await TokenManager.ensureValid();
+  if (tokenStatus === false) {
+    return; // Auth modal already shown
+  }
+  // If tokenStatus === 'offline', continue with cached data
+  const isOffline = tokenStatus === 'offline';
+  if (isOffline) {
+    console.log('Operating in offline mode');
   }
   // NOW set guard
   if (isPostingAlert) {
@@ -1542,7 +1547,6 @@ async function postAlert() {
     const result = await response.json();
     if (response.status === 201 && result.alert?._id) {
       console.log('Alert posted successfully:', result.alert._id);
-   
       // Remove temp marker
       if (navState.tempMarker) {
         navState.tempMarker.map = null;
@@ -1577,7 +1581,6 @@ async function postAlert() {
       const reportBox = document.getElementById('report-box');
       const reportOptions = document.querySelector('.report-options');
       const confirmAlert = document.getElementById('confirm-alert');
-   
       reportBox.classList.remove('active');
       reportOptions.style.display = 'grid';
       confirmAlert.classList.remove('active');
@@ -1636,58 +1639,148 @@ function cancelAlert() {
     lockNavigation();
   }
 }
-    // TokenManager
-    const TokenManager = {
-      // ... existing code ...
-      async ensureValid() {
-        if (!this.isValid()) {
-          // Check if navigating
-          if (navState.isNavigating) {
-            const refreshed = await refreshToken();
-            if (!refreshed) {
-              // Show minimal inline warning instead of modal
-              showToast('Session expired. Navigation will continue offline.', 10000);
-              return false;
-            }
-            return true;
-          } else {
-            // Not navigating, can show full auth modal
-            TokenManager.clear();
-            document.getElementById('auth-container').style.display = 'flex';
-            return false;
-          }
-        }
+    // ✅ IMPROVED VERSION
+const TokenManager = {
+  get() {
+    return localStorage.getItem('token') || sessionStorage.getItem('token');
+  },
+  set(token, remember = true) {
+    if (remember) {
+      localStorage.setItem('token', token);
+    }
+    sessionStorage.setItem('token', token);
+  },
+  clear() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userId');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('userId');
+  },
+  isValid() {
+    const token = this.get();
+    if (!token || !token.includes('.') || token === 'undefined') {
+      return false;
+    }
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.exp * 1000 > Date.now();
+    } catch {
+      return false;
+    }
+  },
+  // ✅ IMPROVED VERSION
+  async ensureValid() {
+    if (this.isValid()) {
+      return true;
+    }
+  
+    // Token expired - attempt refresh
+    console.log('Token expired, attempting refresh...');
+  
+    try {
+      const refreshed = await refreshToken();
+    
+      if (refreshed) {
+        console.log('✅ Token refreshed successfully');
         return true;
-      },
-      get() {
-        return localStorage.getItem('token') || sessionStorage.getItem('token');
-      },
-      set(token, remember = true) {
-        if (remember) {
-          localStorage.setItem('token', token);
-        }
-        sessionStorage.setItem('token', token);
-      },
-      clear() {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('userId');
-      },
-      isValid() {
-        const token = this.get();
-        if (!token || !token.includes('.') || token === 'undefined') {
-          return false;
-        }
-        // Check expiration
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          return payload.exp * 1000 > Date.now();
-        } catch {
-          return false;
-        }
       }
-    };
+    
+      // Refresh failed - handle based on context
+      if (navState.isNavigating) {
+        console.warn('⚠️ Token refresh failed during navigation - continuing offline');
+        showToast('Session expired. Navigation continues offline.', 8000);
+      
+        // Flag for retry after navigation ends
+        localStorage.setItem('tokenRefreshNeeded', 'true');
+      
+        // Allow navigation to continue with cached data
+        return 'offline'; // Special return value
+      } else {
+        // Not critical - show auth modal
+        console.error('❌ Token refresh failed - showing login');
+        this.clear();
+        document.getElementById('auth-container').style.display = 'flex';
+        showToast('Session expired. Please log in again.', 5000);
+        return false;
+      }
+    } catch (error) {
+      console.error('Token refresh error:', error);
+    
+      // Network error during refresh
+      if (!navigator.onLine) {
+        console.log('📡 Offline - deferring token refresh');
+        showToast('Offline mode active', 3000);
+        return 'offline';
+      }
+    
+      // Unknown error - force re-auth
+      this.clear();
+      document.getElementById('auth-container').style.display = 'flex';
+      return false;
+    }
+  }
+};
+    // ✅ IMPROVED refreshToken function (replace around line 4409)
+async function refreshToken() {
+  const MAX_REFRESH_ATTEMPTS = 3;
+  let attempts = 0;
+  while (attempts < MAX_REFRESH_ATTEMPTS) {
+    try {
+      const token = TokenManager.get();
+      if (!token) {
+        console.error('No token to refresh');
+        return false;
+      }
+    
+      const response = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000 // 10s timeout
+      });
+    
+      if (response.ok) {
+        const data = await response.json();
+        TokenManager.set(data.token);
+        console.log('✅ Token refreshed successfully');
+      
+        // Clear retry flag
+        localStorage.removeItem('tokenRefreshNeeded');
+      
+        return true;
+      }
+    
+      // 401 = refresh token also expired
+      if (response.status === 401) {
+        console.error('Refresh token expired - re-authentication required');
+        return false;
+      }
+    
+      // Retry on server errors
+      if (response.status >= 500) {
+        attempts++;
+        console.warn(`Server error, retry ${attempts}/${MAX_REFRESH_ATTEMPTS}`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempts)); // Backoff
+        continue;
+      }
+    
+      return false;
+    } catch (error) {
+      attempts++;
+      console.error(`Token refresh attempt ${attempts}/${MAX_REFRESH_ATTEMPTS} failed:`, error);
+    
+      if (attempts >= MAX_REFRESH_ATTEMPTS) {
+        return false;
+      }
+    
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempts));
+    }
+  }
+  return false;
+}
     // Debounce utility
     const debounce = (fn, delay) => {
       let timer;
@@ -2225,21 +2318,49 @@ function cancelAlert() {
       }
       return response.json();
     }
-    function loadGoogleMaps() {
+function loadGoogleMaps() {
   document.getElementById('map-loading').style.display = 'block';
   console.log('Loading Google Maps API...');
   const script = document.createElement('script');
   script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyBSW8iQAE1AjjouEu4df-Cvq1ceUMLBit4&map_ids=${mapId}&v=beta&callback=initMap&libraries=places,geometry,marker,routes&loading=async`;
   script.async = true;
   script.defer = true;
+  // Track retry attempts
+  const retryCount = parseInt(sessionStorage.getItem('mapLoadRetries') || '0');
   script.onerror = () => {
-    console.error('Failed to load Google Maps script');
-    document.getElementById('map-loading').style.display = 'none';
-    showToast('Failed to load map. Retrying in 5 seconds...');
-    setTimeout(loadGoogleMaps, 5000); // Retry with longer delay
+    console.error('Failed to load Google Maps script, attempt:', retryCount + 1);
+  
+    if (retryCount < 3) {
+      // Retry up to 3 times
+      sessionStorage.setItem('mapLoadRetries', (retryCount + 1).toString());
+      showToast(`Map load failed. Retrying (${retryCount + 1}/3)...`, 3000);
+      setTimeout(loadGoogleMaps, 5000);
+    } else {
+      // Give up after 3 retries
+      sessionStorage.removeItem('mapLoadRetries');
+      document.getElementById('map-loading').innerHTML = `
+        <div style="text-align: center; padding: 2rem; color: white;">
+          <h3 style="margin-bottom: 1rem;">⚠️ Map Failed to Load</h3>
+          <p style="margin-bottom: 1rem;">Unable to connect to Google Maps after 3 attempts.</p>
+          <p style="margin-bottom: 1.5rem; font-size: 0.9rem;">Please check:</p>
+          <ul style="text-align: left; max-width: 300px; margin: 0 auto 1.5rem; font-size: 0.9rem;">
+            <li>Your internet connection</li>
+            <li>Firewall/VPN settings</li>
+            <li>Browser extensions blocking scripts</li>
+          </ul>
+          <button onclick="sessionStorage.removeItem('mapLoadRetries'); location.reload()"
+                  style="background: #4CAF50; color: white; border: none; padding: 0.8rem 1.5rem;
+                         border-radius: 0.5rem; cursor: pointer; font-size: 1rem;">
+            🔄 Retry Now
+          </button>
+        </div>
+      `;
+      document.getElementById('map-loading').style.display = 'flex';
+    }
   };
   script.onload = () => {
     console.log('Google Maps script loaded successfully');
+    sessionStorage.removeItem('mapLoadRetries'); // Clear on success
     document.getElementById('map-loading').style.display = 'none';
   };
   document.head.appendChild(script);
@@ -2585,11 +2706,124 @@ function updateMapHeading(targetHeading) {
 }
     // Update stopGPS to use TweenManager
 function stopGPS() {
-  // ... existing code ...
-  // Stop ALL tweens
-  TweenManager.stopAll();
-  currentHeadingTween = null;
-  // ... rest of existing code ...
+  // ... existing cleanup code ...
+  // ✅ Add retry logic after navigation ends (add to stopGPS function around line 4130)
+  if (localStorage.getItem('tokenRefreshNeeded') === 'true') {
+    console.log('Attempting deferred token refresh...');
+    refreshToken().then(success => {
+      if (!success) {
+        showToast('Session expired. Please log in to continue.', 5000);
+        setTimeout(() => {
+          document.getElementById('auth-container').style.display = 'flex';
+        }, 1000);
+      }
+    });
+  }
+  navState.hasArrived = false;
+  navState.alertProximities.clear();
+  cleanupResources();
+  releaseWakeLock();
+  if (watchId) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+    console.log('GPS tracking stopped.');
+  }
+  if (mockSimulationInterval) {
+    clearInterval(mockSimulationInterval);
+    mockSimulationInterval = null;
+    document.getElementById('simulate-position-button').textContent = 'Simulate';
+    console.log('Position simulation stopped');
+  }
+  if (navState.rerouteCheckTimeout) {
+    clearTimeout(navState.rerouteCheckTimeout);
+    navState.rerouteCheckTimeout = null;
+  }
+  if (navState.hazardCheckInterval) {
+    clearInterval(navState.hazardCheckInterval);
+    navState.hazardCheckInterval = null;
+  }
+  if (cameraCheckInterval) {
+    clearInterval(cameraCheckInterval);
+    cameraCheckInterval = null;
+  }
+  // FIXED: Use centralized polling
+  stopAlertPolling();
+  if (routePolyline) {
+    routePolyline.setMap(null);
+    routePolyline = null;
+  }
+  if (offRoadPolyline) {
+    offRoadPolyline.setMap(null);
+    offRoadPolyline = null;
+  }
+  // Stop all tweens
+  if (currentHeadingTween) {
+    currentHeadingTween.stop();
+    currentHeadingTween = null;
+  }
+  TWEEN.removeAll();
+  // Clear all intervals/timeouts
+  [cameraCheckInterval, alertFetchInterval, navState.rerouteCheckTimeout,
+   navState.hazardCheckInterval, mockSimulationInterval, dragTimer].forEach(id => {
+    if (id) clearInterval(id);
+    if (id) clearTimeout(id);
+  });
+  // Add to stopGPS()
+  routeSpatialIndex = null;
+  google.maps.event.clearInstanceListeners(map);
+  google.maps.event.clearInstanceListeners(userMarker);
+  // Clean up TWEEN animations
+  TWEEN.removeAll();
+  // Clear all intervals/timeouts
+  [cameraCheckInterval, alertFetchInterval, navState.rerouteCheckTimeout,
+   navState.hazardCheckInterval, mockSimulationInterval, dragTimer].forEach(id => {
+    if (id) clearInterval(id);
+    if (id) clearTimeout(id);
+  });
+  ProgrammaticUpdateManager.end();
+  navState.isNavigating = false;
+  navState.isFollowing = false;
+  navState.isInitialSnap = false;
+  navState.currentRoute = null;
+  navState.originalRoute = null;
+  navState.routePolyline = null;
+  navState.detailedPath = [];
+  navState.lastSnapIndex = 0;
+  navState.ignoredHazards = [];
+  navState.currentHazard = null;
+  navState.alternativeRoute = null;
+  navState.lastRecalculationTime = 0;
+  navState.currentHeading = 0;
+  navState.lastValidHeading = 0;
+  headingHistory = [];
+  lastLocationUpdate = 0;
+  lastAlertFetchTime = 0;
+  lastPosition = null;
+  rawUserLocation = null;
+  positionHistory = [];
+  document.getElementById('search-container').classList.remove('hidden');
+  document.getElementById('search-container').style.display = 'flex';
+  document.getElementById('hud-container').style.display = 'none';
+  document.getElementById('bottom-hud-container').style.display = 'none';
+  document.getElementById('simulate-position-button').style.display = 'none';
+  alternativeRenderer.setMap(null);
+  directionsRenderer.setMap(null);
+  trafficLayer.setMap(null);
+  if (destMarker) destMarker.setMap(null);
+  document.getElementById('start-button').style.display = 'none';
+  map.setOptions({
+    zoom: 15,
+    tilt: 0,
+    heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
+    disableDefaultUI: true,
+    gestureHandling: 'cooperative',
+    mapTypeControl: false,
+    streetViewControl: false
+  });
+  requestAnimationFrame(() => {
+    map.setCenter(navState.userLocation);
+    console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, tilt: 0 });
+  });
 }
     // Replace updateNavigationCamera tweens
 function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
@@ -2790,12 +3024,12 @@ function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
               reportBox.classList.remove('active');
               navState.alertState = alertType === 'Manual Report' ? 'PLACING_ALERT' : 'PLACING_TRAFFIC_CAMERA';
               showToast(`Tap a location on the map to place a ${alertType === 'Manual Report' ? 'hazard' : 'traffic camera'} alert.`);
-          
+     
               // Clean up old listener first
               if (navState.mapClickListener) {
                 google.maps.event.removeListener(navState.mapClickListener);
               }
-          
+     
               navState.mapClickListener = google.maps.event.addListener(map, 'click', (event) => {
                 if (navState.alertState === 'PLACING_ALERT' || navState.alertState === 'PLACING_TRAFFIC_CAMERA') {
                   console.log('Map clicked for alert placement:', { lat: event.latLng.lat(), lng: event.latLng.lng() });
@@ -3326,6 +3560,54 @@ function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
           showToast('Switching to offline maps');
         }
       });
+      document.getElementById('edit-profile-button').addEventListener('click', () => {
+  document.getElementById('edit-profile-form').style.display = 'block';
+  document.getElementById('edit-profile-button').style.display = 'none';
+});
+document.getElementById('save-profile').addEventListener('click', async () => {
+  const username = document.getElementById('edit-username').value.trim();
+  const email = document.getElementById('edit-email').value.trim();
+  const password = document.getElementById('edit-password').value.trim();
+  if (!username || !email) {
+    showToast('Username and email are required.');
+    return;
+  }
+  try {
+    const token = TokenManager.get();
+    const body = { username, email };
+    if (password) body.password = password;
+    const response = await fetchWithRetry('/api/auth/profile', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(body)
+    });
+    if (response.ok) {
+      showToast('Profile updated successfully!');
+      const ownId = localStorage.getItem('userId');
+      fetchProfile(ownId, true).then(populateAccountProfile);
+      document.getElementById('edit-profile-form').style.display = 'none';
+      document.getElementById('edit-profile-button').style.display = 'block';
+    } else {
+      const data = await response.json();
+      showToast(data.error || 'Failed to update profile.');
+    }
+  } catch (error) {
+    console.error('Profile update error:', error);
+    showToast('Failed to update profile.');
+  }
+});
+document.getElementById('cancel-edit').addEventListener('click', () => {
+  document.getElementById('edit-profile-form').style.display = 'none';
+  document.getElementById('edit-profile-button').style.display = 'block';
+});
+      document.getElementById('trial-banner').addEventListener('click', (e) => {
+  if (e.target.id !== 'trial-banner-close') {
+    showUpgradeModal('trial_banner');
+  }
+});
     }
     // Offline Queue
     const OfflineQueue = {
@@ -3488,9 +3770,7 @@ function stopWakeWordDetection() {
                 lat: place.geometry.location.lat(),
                 lng: place.geometry.location.lng()
               };
-    
               console.log('Destination set:', navState.destination);
-    
               // Create destination marker
               if (destMarker) destMarker.map = null;
               const destMarkerElement = document.createElement('div');
@@ -3505,12 +3785,11 @@ function stopWakeWordDetection() {
                 content: destMarkerElement,
                 title: 'Destination'
               });
-    
               // Calculate route
               calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
                 console.log('Route calculated via voice command');
                 showToast(`Route to ${address} ready. Say "start navigation" to begin.`);
-      
+ 
                 // Speak confirmation
                 if ('speechSynthesis' in window) {
                   const utterance = new SpeechSynthesisUtterance(`Route ready. Say start navigation to begin.`);
@@ -3580,10 +3859,17 @@ function stopWakeWordDetection() {
 }
     async function fetchProfile(targetId, isOwn) {
       try {
-        const token = TokenManager.get();
-        if (!TokenManager.isValid()) {
-          throw new Error('Invalid token format in storage');
+        // ✅ NEW WAY
+        const tokenStatus = await TokenManager.ensureValid();
+        if (tokenStatus === false) {
+          throw new Error('Authentication failed'); // Auth modal already shown
         }
+        // If tokenStatus === 'offline', continue with cached data
+        const isOffline = tokenStatus === 'offline';
+        if (isOffline) {
+          console.log('Operating in offline mode');
+        }
+        const token = TokenManager.get();
         console.log('Fetching profile with token:', token.substring(0, 20) + '...');
         let response = await fetchWithRetry(`/api/auth/profile/${targetId}`, {
           headers: { 'Authorization': `Bearer ${token}` }
@@ -3740,13 +4026,17 @@ function stopWakeWordDetection() {
       return outputArray;
     }
     async function fetchLeaderboard() {
-      const token = TokenManager.get();
-      if (!TokenManager.isValid()) {
-        console.error('Invalid token, showing auth form');
-        TokenManager.clear();
-        document.getElementById('auth-container').style.display = 'flex';
-        return;
+      // ✅ NEW WAY
+      const tokenStatus = await TokenManager.ensureValid();
+      if (tokenStatus === false) {
+        return; // Auth modal already shown
       }
+      // If tokenStatus === 'offline', continue with cached data
+      const isOffline = tokenStatus === 'offline';
+      if (isOffline) {
+        console.log('Operating in offline mode');
+      }
+      const token = TokenManager.get();
       try {
         console.log('Fetching leaderboard with token:', token.substring(0, 20) + '...');
         const response = await fetchWithRetry('/api/leaderboard', {
@@ -3818,27 +4108,6 @@ function stopWakeWordDetection() {
         showToast('Sharing not supported');
       }
     }
-    // Update refreshToken function
-async function refreshToken() {
-  try {
-    const token = TokenManager.get();
-    if (!token) return false;
-    const response = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) {
-      const data = await response.json();
-      TokenManager.set(data.token);
-      console.log('Token refreshed silently during navigation');
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('Token refresh failed:', error);
-    return false;
-  }
-}
     // Auto-refresh before expiry
 setInterval(async () => {
   const token = TokenManager.get();
@@ -3976,13 +4245,17 @@ async function postAlert() {
     }
     async function voteOnAlert(alertId, voteType) {
       try {
-        const token = TokenManager.get();
-        if (!TokenManager.isValid()) {
-          console.error('Invalid token, showing auth form');
-          TokenManager.clear();
-          document.getElementById('auth-container').style.display = 'flex';
-          return;
+        // ✅ NEW WAY
+        const tokenStatus = await TokenManager.ensureValid();
+        if (tokenStatus === false) {
+          return; // Auth modal already shown
         }
+        // If tokenStatus === 'offline', continue with cached data
+        const isOffline = tokenStatus === 'offline';
+        if (isOffline) {
+          console.log('Operating in offline mode');
+        }
+        const token = TokenManager.get();
         console.log(`Voting ${voteType} on alert ${alertId} with token:`, token.substring(0, 20) + '...');
         const response = await fetchWithRetry(`/api/alerts/${alertId}/vote`, {
           method: 'POST',
@@ -4032,8 +4305,17 @@ async function postAlert() {
     // Add localStorage caching
 async function checkSubscriptionStatus() {
   try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      return; // Auth modal already shown
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
     const token = TokenManager.get();
-    if (!TokenManager.isValid()) return;
     const cacheBuster = Date.now();
     const response = await fetch(`/api/subscription/status?_=${cacheBuster}`, {
       headers: {
@@ -4075,9 +4357,7 @@ async function checkSubscriptionStatus() {
           console.log('Using cached subscription status');
           subscriptionStatus = status;
           updateUIForSubscription();
-  
           showToast('Using cached subscription status (offline)', 5000);
-  
           // Retry in background after 30 seconds
           setTimeout(checkSubscriptionStatus, 30000);
           return;
@@ -4107,10 +4387,17 @@ async function checkSubscriptionStatus() {
     item.style.pointerEvents = 'none';
   }
   try {
-    const token = TokenManager.get();
-    if (!TokenManager.isValid()) {
-      throw new Error('Invalid token');
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      throw new Error('Authentication failed'); // Auth modal already shown
     }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
+    const token = TokenManager.get();
     // Delete from server FIRST
     const response = await fetchWithRetry(`/api/alerts/${id}`, {
       method: 'DELETE',
@@ -4181,8 +4468,17 @@ function stopAlertPolling() {
     async function pollAlerts() {
   if (!navState.userLocation) return;
   try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      return; // Auth modal already shown
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
     const token = TokenManager.get();
-    if (!TokenManager.isValid()) return;
     const response = await fetchWithRetry(/* ... */);
     const serverAlerts = await response.json();
     // ✅ Dedupe first
@@ -4204,11 +4500,18 @@ function stopAlertPolling() {
 }
     async function fetchAndDisplayMarkers(map, center) {
       try {
-        const token = TokenManager.get();
-        if (!TokenManager.isValid()) {
+        // ✅ NEW WAY
+        const tokenStatus = await TokenManager.ensureValid();
+        if (tokenStatus === false) {
           console.error('Invalid token, skipping marker fetch');
           return;
         }
+        // If tokenStatus === 'offline', continue with cached data
+        const isOffline = tokenStatus === 'offline';
+        if (isOffline) {
+          console.log('Operating in offline mode, skipping marker fetch');
+        }
+        const token = TokenManager.get();
         console.log('Fetching markers with token:', token.substring(0, 20) + '...');
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=${navState.alertRadius * 1609.34}`;
         const response = await fetchWithRetry(url, {
@@ -4258,13 +4561,17 @@ function stopAlertPolling() {
     }
     async function fetchCurrentAlerts() {
       const center = navState.userLocation;
-      const token = TokenManager.get();
-      if (!TokenManager.isValid()) {
-        console.error('Invalid token, showing auth form');
-        TokenManager.clear();
-        document.getElementById('auth-container').style.display = 'flex';
-        return;
+      // ✅ NEW WAY
+      const tokenStatus = await TokenManager.ensureValid();
+      if (tokenStatus === false) {
+        return; // Auth modal already shown
       }
+      // If tokenStatus === 'offline', continue with cached data
+      const isOffline = tokenStatus === 'offline';
+      if (isOffline) {
+        console.log('Operating in offline mode');
+      }
+      const token = TokenManager.get();
       try {
         console.log('Fetching current alerts with token:', token.substring(0, 20) + '...');
         const url = `/api/markers?lat=${center.lat}&lng=${center.lng}&maxDistance=${navState.alertRadius * 1609.34}`;
@@ -4948,113 +5255,6 @@ function startPositionSimulation() {
   document.getElementById('simulate-position-button').textContent = '⏹️ Stop Simulation';
   // Rest of existing code...
 }
-    function stopGPS() {
-      navState.hasArrived = false;
-      navState.alertProximities.clear();
-      cleanupResources();
-      releaseWakeLock();
-      if (watchId) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-        console.log('GPS tracking stopped.');
-      }
-      if (mockSimulationInterval) {
-        clearInterval(mockSimulationInterval);
-        mockSimulationInterval = null;
-        document.getElementById('simulate-position-button').textContent = 'Simulate';
-        console.log('Position simulation stopped');
-      }
-      if (navState.rerouteCheckTimeout) {
-        clearTimeout(navState.rerouteCheckTimeout);
-        navState.rerouteCheckTimeout = null;
-      }
-      if (navState.hazardCheckInterval) {
-        clearInterval(navState.hazardCheckInterval);
-        navState.hazardCheckInterval = null;
-      }
-      if (cameraCheckInterval) {
-        clearInterval(cameraCheckInterval);
-        cameraCheckInterval = null;
-      }
-      // FIXED: Use centralized polling
-      stopAlertPolling();
-      if (routePolyline) {
-        routePolyline.setMap(null);
-        routePolyline = null;
-      }
-      if (offRoadPolyline) {
-        offRoadPolyline.setMap(null);
-        offRoadPolyline = null;
-      }
-      // Stop all tweens
-      if (currentHeadingTween) {
-        currentHeadingTween.stop();
-        currentHeadingTween = null;
-      }
-      TWEEN.removeAll();
-      // Clear all intervals/timeouts
-      [cameraCheckInterval, alertFetchInterval, navState.rerouteCheckTimeout,
-       navState.hazardCheckInterval, mockSimulationInterval, dragTimer].forEach(id => {
-        if (id) clearInterval(id);
-        if (id) clearTimeout(id);
-      });
-      // Add to stopGPS()
-      routeSpatialIndex = null;
-      google.maps.event.clearInstanceListeners(map);
-      google.maps.event.clearInstanceListeners(userMarker);
-      // Clean up TWEEN animations
-      TWEEN.removeAll();
-      // Clear all intervals/timeouts
-      [cameraCheckInterval, alertFetchInterval, navState.rerouteCheckTimeout,
-       navState.hazardCheckInterval, mockSimulationInterval, dragTimer].forEach(id => {
-        if (id) clearInterval(id);
-        if (id) clearTimeout(id);
-      });
-      ProgrammaticUpdateManager.end();
-      navState.isNavigating = false;
-      navState.isFollowing = false;
-      navState.isInitialSnap = false;
-      navState.currentRoute = null;
-      navState.originalRoute = null;
-      navState.routePolyline = null;
-      navState.detailedPath = [];
-      navState.lastSnapIndex = 0;
-      navState.ignoredHazards = [];
-      navState.currentHazard = null;
-      navState.alternativeRoute = null;
-      navState.lastRecalculationTime = 0;
-      navState.currentHeading = 0;
-      navState.lastValidHeading = 0;
-      headingHistory = [];
-      lastLocationUpdate = 0;
-      lastAlertFetchTime = 0;
-      lastPosition = null;
-      rawUserLocation = null;
-      positionHistory = [];
-      document.getElementById('search-container').classList.remove('hidden');
-      document.getElementById('search-container').style.display = 'flex';
-      document.getElementById('hud-container').style.display = 'none';
-      document.getElementById('bottom-hud-container').style.display = 'none';
-      document.getElementById('simulate-position-button').style.display = 'none';
-      alternativeRenderer.setMap(null);
-      directionsRenderer.setMap(null);
-      trafficLayer.setMap(null);
-      if (destMarker) destMarker.setMap(null);
-      document.getElementById('start-button').style.display = 'none';
-      map.setOptions({
-        zoom: 15,
-        tilt: 0,
-        heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading,
-        disableDefaultUI: true,
-        gestureHandling: 'cooperative',
-        mapTypeControl: false,
-        streetViewControl: false
-      });
-      requestAnimationFrame(() => {
-        map.setCenter(navState.userLocation);
-        console.log('Navigation stopped, reset to:', { center: navState.userLocation, zoom: 15, heading: navState.mapOrientation === 'north-up' ? 0 : navState.currentHeading, tilt: 0 });
-      });
-    }
     function cleanupResources() {
       // Stop all intervals/timeouts
       [cameraCheckInterval, alertFetchInterval, navState.rerouteCheckTimeout,
@@ -5286,11 +5486,18 @@ function startPositionSimulation() {
     }
     async function updateServerLocation(position) {
       try {
-        const token = TokenManager.get();
-        if (!TokenManager.isValid()) {
+        // ✅ NEW WAY
+        const tokenStatus = await TokenManager.ensureValid();
+        if (tokenStatus === false) {
           console.error('Invalid token, skipping server location update');
           return;
         }
+        // If tokenStatus === 'offline', continue with cached data
+        const isOffline = tokenStatus === 'offline';
+        if (isOffline) {
+          console.log('Operating in offline mode, skipping server location update');
+        }
+        const token = TokenManager.get();
         const response = await fetchWithRetry('/api/location', {
           method: 'POST',
           mode: 'cors',
@@ -5631,30 +5838,62 @@ function startPositionSimulation() {
 function initSocket(token, userId) {
   let reconnectAttempts = 0;
   const MAX_RECONNECT_ATTEMPTS = 10;
+  let permanentlyOffline = false; // ← NEW: Track if we gave up
+ 
   socket = io({
     auth: { token },
     reconnection: true,
     reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectionDelay: 1000,
-    reconnectionDelayMax: 10000, // ← Increase from 5000
+    reconnectionDelayMax: 10000,
     timeout: 20000,
-    randomizationFactor: 0.5 // ← Add jitter
+    randomizationFactor: 0.5
   });
+ 
   socket.on('reconnect_attempt', (attemptNumber) => {
     reconnectAttempts = attemptNumber;
     console.log(`Reconnect attempt ${attemptNumber}/${MAX_RECONNECT_ATTEMPTS}`);
-    if (attemptNumber === 5) {
-      showToast('Connection unstable. Switching to offline mode...', 5000);
-      startAlertPolling(); // ← Fallback to polling
+   
+    // ✅ NEW: Progressive fallback strategy
+    if (attemptNumber === 3) {
+      showToast('⚠️ Connection issues. Switching to offline mode...', 5000);
+      startAlertPolling(); // Start polling as backup
+    }
+   
+    if (attemptNumber >= 5) {
+      // ✅ NEW: Stop Socket.IO from trying further
+      socket.io.opts.reconnection = false;
+      permanentlyOffline = true;
+     
+      showToast('📡 Running in offline mode. Tap to retry connection.', 0); // 0 = persistent
+     
+      // Add click-to-retry on toast
+      document.getElementById('toast').style.cursor = 'pointer';
+      document.getElementById('toast').onclick = () => {
+        if (permanentlyOffline) {
+          retrySocketConnection(token, userId);
+        }
+      };
+     
+      console.warn('Socket.IO reconnection disabled after 5 attempts');
     }
   });
+ 
   socket.on('reconnect_failed', () => {
     console.error('Socket.io reconnection failed permanently');
-    showToast('Unable to connect. Running in offline mode.', 10000);
-    // Permanent fallback
-    startAlertPolling();
+    permanentlyOffline = true;
+    socket.io.opts.reconnection = false; // ✅ NEW: Stop trying
+   
+    showToast('Unable to connect. Running in offline mode. Tap to retry.', 0);
+    document.getElementById('toast').style.cursor = 'pointer';
+    document.getElementById('toast').onclick = () => {
+      retrySocketConnection(token, userId);
+    };
+   
+    startAlertPolling(); // Ensure polling is active
   });
-  // ... rest of socket handlers ...
+ 
+  // ... rest of your socket.on handlers ...
   socket.on('connect', () => {
     // Remove offline indicator
   document.getElementById('offline-indicator')?.remove();
@@ -5714,7 +5953,7 @@ function initSocket(token, userId) {
   }, 200);
   socket.on('alert', (alert) => {
   console.log('Received new alert via Socket.IO:', alert?._id);
-  // ENHANCED validation
+  // Validation
   if (!alert || typeof alert !== 'object' ||
       !alert._id || typeof alert._id !== 'string' ||
       !alert.location?.coordinates ||
@@ -5725,19 +5964,16 @@ function initSocket(token, userId) {
     console.error('Invalid alert structure:', alert);
     return;
   }
-  // Timestamp validation
   if (!alert.timestamp || new Date(alert.timestamp) > new Date()) {
     console.error('Invalid alert timestamp:', alert.timestamp);
     return;
   }
-  // ... rest of handler
   if (!alert.userId || typeof alert.userId !== 'object') {
     console.warn('Alert missing userId, using fallback');
     alert.userId = { username: 'Anonymous', _id: null };
   }
   const alertId = alert._id;
   const isTrafficCamera = alert.type === 'Traffic Camera';
-  // Skip if filtered out
   if (isTrafficCamera && !showTrafficCameras) {
     console.log('Skipping traffic camera alert: disabled in settings');
     return;
@@ -5748,15 +5984,23 @@ function initSocket(token, userId) {
     return;
   }
   if (!isDuplicateAlert(alert)) {
-    // Dedupe in currentAlerts
+    pendingAlerts.push(alert);
+ 
+    if (alertBatchTimeout) clearTimeout(alertBatchTimeout);
+    alertBatchTimeout = setTimeout(() => {
+      processPendingAlerts();
+      pendingAlerts = [];
+    }, 500);
+  }
+});
+function processPendingAlerts() {
+  pendingAlerts.forEach(alert => {
+    const alertId = alert._id;
+    const isTrafficCamera = alert.type === 'Traffic Camera';
+ 
     if (!currentAlerts.some(a => a._id === alertId)) {
       currentAlerts.push(alert);
-      displayAlertsInHud(currentAlerts);
-      console.log('Added alert to currentAlerts via socket:', alertId);
-    } else {
-      console.log('Alert already in currentAlerts, skipping push:', alertId);
     }
-    // Dedupe marker creation
     if (!markers.has(alertId)) {
       const marker = getMarker({
         map,
@@ -5765,9 +6009,6 @@ function initSocket(token, userId) {
         title: `${alert.type} Alert`
       });
       markers.set(alertId, marker);
-      console.log('Created marker for socket alert:', alertId);
-    } else {
-      console.log('Marker already exists for socket alert, skipping creation:', alertId);
     }
     if (isTrafficCamera) {
       cameraPositions.push({
@@ -5777,12 +6018,10 @@ function initSocket(token, userId) {
     } else if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
     }
-    showToast(`New ${alert.type} alert received.`);
-  } else {
-    console.log('Duplicate alert ignored via cache:', alertId);
-  }
-  debouncedAlertSync();
-});
+  });
+  displayAlertsInHud(currentAlerts);
+  showToast(`${pendingAlerts.length} new alert(s) received.`);
+}
       socket.on('locationUpdate', debouncedLocationUpdate);
       // Add heartbeat to detect stale connections
       let heartbeatInterval = setInterval(() => {
@@ -5856,6 +6095,24 @@ function initSocket(token, userId) {
         checkSubscriptionStatus(); // Refresh status
         showToast('🎉 Premium activated! Welcome!');
       });
+}
+// ✅ NEW: Manual retry function
+function retrySocketConnection(token, userId) {
+  console.log('User manually retrying socket connection...');
+  document.getElementById('toast').onclick = null; // Remove click handler
+  document.getElementById('toast').style.cursor = 'default';
+ 
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+ 
+  showToast('🔄 Reconnecting...', 3000);
+ 
+  // Wait 1 second then reinitialize
+  setTimeout(() => {
+    initSocket(token, userId);
+  }, 1000);
 }
     // Initialize subscription check on app load
 function initSubscription() {
@@ -6077,6 +6334,16 @@ async function cancelSubscription() {
     return;
   }
   try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      return; // Auth modal already shown
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
     const token = TokenManager.get();
     const response = await fetchWithRetry('/api/subscription/cancel', {
       method: 'POST',
@@ -6096,6 +6363,16 @@ async function cancelSubscription() {
 // Modal button handlers
 document.getElementById('upgrade-button').addEventListener('click', async () => {
   try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      return; // Auth modal already shown
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
     const token = TokenManager.get();
     const response = await fetchWithRetry('/api/subscription/create-checkout', {
       method: 'POST',
@@ -6127,6 +6404,287 @@ setInterval(() => {
     console.log(`Cleaned ${excess} excess markers from pool`);
   }
 }, 60000); // Every minute
+function restoreNavigationView() {
+  if (!navState.isNavigating || !navState.isFollowing) return;
+  const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+  const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+  const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+  ProgrammaticUpdateManager.start();
+  requestAnimationFrame(() => {
+    map.setCenter(lookaheadPoint);
+    map.setZoom(zoom);
+    map.setHeading(heading);
+    map.setTilt(tilt);
+    userMarker.position = navState.userLocation;
+    userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+    console.log('Navigation view restored:', { zoom, heading, tilt });
+    ProgrammaticUpdateManager.end();
+  });
+  updateCompass();
+}
+function updateTrackedUserLocation(data) {
+  if (!data || !data.userId || !data.location) {
+    console.error('Invalid location update data:', data);
+    return;
+  }
+  const userId = data.userId;
+  const location = {
+    lat: data.location.coordinates[1],
+    lng: data.location.coordinates[0]
+  };
+  // Update or create tracked user marker
+  if (trackedMarkers.has(userId)) {
+    const marker = trackedMarkers.get(userId);
+    marker.position = location;
+  } else if (trackingUsers.includes(userId)) {
+    const markerElement = document.createElement('div');
+    markerElement.style.width = '15px';
+    markerElement.style.height = '15px';
+    markerElement.style.backgroundColor = '#2196F3';
+    markerElement.style.borderRadius = '50%';
+    markerElement.style.border = '2px solid white';
+    const marker = new google.maps.marker.AdvancedMarkerElement({
+      map: map,
+      position: location,
+      content: markerElement,
+      title: `User ${userId}`
+    });
+    trackedMarkers.set(userId, marker);
+  }
+  console.log('Tracked user location updated:', { userId, location });
+}
+async function fetchUsers(query = '') {
+  try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      showToast('Session expired. Please log in again.');
+      return;
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
+    const token = TokenManager.get();
+    const url = query
+      ? `/api/admin/users/search?q=${encodeURIComponent(query)}`
+      : '/api/admin/users';
+    const response = await fetchWithRetry(url, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const users = await response.json();
+    displayUsersList(users);
+  } catch (error) {
+    console.error('Fetch users error:', error);
+    showToast('Failed to load users.');
+  }
+}
+async function loadAllUsers() {
+  await fetchUsers();
+}
+async function fetchUserForActivity(query) {
+  try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      showToast('Session expired. Please log in again.');
+      return;
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
+    const token = TokenManager.get();
+    const response = await fetchWithRetry(`/api/admin/users/search?q=${encodeURIComponent(query)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const users = await response.json();
+    if (users.length > 0) {
+      selectedUserId = users[0]._id;
+      loadUserActivity(selectedUserId);
+    } else {
+      showToast('User not found.');
+    }
+  } catch (error) {
+    console.error('Fetch user for activity error:', error);
+    showToast('Failed to find user.');
+  }
+}
+async function loadUserActivity(userId) {
+  try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      showToast('Session expired. Please log in again.');
+      return;
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
+    const token = TokenManager.get();
+    const response = await fetchWithRetry(`/api/admin/users/${userId}/activity`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const activity = await response.json();
+    displayUserActivity(activity);
+  } catch (error) {
+    console.error('Load user activity error:', error);
+    showToast('Failed to load user activity.');
+  }
+}
+function displayUsersList(users) {
+  const container = document.getElementById('users-list');
+  container.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Email</th>
+          <th>Join Date</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${users.map(user => `
+          <tr>
+            <td>${user.username}</td>
+            <td>${user.email}</td>
+            <td>${new Date(user.joinDate).toLocaleDateString()}</td>
+            <td>
+              <button class="view-activity-btn" onclick="loadUserActivity('${user._id}')">Activity</button>
+              <button class="delete-btn admin-action-btn" onclick="deleteUser('${user._id}')">Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+}
+function displayUserActivity(activity) {
+  const list = document.getElementById('user-activity-list');
+  if (!activity || activity.length === 0) {
+    list.innerHTML = '<li class="no-activity">No activity found</li>';
+    return;
+  }
+  list.innerHTML = activity.map(item => `
+    <li>
+      <strong>${item.type}</strong>: ${item.description}
+      <br><small>${new Date(item.timestamp).toLocaleString()}</small>
+    </li>
+  `).join('');
+}
+async function deleteUser(userId) {
+  if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
+    return;
+  }
+  try {
+    // ✅ NEW WAY
+    const tokenStatus = await TokenManager.ensureValid();
+    if (tokenStatus === false) {
+      showToast('Session expired. Please log in again.');
+      return;
+    }
+    // If tokenStatus === 'offline', continue with cached data
+    const isOffline = tokenStatus === 'offline';
+    if (isOffline) {
+      console.log('Operating in offline mode');
+    }
+    const token = TokenManager.get();
+    const response = await fetchWithRetry(`/api/admin/users/${userId}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (response.ok) {
+      showToast('User deleted successfully.');
+      loadAllUsers();
+    } else {
+      showToast('Failed to delete user.');
+    }
+  } catch (error) {
+    console.error('Delete user error:', error);
+    showToast('Error deleting user.');
+  }
+}
+// Global fetch wrapper - catches ALL network errors
+const originalFetch = window.fetch;
+window.fetch = async function(...args) {
+  try {
+    const response = await originalFetch.apply(this, args);
+  
+    // Handle common HTTP errors
+    if (!response.ok) {
+      if (response.status === 401) {
+        console.warn('Unauthorized request, attempting token refresh');
+        const refreshed = await refreshToken();
+        if (refreshed) {
+          // Retry with new token
+          const [url, options] = args;
+          if (options?.headers) {
+            options.headers['Authorization'] = `Bearer ${TokenManager.get()}`;
+          }
+          return originalFetch.apply(this, args);
+        }
+        throw new Error('Authentication failed');
+      }
+    
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After') || '60';
+        throw new Error(`Rate limited. Retry after ${retryAfter}s`);
+      }
+    
+      if (response.status >= 500) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+    }
+  
+    return response;
+  } catch (error) {
+    // Network error or fetch failed
+    if (!navigator.onLine) {
+      console.error('Offline - request queued:', args[0]);
+      OfflineQueue.add({
+        type: 'fetch',
+        data: { url: args[0], options: args[1] }
+      });
+      throw new Error('Offline - request queued');
+    }
+  
+    console.error('Fetch error:', error);
+    throw error; // Re-throw for caller to handle
+  }
+};
+// Global error handler
+window.addEventListener('error', (event) => {
+  console.error('Uncaught error:', event.error);
+  // Log to Sentry
+  if (window.Sentry && window.location.hostname !== 'localhost') {
+    Sentry.captureException(event.error);
+  }
+  // Show user-friendly message for critical errors
+  if (event.error?.message?.includes('GPS') ||
+      event.error?.message?.includes('location')) {
+    showToast('⚠️ Location error. Check GPS settings.', 5000);
+  } else if (event.error?.message?.includes('network') ||
+             event.error?.message?.includes('fetch')) {
+    showToast('📡 Network issue. Some features may be limited.', 5000);
+  }
+  // Don't prevent default - let browser console log it
+});
+// Catch unhandled promise rejections
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('Unhandled promise rejection:', event.reason);
+  if (window.Sentry && window.location.hostname !== 'localhost') {
+    Sentry.captureException(event.reason);
+  }
+  // Prevent browser console spam in production
+  if (window.location.hostname !== 'localhost') {
+    event.preventDefault();
+  }
+});
   </script>
 </body>
 </html>
