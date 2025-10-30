@@ -1404,10 +1404,241 @@ let pendingRouteRequest = null;
     let postingTimeout = null;
     // Add to top of file
 let lastRealGPSTime = 0;
+    // FIXED: Alert Placement System - Moved to setupEventListeners()
+    // FIXED: Alert Location Confirmation
+async function confirmAlertLocation(location, alertType) {
+  try {
+    // Check token BEFORE doing anything else
+    if (!TokenManager.isValid()) {
+      console.error('Invalid token, showing auth form');
+      cancelAlert(); // Clean up first
+      TokenManager.clear();
+      document.getElementById('auth-container').style.display = 'flex';
+      return;
+    }
+    const token = TokenManager.get();
+    // Check for nearby alerts
+    const response = await fetchWithRetry(
+      `/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=100`,
+      { headers: { 'Authorization': `Bearer ${token}` }}
+    );
+ 
+    const nearbyAlerts = await response.json();
+ 
+    if (nearbyAlerts.length > 0) {
+      const nearestDistance = Math.min(...nearbyAlerts.map(a =>
+        google.maps.geometry.spherical.computeDistanceBetween(
+          location,
+          new google.maps.LatLng(a.location.coordinates[1], a.location.coordinates[0])
+        )
+      ));
+   
+      if (nearestDistance < 100) {
+        showToast(
+          `⚠️ Alert ${Math.round(nearestDistance)}m away. Place at least 100m apart.`,
+          5000
+        );
+        // Don't cancel - let user try again
+        return;
+      }
+    }
+    // Get address via reverse geocoding
+    let address = `${location.lat().toFixed(4)}, ${location.lng().toFixed(4)}`;
+    try {
+      const geocodeResult = await reverseGeocode(location.lat(), location.lng());
+      if (geocodeResult.results && geocodeResult.results.length > 0) {
+        address = geocodeResult.results[0].formatted_address;
+      }
+    } catch (geocodeError) {
+      console.warn('Geocoding failed, using coordinates:', geocodeError);
+    }
+    // Show temp marker
+    const tempMarkerElement = document.createElement('div');
+    tempMarkerElement.style.width = '30px';
+    tempMarkerElement.style.height = '30px';
+    tempMarkerElement.style.backgroundColor = 'orange';
+    tempMarkerElement.style.borderRadius = '50%';
+    tempMarkerElement.style.border = '3px solid white';
+    tempMarkerElement.classList.add('ping');
+    if (navState.tempMarker) {
+      navState.tempMarker.map = null;
+    }
+    navState.tempMarker = new google.maps.marker.AdvancedMarkerElement({
+      map: map,
+      position: { lat: location.lat(), lng: location.lng() },
+      content: tempMarkerElement,
+      title: 'Temp Alert'
+    });
+    // Store alert data
+    navState.tempAlertData = {
+      type: alertType,
+      location: {
+        type: 'Point',
+        coordinates: [location.lng(), location.lat()]
+      },
+      address: address,
+      timestamp: new Date().toISOString()
+    };
+    // Show confirmation dialog
+    const reportBox = document.getElementById('report-box');
+    const reportOptions = document.querySelector('.report-options');
+    const confirmAlert = document.getElementById('confirm-alert');
+    document.getElementById('alert-type-display').textContent = alertType;
+    document.getElementById('location-display').textContent = address;
+    document.getElementById('timestamp-display').textContent = new Date().toLocaleString();
+    reportBox.classList.add('active');
+    reportOptions.style.display = 'none';
+    confirmAlert.classList.add('active');
+    // Clean up map click listener
+    if (navState.mapClickListener) {
+      google.maps.event.removeListener(navState.mapClickListener);
+      navState.mapClickListener = null;
+    }
+    navState.alertState = 'CONFIRMING';
+    console.log('Alert location confirmed, waiting for user confirmation');
+  } catch (error) {
+    console.error('Error in confirmAlertLocation:', error);
+    showToast('Failed to confirm alert location. Please try again.');
+    cancelAlert(); // Clean up on error
+  }
+}
+    // FIXED: Post Alert Function - Validation moved BEFORE guard
+async function postAlert() {
+  // Validate BEFORE setting guard
+  if (!navState.tempAlertData) {
+    showToast('No alert data available. Please try again.');
+    return;
+  }
+  if (!TokenManager.isValid()) {
+    console.error('Invalid token, showing auth form');
+    cancelAlert(); // Clean up
+    TokenManager.clear();
+    document.getElementById('auth-container').style.display = 'flex';
+    return;
+  }
+  // NOW set guard
+  if (isPostingAlert) {
+    console.log('Alert post already in progress');
+    return;
+  }
+  isPostingAlert = true;
+  // Safety timeout
+  const timeoutId = setTimeout(() => {
+    console.error('postAlert timeout, force releasing guard');
+    isPostingAlert = false;
+  }, 10000);
+  try {
+    const token = TokenManager.get();
+    console.log('Posting alert:', navState.tempAlertData);
+    // Post to server
+    const response = await fetchWithRetry('/api/alerts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify(navState.tempAlertData)
+    });
+    const result = await response.json();
+    if (response.status === 201 && result.alert?._id) {
+      console.log('Alert posted successfully:', result.alert._id);
+   
+      // Remove temp marker
+      if (navState.tempMarker) {
+        navState.tempMarker.map = null;
+        navState.tempMarker = null;
+      }
+      // Add to current alerts
+      currentAlerts.push(result.alert);
+      displayAlertsInHud(currentAlerts);
+      // Create map marker
+      const isTrafficCamera = result.alert.type === 'Traffic Camera';
+      const marker = getMarker({
+        map,
+        position: {
+          lat: result.alert.location.coordinates[1],
+          lng: result.alert.location.coordinates[0]
+        },
+        content: isTrafficCamera ? createTrafficCameraContent() : createAlertContent(),
+        title: `${result.alert.type} Alert`
+      });
+      markers.set(result.alert._id, marker);
+      if (isTrafficCamera) {
+        cameraPositions.push({
+          lat: result.alert.location.coordinates[1],
+          lng: result.alert.location.coordinates[0]
+        });
+      }
+      // Emit via socket
+      if (socket && socket.connected) {
+        socket.emit('alert', result.alert);
+      }
+      // Close dialog
+      const reportBox = document.getElementById('report-box');
+      const reportOptions = document.querySelector('.report-options');
+      const confirmAlert = document.getElementById('confirm-alert');
+   
+      reportBox.classList.remove('active');
+      reportOptions.style.display = 'grid';
+      confirmAlert.classList.remove('active');
+      navState.alertState = 'IDLE';
+      navState.tempAlertData = null;
+      showToast('Alert posted successfully!');
+      // Re-lock navigation if needed
+      if (navState.isNavigating && navState.isFollowing) {
+        lockNavigation();
+      }
+      // Refresh profile
+      const ownId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+      fetchProfile(ownId, true).then(populateAccountProfile).catch(err => {
+        console.error('Failed to refresh profile:', err);
+      });
+    } else {
+      throw new Error(result.error || 'Failed to post alert');
+    }
+  } catch (error) {
+    console.error('Post alert error:', error);
+    showToast(`Failed to post alert: ${error.message}`);
+  } finally {
+    // ALWAYS clear guard and timeout
+    clearTimeout(timeoutId);
+    isPostingAlert = false;
+  }
+}
+    // FIXED: Cancel Alert Function
+function cancelAlert() {
+  // Remove temp marker
+  if (navState.tempMarker) {
+    navState.tempMarker.map = null;
+    navState.tempMarker = null;
+  }
+  // Remove map click listener
+  if (navState.mapClickListener) {
+    google.maps.event.removeListener(navState.mapClickListener);
+    navState.mapClickListener = null;
+  }
+  // Reset UI
+  const reportBox = document.getElementById('report-box');
+  const reportOptions = document.querySelector('.report-options');
+  const confirmAlert = document.getElementById('confirm-alert');
+  reportBox.classList.remove('active');
+  reportOptions.style.display = 'grid';
+  confirmAlert.classList.remove('active');
+  // Reset state
+  navState.alertState = 'IDLE';
+  navState.tempAlertData = null;
+  // Clear posting guard (safety)
+  isPostingAlert = false;
+  showToast('Alert placement cancelled.');
+  console.log('Alert placement cancelled, state reset');
+  // Re-lock navigation if needed
+  if (navState.isNavigating && navState.isFollowing) {
+    lockNavigation();
+  }
+}
     // TokenManager
     const TokenManager = {
       // ... existing code ...
-  
       async ensureValid() {
         if (!this.isValid()) {
           // Check if navigating
@@ -1582,13 +1813,10 @@ let lastRealGPSTime = 0;
   Object.keys(tooltipTexts).forEach(buttonId => {
     const button = document.getElementById(buttonId);
     if (!button) return;
- 
     const text = tooltipTexts[buttonId];
- 
     if (isMobile) {
       // Use long-press for mobile
       let longPressTimer;
-   
       button.addEventListener('touchstart', (e) => {
         hideTooltip();
         longPressTimer = setTimeout(() => {
@@ -1599,11 +1827,9 @@ let lastRealGPSTime = 0;
           }
         }, 500);
       });
-   
       button.addEventListener('touchend', () => {
         clearTimeout(longPressTimer);
       });
-   
       button.addEventListener('touchmove', () => {
         clearTimeout(longPressTimer);
         hideTooltip();
@@ -1871,7 +2097,6 @@ let lastRealGPSTime = 0;
     if (progressBar) {
       progressBar.style.width = `${progress}%`;
     }
- 
     if (progress >= 100) {
       clearInterval(progressInterval);
       setTimeout(() => {
@@ -1942,14 +2167,12 @@ let lastRealGPSTime = 0;
   // Allow heading updates even when stationary if user rotates device
   if (speed <= CONFIG.STATIONARY_SPEED_THRESHOLD) {
     const headingDiff = Math.abs(((newHeading - navState.lastValidHeading + 180) % 360) - 180);
- 
     // Update if significant rotation detected (> 15 degrees)
     if (headingDiff > 15 && source === 'compass') {
       navState.lastValidHeading = newHeading;
       navState.currentHeading = newHeading;
       return newHeading;
     }
- 
     return navState.lastValidHeading; // Keep current heading
   }
   // Rest of existing smoothing logic...
@@ -2552,6 +2775,42 @@ function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
     }
     function setupEventListeners() {
       console.log('Setting up event listeners...');
+      // FIXED: Moved report-button listeners here to ensure single attachment
+      document.querySelectorAll('.report-button').forEach(button => {
+        button.addEventListener('click', async () => {
+          if (navState.alertState === 'IDLE') {
+            const alertType = button.getAttribute('data-alert-type');
+            console.log('Report button clicked:', { alertType });
+            if (navState.alertFilters[alertType.toLowerCase()] === false) {
+              showToast(`Filter disabled for ${alertType}`);
+              return;
+            }
+            if (alertType === 'Manual Report' || alertType === 'Manual Traffic Camera') {
+              const reportBox = document.getElementById('report-box');
+              reportBox.classList.remove('active');
+              navState.alertState = alertType === 'Manual Report' ? 'PLACING_ALERT' : 'PLACING_TRAFFIC_CAMERA';
+              showToast(`Tap a location on the map to place a ${alertType === 'Manual Report' ? 'hazard' : 'traffic camera'} alert.`);
+          
+              // Clean up old listener first
+              if (navState.mapClickListener) {
+                google.maps.event.removeListener(navState.mapClickListener);
+              }
+          
+              navState.mapClickListener = google.maps.event.addListener(map, 'click', (event) => {
+                if (navState.alertState === 'PLACING_ALERT' || navState.alertState === 'PLACING_TRAFFIC_CAMERA') {
+                  console.log('Map clicked for alert placement:', { lat: event.latLng.lat(), lng: event.latLng.lng() });
+                  confirmAlertLocation(event.latLng, alertType === 'Manual Report' ? 'Manual Report' : 'Traffic Camera');
+                }
+              });
+            } else {
+              // Place at current location
+              const location = new google.maps.LatLng(navState.userLocation);
+              console.log('Placing alert at user location:', { alertType, location: navState.userLocation });
+              confirmAlertLocation(location, alertType);
+            }
+          }
+        });
+      });
       document.getElementById('start-button').addEventListener('click', startGPS);
       document.getElementById('bottom-hud-stop').addEventListener('click', stopGPS);
       document.getElementById('simulate-position-button').addEventListener('click', () => {
@@ -2806,34 +3065,6 @@ function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
           console.log('Route shared with family:', shareUrl);
         }
       });
-      document.querySelectorAll('.report-button').forEach(button => {
-        button.addEventListener('click', async () => {
-          if (navState.alertState === 'IDLE') {
-            const alertType = button.getAttribute('data-alert-type');
-            console.log('Report button clicked:', { alertType });
-            if (navState.alertFilters[alertType.toLowerCase()] === false) {
-              showToast(`Filter disabled for ${alertType}`);
-              return;
-            }
-            if (alertType === 'Manual Report' || alertType === 'Manual Traffic Camera') {
-              const reportBox = document.getElementById('report-box');
-              reportBox.classList.remove('active');
-              navState.alertState = alertType === 'Manual Report' ? 'PLACING_ALERT' : 'PLACING_TRAFFIC_CAMERA';
-              showToast(`Press a location on the map to place a ${alertType === 'Manual Report' ? 'hazard' : 'traffic camera'} alert.`);
-              navState.mapClickListener = google.maps.event.addListener(map, 'click', (event) => {
-                if (navState.alertState === 'PLACING_ALERT' || navState.alertState === 'PLACING_TRAFFIC_CAMERA') {
-                  console.log('Map clicked for alert placement:', { lat: event.latLng.lat(), lng: event.latLng.lng() });
-                  confirmAlertLocation(event.latLng, alertType === 'Manual Report' ? 'Manual Report' : 'Traffic Camera');
-                }
-              });
-            } else {
-              const location = new google.maps.LatLng(navState.userLocation);
-              console.log('Placing alert at user location:', { alertType, location: navState.userLocation });
-              confirmAlertLocation(location, alertType);
-            }
-          }
-        });
-      });
       document.getElementById('post-alert-button').addEventListener('click', postAlert);
       document.getElementById('cancel-alert-button').addEventListener('click', cancelAlert);
       document.getElementById('reroute-close').addEventListener('click', rejectReroute);
@@ -2882,10 +3113,8 @@ function updateNavigationCamera(actualPos, predictedPos, heading, speed) {
   const threshold = isMobile ? 50 : 30;
   if (dragDistance > threshold && navState.isFollowing) {
     unlockNavigation();
- 
     // Show visual feedback
     showToast('📍 Auto-follow paused. Tap recenter to resume.', 5000);
- 
     // Highlight recenter button
     const recenterBtn = document.getElementById('recenter-button');
     recenterBtn.style.animation = 'pulse 1s ease-in-out 3';
@@ -3206,18 +3435,14 @@ async function startWakeWordDetection() {
     // Request mic access explicitly
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     stream.getTracks().forEach(track => track.stop()); // Release immediately
- 
     // Clear denial flag
     localStorage.removeItem('micPermissionDenied');
- 
     // Now start recognizer (existing code)
     wakeWordRecognizer = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
     // ... rest of setup
- 
   } catch (err) {
     console.error('Mic access denied:', err);
     localStorage.setItem('micPermissionDenied', 'true');
- 
     showToast('🎤 Microphone access denied. Voice assistant disabled.', 5000);
     voiceAssistantEnabled = false;
     document.getElementById('voice-assistant-toggle').checked = false;
@@ -3255,7 +3480,6 @@ function stopWakeWordDetection() {
       service.getPlacePredictions({ input: address }, (predictions, status) => {
         if (status === google.maps.places.PlacesServiceStatus.OK && predictions && predictions.length > 0) {
           const placeId = predictions[0].place_id;
-    
           // Get place details
           const detailService = new google.maps.places.PlacesService(map);
           detailService.getDetails({ placeId: placeId }, (place, status) => {
@@ -3264,9 +3488,9 @@ function stopWakeWordDetection() {
                 lat: place.geometry.location.lat(),
                 lng: place.geometry.location.lng()
               };
-        
+    
               console.log('Destination set:', navState.destination);
-        
+    
               // Create destination marker
               if (destMarker) destMarker.map = null;
               const destMarkerElement = document.createElement('div');
@@ -3281,12 +3505,12 @@ function stopWakeWordDetection() {
                 content: destMarkerElement,
                 title: 'Destination'
               });
-        
+    
               // Calculate route
               calculateAndDisplayRoute(navState.userLocation, navState.destination, () => {
                 console.log('Route calculated via voice command');
                 showToast(`Route to ${address} ready. Say "start navigation" to begin.`);
-          
+      
                 // Speak confirmation
                 if ('speechSynthesis' in window) {
                   const utterance = new SpeechSynthesisUtterance(`Route ready. Say start navigation to begin.`);
@@ -3622,7 +3846,6 @@ setInterval(async () => {
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
       const expiresIn = payload.exp * 1000 - Date.now();
-  
       // Refresh if expiring in next 5 minutes
       if (expiresIn < 5 * 60 * 1000 && expiresIn > 0) {
         await refreshToken();
@@ -3684,44 +3907,6 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
   alertCache.set(key, { timestamp: now, id: alert._id });
   return false;
 }
-    async function confirmAlertLocation(location, alertType) {
-  try {
-    const token = TokenManager.get(); // ← ADD THIS
-    if (!TokenManager.isValid()) {
-      console.error('Invalid token, showing auth form');
-      TokenManager.clear();
-      document.getElementById('auth-container').style.display = 'flex';
-      return;
-    }
-    const response = await fetchWithRetry(
-      `/api/markers?lat=${location.lat()}&lng=${location.lng()}&maxDistance=100`,
-      { headers: { 'Authorization': `Bearer ${token}` }}
-    );
-    const nearbyAlerts = await response.json();
-  
-    if (nearbyAlerts.length > 0) {
-      const nearestDistance = Math.min(...nearbyAlerts.map(a =>
-        google.maps.geometry.spherical.computeDistanceBetween(
-          location,
-          new google.maps.LatLng(a.location.coordinates[1], a.location.coordinates[0])
-        )
-      ));
-    
-      showToast(
-        `⚠️ Alert ${Math.round(nearestDistance)}m away. Place at least 100m apart.`,
-        5000
-      );
-      // Show nearby alert on map
-      map.setCenter({ lat: nearbyAlerts[0].location.coordinates[1], lng: nearbyAlerts[0].location.coordinates[0] });
-      map.setZoom(16);
-      return;
-    }
-  } catch (error) {
-    console.error('Error checking nearby alerts:', error);
-    showToast('Error checking nearby alerts. Proceeding with placement.');
-  }
-  // ... rest of existing placement logic ...
-}
     // FIXED: Race condition fix for postAlert
 async function postAlert() {
   // Guard at the TOP
@@ -3732,7 +3917,6 @@ async function postAlert() {
   isPostingAlert = true;
   try {
     // ... existing validation code ...
-   
     const token = TokenManager.get();
     if (!TokenManager.isValid()) {
       console.error('Invalid token, showing auth form');
@@ -3740,7 +3924,6 @@ async function postAlert() {
       document.getElementById('auth-container').style.display = 'flex';
       return;
     }
-   
     const response = await fetchWithRetry('/api/alerts', {
       method: 'POST',
       headers: {
@@ -3887,15 +4070,14 @@ async function checkSubscriptionStatus() {
       try {
         const { status, timestamp } = JSON.parse(cached);
         const age = Date.now() - timestamp;
-    
         // Use cache if less than 1 hour old
         if (age < 60 * 60 * 1000) {
           console.log('Using cached subscription status');
           subscriptionStatus = status;
           updateUIForSubscription();
-      
+  
           showToast('Using cached subscription status (offline)', 5000);
-      
+  
           // Retry in background after 30 seconds
           setTimeout(checkSubscriptionStatus, 30000);
           return;
@@ -3983,10 +4165,8 @@ function startAlertPolling() {
   if (alertFetchInterval) {
     clearInterval(alertFetchInterval);
   }
- 
   // Fetch immediately
   fetchCurrentAlerts();
- 
   // Then poll every 30 seconds (not 5!)
   alertFetchInterval = setInterval(fetchCurrentAlerts, 30000);
   console.log('Centralized alert polling started');
@@ -4381,7 +4561,6 @@ function _onPositionUpdate(position, isSimulation = false) {
       lat < -90 || lat > 90 ||
       lng < -180 || lng > 180) {
     console.error('Invalid GPS data:', { lat, lng });
-   
     // Use last known good position
     if (navState.lastKnownPosition) {
       console.warn('Using last known position as fallback');
@@ -4401,7 +4580,6 @@ function _onPositionUpdate(position, isSimulation = false) {
     const path = navState.detailedPath;
     const headingToUse = gpsHeading !== null ? gpsHeading : navState.currentHeading;
     const { point, index } = findClosestRoutePoint(smoothedPos, path, headingToUse, speed);
-  
     const distance = google.maps.geometry.spherical.computeDistanceBetween(
       new google.maps.LatLng(smoothedPos),
       new google.maps.LatLng(point)
@@ -4554,7 +4732,6 @@ async function calculateAndDisplayRoute(origin, dest, callback) {
       });
     });
     // ... existing success code ...
-   
   } catch (error) {
     console.error('Route calculation error:', error);
     showToast(`Route error: ${error.message}. Please try again.`);
@@ -4562,7 +4739,6 @@ async function calculateAndDisplayRoute(origin, dest, callback) {
     startButton.disabled = false;
   } finally {
     isCalculatingRoute = false;
-   
     // Process queued request
     if (pendingRouteRequest) {
       const { origin, dest, callback } = pendingRouteRequest;
@@ -5371,7 +5547,6 @@ function startPositionSimulation() {
     const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
     const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
     ProgrammaticUpdateManager.start();
-  
     const cameraTween = TweenManager.create(
       {
         lat: map.getCenter().lat(),
@@ -5456,7 +5631,6 @@ function startPositionSimulation() {
 function initSocket(token, userId) {
   let reconnectAttempts = 0;
   const MAX_RECONNECT_ATTEMPTS = 10;
- 
   socket = io({
     auth: { token },
     reconnection: true,
@@ -5469,7 +5643,6 @@ function initSocket(token, userId) {
   socket.on('reconnect_attempt', (attemptNumber) => {
     reconnectAttempts = attemptNumber;
     console.log(`Reconnect attempt ${attemptNumber}/${MAX_RECONNECT_ATTEMPTS}`);
-   
     if (attemptNumber === 5) {
       showToast('Connection unstable. Switching to offline mode...', 5000);
       startAlertPolling(); // ← Fallback to polling
@@ -5478,7 +5651,6 @@ function initSocket(token, userId) {
   socket.on('reconnect_failed', () => {
     console.error('Socket.io reconnection failed permanently');
     showToast('Unable to connect. Running in offline mode.', 10000);
-   
     // Permanent fallback
     startAlertPolling();
   });
@@ -5530,7 +5702,6 @@ function initSocket(token, userId) {
     `;
     offlineIndicator.textContent = '📡 Offline Mode - Limited Features';
     document.body.appendChild(offlineIndicator);
- 
     if (!alertFetchInterval) {
       alertFetchInterval = setInterval(fetchCurrentAlerts, 30000);
     }
@@ -5820,10 +5991,8 @@ async function handlePaymentCallback() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('payment') === 'success') {
     document.getElementById('subscription-loading').style.display = 'flex';
- 
     try {
       await checkSubscriptionStatus(); // Refresh status from server
-   
       if (subscriptionStatus.isPremium) {
         showToast('🎉 Welcome to Premium! All features unlocked.', 5000);
         // Clear locked states
@@ -5852,12 +6021,10 @@ function updateUIForSubscription() {
     // Check if user dismissed banner recently (24h cooldown)
     const hiddenAt = parseInt(localStorage.getItem('trialBannerHiddenAt') || '0');
     const hoursSinceHidden = (Date.now() - hiddenAt) / (1000 * 60 * 60);
- 
     if (hoursSinceHidden < 24) {
       trialBanner.style.display = 'none';
       return;
     }
- 
     document.getElementById('trial-days-remaining').textContent =
       subscriptionStatus.trialDaysRemaining;
     trialBanner.style.display = 'flex';
@@ -5868,7 +6035,6 @@ function updateUIForSubscription() {
   PREMIUM_FEATURES.forEach(featureId => {
     const element = document.getElementById(featureId);
     if (!element) return;
- 
     if (subscriptionStatus.isPremium || subscriptionStatus.isTrialActive) {
       element.classList.remove('locked-feature');
       element.style.pointerEvents = 'auto';

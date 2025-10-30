@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v1.0.14'; // ← Increment this on every deploy
+const CACHE_VERSION = 'v1.0.15'; // ← Increment this on every deploy
 const CACHE_NAME = `waze-gps-${CACHE_VERSION}`;
 const CACHE_SIZE_LIMIT = 50; // max entries
 const ASSETS_TO_CACHE = [
