@@ -1,5 +1,6 @@
 const CACHE_VERSION = 'v1.0.14'; // ← Increment this on every deploy
 const CACHE_NAME = `waze-gps-${CACHE_VERSION}`;
+const CACHE_SIZE_LIMIT = 50; // max entries
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -7,6 +8,18 @@ const ASSETS_TO_CACHE = [
   'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css',
   'https://unpkg.com/@tweenjs/tween.js@23.1.3/dist/tween.umd.js'
 ];
+
+// Limit cache size
+async function limitCacheSize(cacheName, maxItems) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+  
+  if (keys.length > maxItems) {
+    const excess = keys.slice(0, keys.length - maxItems);
+    await Promise.all(excess.map(key => cache.delete(key)));
+    console.log(`Evicted ${excess.length} old cache entries`);
+  }
+}
 
 // Install - Cache core assets
 self.addEventListener('install', event => {
@@ -53,18 +66,21 @@ self.addEventListener('fetch', event => {
   if (event.request.destination === 'document') {
     event.respondWith(
       fetch(event.request)
-        .then(response => {
+        .then(async response => {
           if (response.ok) {
             const clone = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+            const cache = await caches.open(CACHE_NAME);
+            await cache.put(event.request, clone);
+            await limitCacheSize(CACHE_NAME, CACHE_SIZE_LIMIT);
           }
           return response;
         })
-        .catch(() => caches.match(event.request).then(cached => 
-          cached || new Response('<h1>Offline</h1><p>Reconnect to access app</p>', {
+        .catch(async () => {
+          const cached = await caches.match(event.request);
+          return cached || new Response('<h1>Offline</h1><p>Reconnect to access app</p>', {
             headers: { 'Content-Type': 'text/html' }
-          })
-        ))
+          });
+        })
     );
     return;
   }
@@ -72,13 +88,18 @@ self.addEventListener('fetch', event => {
   // Cache-first for static assets
   event.respondWith(
     caches.match(event.request)
-      .then(cached => cached || fetch(event.request).then(response => {
+      .then(async cached => {
+        if (cached) return cached;
+        
+        const response = await fetch(event.request);
         if (response.ok) {
           const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          const cache = await caches.open(CACHE_NAME);
+          await cache.put(event.request, clone);
+          await limitCacheSize(CACHE_NAME, CACHE_SIZE_LIMIT);
         }
         return response;
-      }))
+      })
   );
 });
 
@@ -88,19 +109,3 @@ self.addEventListener('message', event => {
     self.skipWaiting();
   }
 });
-
-async function checkSubscriptionStatus() {
-  // ... existing fetch logic
-  
-  subscriptionStatus = await response.json();
-  
-  // ✅ Debug log
-  console.log('🔍 Subscription Check:', {
-    isPremium: subscriptionStatus.isPremium,
-    isTrialActive: subscriptionStatus.isTrialActive,
-    trialDays: subscriptionStatus.trialDaysRemaining,
-    premiumActivated: subscriptionStatus.premiumActivatedAt
-  });
-  
-  updateUIForSubscription();
-}
