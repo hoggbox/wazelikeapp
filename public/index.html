@@ -3495,7 +3495,6 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         continue;
       }
       if (response.ok) return response;
- 
       if (response.status === 401) {
         const refreshed = await refreshToken();
         if (refreshed) {
@@ -4435,12 +4434,22 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         clearTimeout(dragTimer);
         dragTimer = null;
       }
+      
       dragStartPos = null;
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
       sessionStorage.setItem('isFollowing', navState.isFollowing);
-      map.setOptions({ gestureHandling: 'none', disableDefaultUI: true, mapTypeControl: false, streetViewControl: false });
+      
+      map.setOptions({ 
+        gestureHandling: 'none', 
+        disableDefaultUI: true, 
+        mapTypeControl: false, 
+        streetViewControl: false 
+      });
+      
+      // ✅ FIX: Force camera restore when locking
       restoreNavigationView();
+      
       console.log('Navigation locked');
     }
     function unlockNavigation() {
@@ -5274,9 +5283,14 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         console.error('No alternative route available');
         return;
       }
+
+      console.log('Accepting reroute...');
+
+      // Update route data
       navState.currentRoute = navState.alternativeRoute;
       navState.routePolyline = navState.alternativeRoute.routes[0].overview_path;
-      // FIXED: Recompute detailed path for alternative route
+
+      // ✅ FIX 1: Rebuild detailed path for new route
       navState.detailedPath = [];
       const legs = navState.currentRoute.routes[0].legs;
       for (const leg of legs) {
@@ -5284,49 +5298,153 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
           step.path.forEach(point => navState.detailedPath.push(point));
         }
       }
-      // Dedupe to prevent overlapping
+
+      // Dedupe to prevent overlapping points
       navState.detailedPath = navState.detailedPath.filter((point, index, self) =>
-        index === self.findIndex(p => Math.abs(p.lat() - point.lat()) < 1e-6 && Math.abs(p.lng() - point.lng()) < 1e-6)
+        index === self.findIndex(p => 
+          Math.abs(p.lat() - point.lat()) < 1e-6 && 
+          Math.abs(p.lng() - point.lng()) < 1e-6
+        )
       );
+
       console.log('Detailed path recomputed for alternative route:', navState.detailedPath.length, 'points');
+
+      // ✅ FIX 2: Clear spatial index to force rebuild
+      routeSpatialIndex = null;
+
+      // Update renderers
       directionsRenderer.setDirections(navState.currentRoute);
       directionsRenderer.setMap(map);
       alternativeRenderer.setMap(null);
+
+      // Update UI
       updateRouteAhead(navState.userLocation);
       updateHUD(navState.currentRoute, navState.userLocation);
       updateBottomHUD(navState.currentRoute);
+
+      // Mark hazard as ignored
       navState.ignoredHazards.push(navState.currentHazard._id);
       navState.currentHazard = null;
       navState.alternativeRoute = null;
+
+      // Close reroute HUD
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.alertState = 'IDLE';
+
+      // ✅ FIX 3: Force re-lock navigation with camera update
       if (navState.isFollowing) {
         lockNavigation();
+        
+        // ✅ FIX 4: Force immediate camera update with current position
+        const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+        const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+        const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+
+        ProgrammaticUpdateManager.start();
+        requestAnimationFrame(() => {
+          map.setCenter(lookaheadPoint);
+          map.setZoom(zoom);
+          map.setHeading(heading);
+          map.setTilt(tilt);
+          userMarker.position = navState.userLocation;
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          
+          console.log('Camera restored after reroute acceptance:', {
+            center: lookaheadPoint.toJSON(),
+            zoom,
+            heading,
+            tilt
+          });
+          
+          ProgrammaticUpdateManager.end();
+        });
+
+        // ✅ FIX 5: Trigger position update to snap to new route
+        if (navState.lastKnownPosition) {
+          setTimeout(() => {
+            onPositionUpdate({
+              coords: {
+                latitude: navState.lastKnownPosition.lat,
+                longitude: navState.lastKnownPosition.lng,
+                speed: 0,
+                heading: navState.currentHeading
+              }
+            }, false);
+          }, 100);
+        }
       }
+
       showToast('Reroute accepted.');
-      console.log('Reroute accepted, navigation updated');
+      console.log('Reroute accepted, navigation updated and camera restored');
     }
     function rejectReroute() {
+      console.log('Rejecting reroute...');
+
       if (navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         console.log('Hazard ignored:', navState.currentHazard._id);
       }
+
+      // Clear alternative route
       alternativeRenderer.setMap(null);
       navState.alternativeRoute = null;
       navState.currentHazard = null;
+
+      // Close reroute HUD
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.alertState = 'IDLE';
+
+      // ✅ FIX: Force re-lock navigation with camera update
       if (navState.isFollowing) {
         lockNavigation();
+        
+        // ✅ Force immediate camera update
+        const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
+        const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
+        const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
+
+        ProgrammaticUpdateManager.start();
+        requestAnimationFrame(() => {
+          map.setCenter(lookaheadPoint);
+          map.setZoom(zoom);
+          map.setHeading(heading);
+          map.setTilt(tilt);
+          userMarker.position = navState.userLocation;
+          userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
+          
+          console.log('Camera restored after reroute rejection:', {
+            center: lookaheadPoint.toJSON(),
+            zoom,
+            heading,
+            tilt
+          });
+          
+          ProgrammaticUpdateManager.end();
+        });
+
+        // ✅ Trigger position update to re-snap to original route
+        if (navState.lastKnownPosition) {
+          setTimeout(() => {
+            onPositionUpdate({
+              coords: {
+                latitude: navState.lastKnownPosition.lat,
+                longitude: navState.lastKnownPosition.lng,
+                speed: 0,
+                heading: navState.currentHeading
+              }
+            }, false);
+          }, 100);
+        }
       }
+
       showToast('Reroute rejected.');
-      console.log('Reroute rejected, continuing on original route');
+      console.log('Reroute rejected, continuing on original route with camera restored');
     }
     function showCameraHud() {
       if (document.getElementById('camera-hud-container').classList.contains('active')) {
@@ -5728,7 +5846,7 @@ function initSocket(token, userId) {
     socket.emit('join', userId);
     // ✅ Add this:
     checkSubscriptionStatus();
-    
+   
     fetchCurrentAlerts();
     if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
@@ -6118,7 +6236,7 @@ async function handlePaymentCallback() {
         if (status.isPremium) {
           // ✅ SUCCESS: Clear URL BEFORE reload
           showToast('✅ Premium activated! Reloading...', 3000);
-         
+        
           // ✅ FIX: Use complete URL, not just pathname
           try {
             const cleanUrl = window.location.origin + window.location.pathname;
@@ -6128,7 +6246,7 @@ async function handlePaymentCallback() {
             console.warn('Could not clean URL:', historyError);
             // Fallback: just reload with query params
           }
-         
+        
           setTimeout(() => {
             window.location.reload(true);
           }, 2000);
@@ -6149,7 +6267,7 @@ async function handlePaymentCallback() {
         }
       } catch (error) {
         console.error('Polling error:', error);
-       
+      
         // ✅ Also fix error handler
         if (attempts >= MAX_ATTEMPTS) {
           try {
@@ -6159,7 +6277,7 @@ async function handlePaymentCallback() {
             console.warn('Could not clean URL on error:', historyError);
           }
         }
-       
+      
         if (attempts < MAX_ATTEMPTS) {
           setTimeout(checkStatus, 1000);
         }
@@ -6312,7 +6430,7 @@ async function initApp() {
     // Don't return early - let map still load
   } else {
     initSocket(token, userId);
-  
+ 
     // ✅ FIX: Only init subscription if NOT in payment callback
     if (!window.location.search.includes('payment=success')) {
       initSubscription();
