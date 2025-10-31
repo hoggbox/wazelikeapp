@@ -37,38 +37,40 @@ const server = http.createServer(app);
 const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:3000',
-  'https://wazegps-g6j8.onrender.com', // ← Your actual Render URL
-];
-
-// Allow all Render subdomains via regex separately
-const allowedPatterns = [
-  /\.onrender\.com$/,
-  /^https:\/\/[a-z0-9-]+\.onrender\.com$/
+  'http://127.0.0.1:3000',
+  'https://wazegps-g6j8.onrender.com',
 ];
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, Postman)
-    if (!origin) return callback(null, true);
-    
-    // Check exact matches first
-    if (allowedOrigins.includes(origin)) {
+    // ✅ Allow requests with no origin (mobile apps, Postman, same-origin)
+    if (!origin) {
+      console.log('✅ CORS: No origin (same-origin request allowed)');
       return callback(null, true);
     }
     
-    // Check regex patterns
-    if (allowedPatterns.some(pattern => pattern.test(origin))) {
+    // ✅ Check exact matches first
+    if (allowedOrigins.some(allowed => allowed && origin === allowed)) {
+      console.log('✅ CORS: Exact match allowed:', origin);
       return callback(null, true);
     }
     
+    // ✅ Check if it's any Render subdomain
+    if (/https:\/\/.*\.onrender\.com$/.test(origin)) {
+      console.log('✅ CORS: Render subdomain allowed:', origin);
+      return callback(null, true);
+    }
+    
+    // ✅ Log and reject
     console.error('❌ CORS blocked origin:', origin);
-    callback(new Error('CORS not allowed'));
+    console.error('   Allowed origins:', allowedOrigins.filter(Boolean));
+    callback(new Error(`CORS not allowed for origin: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  exposedHeaders: ['Content-Type', 'Authorization']
 };
-
 const io = new Server(server, {
   cors: corsOptions
 });
@@ -165,6 +167,35 @@ async function connectDB() {
         console.log('Created unique index on email');
       }
       console.log('=== MongoDB Connection Complete ===');
+
+      // Migrate existing users to have subscription fields
+      try {
+        const usersWithoutTrial = await User.countDocuments({ 
+          subscriptionStatus: { $exists: false } 
+        });
+
+        if (usersWithoutTrial > 0) {
+          console.log(`🔄 Migrating ${usersWithoutTrial} users to trial status...`);
+          await User.updateMany(
+            { subscriptionStatus: { $exists: false } },
+            {
+              $set: {
+                subscriptionStatus: 'trial',
+                trialStartedAt: new Date(),
+                trialEndsAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                premiumActivatedAt: null,
+                stripeCustomerId: null,
+                stripeSubscriptionId: null,
+                lastReminderSent: null,
+                reminderCount: 0
+              }
+            }
+          );
+          console.log('✅ User migration complete');
+        }
+      } catch (migrationError) {
+        console.error('❌ Migration failed:', migrationError);
+      }
 
       // Check for expired trials every hour
       setInterval(async () => {

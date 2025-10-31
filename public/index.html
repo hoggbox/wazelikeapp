@@ -1372,35 +1372,66 @@ if ('serviceWorker' in navigator) {
     let postingTimeout = null;
     // TokenManager
     const TokenManager = {
-      get() {
-        return localStorage.getItem('token') || sessionStorage.getItem('token');
-      },
-      set(token, remember = true) {
-        if (remember) {
-          localStorage.setItem('token', token);
-        }
-        sessionStorage.setItem('token', token);
-      },
-      clear() {
-        localStorage.removeItem('token');
-        localStorage.removeItem('userId');
-        sessionStorage.removeItem('token');
-        sessionStorage.removeItem('userId');
-      },
-      isValid() {
-        const token = this.get();
-        if (!token || !token.includes('.') || token === 'undefined') {
-          return false;
-        }
-        // Check expiration
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          return payload.exp * 1000 > Date.now();
-        } catch {
-          return false;
-        }
+  get() {
+    return localStorage.getItem('token') || sessionStorage.getItem('token');
+  },
+  set(token, remember = true) {
+    if (remember) {
+      localStorage.setItem('token', token);
+    }
+    sessionStorage.setItem('token', token);
+  },
+  clear() {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userId');
+    sessionStorage.removeItem('token');
+    sessionStorage.removeItem('userId');
+  },
+  isValid() {
+    const token = this.get();
+    
+    // Check token exists and has proper JWT format
+    if (!token || token === 'undefined' || token === 'null') {
+      console.warn('Token missing or invalid string');
+      this.clear(); // ← Auto-clear bad tokens
+      return false;
+    }
+    
+    // Check JWT structure (header.payload.signature)
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      console.warn('Token has invalid structure');
+      this.clear(); // ← Auto-clear bad tokens
+      return false;
+    }
+    
+    // Check expiration
+    try {
+      const payload = JSON.parse(atob(parts[1]));
+      
+      // Validate payload has required fields
+      if (!payload.exp || !payload.id) {
+        console.warn('Token payload missing required fields');
+        this.clear();
+        return false;
       }
-    };
+      
+      // Check expiration (exp is in seconds, Date.now() is in ms)
+      const isExpired = payload.exp * 1000 <= Date.now();
+      if (isExpired) {
+        console.warn('Token expired');
+        this.clear();
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Token validation error:', error);
+      this.clear();
+      return false;
+    }
+  }
+};
     // Debounce utility
     const debounce = (fn, delay) => {
       let timer;
@@ -1646,55 +1677,118 @@ if ('serviceWorker' in navigator) {
       console.log('Auth form updated:', { isRegister, title: authTitle.textContent, usernameVisible: usernameInput.style.display });
     }
     document.getElementById('auth-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      console.log('Auth form submitted:', { isRegister });
-      const email = document.getElementById('email').value.trim();
-      const password = document.getElementById('password').value.trim();
-      const username = isRegister ? document.getElementById('username').value.trim() : '';
-      console.log('Form data:', { email, password, username, endpoint: isRegister ? '/api/auth/register' : '/api/auth/login' });
-      if (!email || !password || (isRegister && !username)) {
-        console.error('Missing required fields:', { email, password, username });
-        showToast('Please fill in all required fields.');
-        return;
-      }
-      const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
-      const body = isRegister ? { email, password, username } : { email, password };
-      try {
-        console.log('Sending fetch request to:', endpoint);
-        const token = TokenManager.get();
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          mode: 'cors',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        });
-        console.log('Response received:', { status: response.status, ok: response.ok });
-        console.log('Response headers:', [...response.headers.entries()]);
-        const data = await response.json();
-        console.log('Response data:', data);
-        if (response.ok && data.token && data.user) {
-          TokenManager.set(data.token);
-          localStorage.setItem('userId', data.user.id);
-          sessionStorage.setItem('userId', data.user.id);
-          isAdmin = data.user.email === 'imhoggbox@gmail.com' || data.user.isAdmin;
-          localStorage.setItem('isAdmin', isAdmin);
-          sessionStorage.setItem('isAdmin', isAdmin);
-          document.getElementById('admin-button').style.display = isAdmin ? 'flex' : 'none';
-          console.log('Token and userId saved:', { token: data.token.substring(0, 20) + '...', userId: data.user.id, isAdmin });
-          document.getElementById('auth-container').style.display = 'none';
-          showToast(isRegister ? 'Registration successful!' : 'Login successful!');
-          console.log(isRegister ? 'User registered' : 'User logged in', { userId: data.user.id });
-          initApp();
-        } else {
-          console.error('Auth failed:', { status: response.status, error: data.error || 'No error message' });
-          showToast(data.error || (isRegister ? 'Registration failed.' : 'Login failed.'));
-        }
-      } catch (error) {
-        console.error('Fetch error:', error.message);
-        showToast('Error: Unable to connect to server. Check your network.');
-      }
+  e.preventDefault();
+  console.log('Auth form submitted:', { isRegister });
+  
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value.trim();
+  const username = isRegister ? document.getElementById('username').value.trim() : '';
+  
+  console.log('Form data:', { email, password: '***', username, endpoint: isRegister ? '/api/auth/register' : '/api/auth/login' });
+  
+  // ✅ Better validation
+  if (!email || !password) {
+    console.error('Missing required fields');
+    showToast('Please fill in email and password');
+    return;
+  }
+  
+  if (isRegister && !username) {
+    console.error('Missing username for registration');
+    showToast('Please fill in username');
+    return;
+  }
+  
+  if (!/^\S+@\S+\.\S+$/.test(email)) {
+    console.error('Invalid email format');
+    showToast('Please enter a valid email address');
+    return;
+  }
+  
+  if (password.length < 6) {
+    console.error('Password too short');
+    showToast('Password must be at least 6 characters');
+    return;
+  }
+  
+  const endpoint = isRegister ? '/api/auth/register' : '/api/auth/login';
+  const body = isRegister ? { email, password, username } : { email, password };
+  
+  // ✅ Show loading state
+  const submitButton = e.target.querySelector('button[type="submit"]');
+  const originalText = submitButton.textContent;
+  submitButton.disabled = true;
+  submitButton.textContent = isRegister ? 'Registering...' : 'Logging in...';
+  
+  try {
+    console.log('Sending fetch request to:', endpoint);
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'include',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(body)
     });
+    
+    console.log('Response received:', { status: response.status, ok: response.ok });
+    
+    // ✅ Handle non-JSON responses
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      throw new Error('Server returned non-JSON response');
+    }
+    
+    const data = await response.json();
+    console.log('Response data:', { 
+      hasToken: !!data.token, 
+      hasUser: !!data.user,
+      error: data.error 
+    });
+    
+    if (response.ok && data.token && data.user) {
+      // ✅ Save token with proper validation
+      if (data.token.split('.').length === 3) {
+        TokenManager.set(data.token);
+        localStorage.setItem('userId', data.user.id);
+        sessionStorage.setItem('userId', data.user.id);
+        
+        isAdmin = data.user.email === 'imhoggbox@gmail.com' || data.user.isAdmin;
+        localStorage.setItem('isAdmin', isAdmin);
+        sessionStorage.setItem('isAdmin', isAdmin);
+        
+        document.getElementById('admin-button').style.display = isAdmin ? 'flex' : 'none';
+        
+        console.log('Auth successful:', { 
+          userId: data.user.id, 
+          username: data.user.username,
+          isAdmin 
+        });
+        
+        document.getElementById('auth-container').style.display = 'none';
+        showToast(isRegister ? '✅ Registration successful!' : '✅ Login successful!');
+        
+        // ✅ Initialize app properly
+        initSocket(data.token, data.user.id);
+        initSubscription();
+      } else {
+        throw new Error('Invalid token format received from server');
+      }
+    } else {
+      console.error('Auth failed:', { status: response.status, error: data.error });
+      showToast(data.error || (isRegister ? 'Registration failed' : 'Login failed'));
+    }
+  } catch (error) {
+    console.error('Fetch error:', error);
+    showToast(`Error: ${error.message}. Check your network connection.`);
+  } finally {
+    // ✅ Always restore button
+    submitButton.disabled = false;
+    submitButton.textContent = originalText;
+  }
+});
     function animate() {
       if (typeof TWEEN !== 'undefined') {
         TWEEN.update();
@@ -4434,22 +4528,22 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         clearTimeout(dragTimer);
         dragTimer = null;
       }
-      
+     
       dragStartPos = null;
       navState.isFollowing = true;
       localStorage.setItem('isFollowing', navState.isFollowing);
       sessionStorage.setItem('isFollowing', navState.isFollowing);
-      
-      map.setOptions({ 
-        gestureHandling: 'none', 
-        disableDefaultUI: true, 
-        mapTypeControl: false, 
-        streetViewControl: false 
+     
+      map.setOptions({
+        gestureHandling: 'none',
+        disableDefaultUI: true,
+        mapTypeControl: false,
+        streetViewControl: false
       });
-      
+     
       // ✅ FIX: Force camera restore when locking
       restoreNavigationView();
-      
+     
       console.log('Navigation locked');
     }
     function unlockNavigation() {
@@ -5283,13 +5377,10 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         console.error('No alternative route available');
         return;
       }
-
       console.log('Accepting reroute...');
-
       // Update route data
       navState.currentRoute = navState.alternativeRoute;
       navState.routePolyline = navState.alternativeRoute.routes[0].overview_path;
-
       // ✅ FIX 1: Rebuild detailed path for new route
       navState.detailedPath = [];
       const legs = navState.currentRoute.routes[0].legs;
@@ -5298,51 +5389,42 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
           step.path.forEach(point => navState.detailedPath.push(point));
         }
       }
-
       // Dedupe to prevent overlapping points
       navState.detailedPath = navState.detailedPath.filter((point, index, self) =>
-        index === self.findIndex(p => 
-          Math.abs(p.lat() - point.lat()) < 1e-6 && 
+        index === self.findIndex(p =>
+          Math.abs(p.lat() - point.lat()) < 1e-6 &&
           Math.abs(p.lng() - point.lng()) < 1e-6
         )
       );
-
       console.log('Detailed path recomputed for alternative route:', navState.detailedPath.length, 'points');
-
       // ✅ FIX 2: Clear spatial index to force rebuild
       routeSpatialIndex = null;
-
       // Update renderers
       directionsRenderer.setDirections(navState.currentRoute);
       directionsRenderer.setMap(map);
       alternativeRenderer.setMap(null);
-
       // Update UI
       updateRouteAhead(navState.userLocation);
       updateHUD(navState.currentRoute, navState.userLocation);
       updateBottomHUD(navState.currentRoute);
-
       // Mark hazard as ignored
       navState.ignoredHazards.push(navState.currentHazard._id);
       navState.currentHazard = null;
       navState.alternativeRoute = null;
-
       // Close reroute HUD
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.alertState = 'IDLE';
-
       // ✅ FIX 3: Force re-lock navigation with camera update
       if (navState.isFollowing) {
         lockNavigation();
-        
+       
         // ✅ FIX 4: Force immediate camera update with current position
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
         const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
-
         ProgrammaticUpdateManager.start();
         requestAnimationFrame(() => {
           map.setCenter(lookaheadPoint);
@@ -5351,17 +5433,16 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
           map.setTilt(tilt);
           userMarker.position = navState.userLocation;
           userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-          
+         
           console.log('Camera restored after reroute acceptance:', {
             center: lookaheadPoint.toJSON(),
             zoom,
             heading,
             tilt
           });
-          
+         
           ProgrammaticUpdateManager.end();
         });
-
         // ✅ FIX 5: Trigger position update to snap to new route
         if (navState.lastKnownPosition) {
           setTimeout(() => {
@@ -5376,39 +5457,33 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
           }, 100);
         }
       }
-
       showToast('Reroute accepted.');
       console.log('Reroute accepted, navigation updated and camera restored');
     }
     function rejectReroute() {
       console.log('Rejecting reroute...');
-
       if (navState.currentHazard) {
         navState.ignoredHazards.push(navState.currentHazard._id);
         console.log('Hazard ignored:', navState.currentHazard._id);
       }
-
       // Clear alternative route
       alternativeRenderer.setMap(null);
       navState.alternativeRoute = null;
       navState.currentHazard = null;
-
       // Close reroute HUD
       const rerouteHudContainer = document.getElementById('reroute-hud-container');
       const rerouteHud = document.getElementById('reroute-hud');
       rerouteHudContainer.classList.remove('active');
       rerouteHud.classList.remove('active');
       navState.alertState = 'IDLE';
-
       // ✅ FIX: Force re-lock navigation with camera update
       if (navState.isFollowing) {
         lockNavigation();
-        
+       
         // ✅ Force immediate camera update
         const { zoom, tilt, turnHeading } = getDynamicZoom(navState.userLocation, 0);
         const heading = navState.mapOrientation === 'north-up' ? 0 : turnHeading || navState.currentHeading;
         const lookaheadPoint = getLookaheadPoint(navState.userLocation, heading, 0);
-
         ProgrammaticUpdateManager.start();
         requestAnimationFrame(() => {
           map.setCenter(lookaheadPoint);
@@ -5417,17 +5492,16 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
           map.setTilt(tilt);
           userMarker.position = navState.userLocation;
           userMarker.content.style.transform = `rotate(${navState.mapOrientation === 'north-up' ? navState.currentHeading : 0}deg)`;
-          
+         
           console.log('Camera restored after reroute rejection:', {
             center: lookaheadPoint.toJSON(),
             zoom,
             heading,
             tilt
           });
-          
+         
           ProgrammaticUpdateManager.end();
         });
-
         // ✅ Trigger position update to re-snap to original route
         if (navState.lastKnownPosition) {
           setTimeout(() => {
@@ -5442,7 +5516,6 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
           }, 100);
         }
       }
-
       showToast('Reroute rejected.');
       console.log('Reroute rejected, continuing on original route with camera restored');
     }
@@ -5846,7 +5919,7 @@ function initSocket(token, userId) {
     socket.emit('join', userId);
     // ✅ Add this:
     checkSubscriptionStatus();
-   
+  
     fetchCurrentAlerts();
     if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
@@ -6236,7 +6309,7 @@ async function handlePaymentCallback() {
         if (status.isPremium) {
           // ✅ SUCCESS: Clear URL BEFORE reload
           showToast('✅ Premium activated! Reloading...', 3000);
-        
+       
           // ✅ FIX: Use complete URL, not just pathname
           try {
             const cleanUrl = window.location.origin + window.location.pathname;
@@ -6246,7 +6319,7 @@ async function handlePaymentCallback() {
             console.warn('Could not clean URL:', historyError);
             // Fallback: just reload with query params
           }
-        
+       
           setTimeout(() => {
             window.location.reload(true);
           }, 2000);
@@ -6267,7 +6340,7 @@ async function handlePaymentCallback() {
         }
       } catch (error) {
         console.error('Polling error:', error);
-      
+     
         // ✅ Also fix error handler
         if (attempts >= MAX_ATTEMPTS) {
           try {
@@ -6277,7 +6350,7 @@ async function handlePaymentCallback() {
             console.warn('Could not clean URL on error:', historyError);
           }
         }
-      
+     
         if (attempts < MAX_ATTEMPTS) {
           setTimeout(checkStatus, 1000);
         }
@@ -6383,16 +6456,20 @@ async function requestStorageAccess() {
 }
 async function initApp() {
   console.log('Initializing app...');
-  // ✅ Request storage access first
-  const hasStorageAccess = await requestStorageAccess();
-  if (!hasStorageAccess && window.location.search.includes('payment=success')) {
-    // Can't proceed with payment callback without storage
-    showToast('Storage access required. Please allow and refresh.');
-    return;
+  
+  // ✅ FIX 1: Don't block on storage access - just warn
+  try {
+    const hasStorageAccess = await requestStorageAccess();
+    if (!hasStorageAccess) {
+      console.warn('Storage access limited - some features may not work');
+      showToast('For best experience, disable Strict Tracking Protection');
+    }
+  } catch (error) {
+    console.error('Storage access check failed:', error);
+    // Continue anyway - don't block app initialization
   }
-  const token = TokenManager.get();
-  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
-  // ← FIX: Initialize map FIRST, regardless of auth status
+  
+  // ✅ FIX 2: Always initialize map first (before auth checks)
   if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
       (position) => {
@@ -6403,7 +6480,7 @@ async function initApp() {
         rawUserLocation = navState.userLocation;
         console.log('Initial location:', navState.userLocation);
         requestDeviceOrientationPermission();
-        loadGoogleMaps(); // ← Map loads here
+        loadGoogleMaps();
       },
       (error) => {
         console.error('Initial geolocation error:', error);
@@ -6422,16 +6499,21 @@ async function initApp() {
     rawUserLocation = navState.userLocation;
     loadGoogleMaps(); // ← Fallback map load
   }
-  // Check auth AFTER starting map load
+  
+  // ✅ FIX 3: Check auth AFTER starting map (with better validation)
+  const token = TokenManager.get();
+  const userId = localStorage.getItem('userId') || sessionStorage.getItem('userId');
+  
   if (!TokenManager.isValid() || !userId) {
     console.log('No valid token or userId, showing auth form');
     TokenManager.clear();
     document.getElementById('auth-container').style.display = 'flex';
-    // Don't return early - let map still load
+    // Don't return - let map continue loading
   } else {
+    // Valid auth - initialize socket and subscription
     initSocket(token, userId);
  
-    // ✅ FIX: Only init subscription if NOT in payment callback
+    // ✅ FIX 4: Only check subscription if NOT in payment callback
     if (!window.location.search.includes('payment=success')) {
       initSubscription();
     } else {
@@ -6439,6 +6521,7 @@ async function initApp() {
       handlePaymentCallback();
     }
   }
+  
   // Service Worker registration
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').then(reg => {
@@ -6450,6 +6533,7 @@ async function initApp() {
       console.error('Service Worker registration failed:', err);
     });
   }
+  
   console.log('App initialization complete');
 }
     // Call initApp on page load
