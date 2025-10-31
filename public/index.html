@@ -2421,11 +2421,12 @@ function loadGoogleMaps() {
   };
   document.head.appendChild(script);
 }
-window.initMap = function() {
-  const MAX_INIT_RETRIES = 5;
+    window.initMap = function() {
+  const MAX_INIT_RETRIES = 3;
   let initAttempts = 0;
 
   function attemptInit() {
+    // Check ALL required APIs before proceeding
     if (!google?.maps?.Map || !google.maps.marker || !google.maps.places) {
       initAttempts++;
       if (initAttempts < MAX_INIT_RETRIES) {
@@ -2433,14 +2434,16 @@ window.initMap = function() {
         setTimeout(attemptInit, 1000);
         return;
       }
-      // Failed after retries - show user-friendly error
+      // Failed after retries
       showToast('Map failed to load. Please refresh the page.');
-      document.getElementById('map-loading').innerHTML = 
-        '<button onclick="location.reload()" style="padding: 1rem; background: #4CAF50; color: white; border: none; border-radius: 0.5rem; cursor: pointer;">Retry Loading Map</button>';
+      document.getElementById('map-loading').innerHTML = '<button onclick="location.reload()">Retry Loading Map</button>';
       return;
     }
+
+    // NOW safe to initialize
     initializeMap();
   }
+
   attemptInit();
 };
     function initializeMap() {
@@ -3689,7 +3692,7 @@ document.getElementById('cancel-edit').addEventListener('click', () => {
     }
     // Offline Queue
     const MAX_QUEUE_SIZE = 50;
-
+    
     const OfflineQueue = {
       queue: JSON.parse(localStorage.getItem('offlineQueue') || '[]'),
       add(action) {
@@ -3811,38 +3814,10 @@ async function startWakeWordDetection() {
     // Now start recognizer (existing code)
     wakeWordRecognizer = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
     // ... rest of setup
-let wakeWordRestartCount = 0;
-const MAX_WAKE_WORD_RESTARTS = 10;
-let wakeWordRestartTimer = null;
-let lastWakeWordRestart = 0;
-
-function startWakeWordDetection() {
-  if (!voiceAssistantEnabled) return;
-  
-  try {
-    wakeWordRecognizer = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    wakeWordRecognizer.continuous = true;
-    wakeWordRecognizer.interimResults = false;
-    wakeWordRecognizer.lang = 'en-US';
-
-    wakeWordRecognizer.onresult = (event) => {
-      const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
-      if (transcript.includes('hey nova')) {
-        startCommandRecognition();
-      }
-      
-      // Reset counter after 5 minutes of stability
-      if (Date.now() - lastWakeWordRestart > 300000) {
-        wakeWordRestartCount = 0;
-      }
-    };
-
     wakeWordRecognizer.onerror = (error) => {
       console.error('Wake word error:', error);
       
       wakeWordRestartCount++;
-      lastWakeWordRestart = Date.now();
-      
       if (wakeWordRestartCount >= MAX_WAKE_WORD_RESTARTS) {
         console.error('Max wake word restarts reached, stopping');
         stopWakeWordDetection();
@@ -3853,27 +3828,17 @@ function startWakeWordDetection() {
 
       // Exponential backoff
       const delay = Math.min(1000 * Math.pow(2, wakeWordRestartCount), 30000);
-      clearTimeout(wakeWordRestartTimer);
       wakeWordRestartTimer = setTimeout(() => {
         wakeWordRecognizer.start();
       }, delay);
     };
 
-    wakeWordRecognizer.start();
-  } catch (e) {
-    console.error('Failed to start wake word detection:', e);
-    showToast('Voice assistant not available on this device.');
-  }
-}
-
-function stopWakeWordDetection() {
-  clearTimeout(wakeWordRestartTimer);
-  wakeWordRestartCount = 0;
-  if (wakeWordRecognizer) {
-    wakeWordRecognizer.stop();
-    wakeWordRecognizer = null;
-  }
-}
+    // Reset counter after 5 minutes of stability
+    wakeWordRecognizer.onresult = () => {
+      if (Date.now() - lastWakeWordRestart > 300000) {
+        wakeWordRestartCount = 0;
+      }
+    };
   } catch (err) {
     console.error('Mic access denied:', err);
     localStorage.setItem('micPermissionDenied', 'true');
@@ -5998,14 +5963,14 @@ function initSocket(token, userId) {
   let reconnectAttempts = 0;
   const MAX_RECONNECT_ATTEMPTS = 10;
   let permanentlyOffline = false;
-
   socket = io({
     auth: { token },
     reconnection: true,
     reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 10000,
-    timeout: 20000
+    timeout: 20000,
+    randomizationFactor: 0.5
   });
   socket.on('reconnect_attempt', (attemptNumber) => {
     reconnectAttempts = attemptNumber;
