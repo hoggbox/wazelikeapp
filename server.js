@@ -93,7 +93,7 @@ if (process.env.NODE_ENV === 'production') {
 app.use(cors(corsOptions));
 
 // ✅ CRITICAL: Webhook route BEFORE bodyParser (needs raw body)
-app.use('/api/stripe', require('./routes/webhooks'));
+app.use('/api/stripe', express.raw({ type: 'application/json' }), require('./routes/webhooks'));
 
 // ✅ THEN add bodyParser for other routes
 app.use(express.json());

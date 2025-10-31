@@ -3495,7 +3495,7 @@ async function fetchWithRetry(url, options, retries = CONFIG.FETCH_RETRIES, back
         continue;
       }
       if (response.ok) return response;
-  
+ 
       if (response.status === 401) {
         const refreshed = await refreshToken();
         if (refreshed) {
@@ -5726,7 +5726,9 @@ function initSocket(token, userId) {
   socket.on('reconnect', (attemptNumber) => {
     console.log('Reconnected after', attemptNumber, 'attempts');
     socket.emit('join', userId);
-    // Resync state
+    // ✅ Add this:
+    checkSubscriptionStatus();
+    
     fetchCurrentAlerts();
     if (navState.isNavigating) {
       checkHazardsAndOfferReroute();
@@ -5956,7 +5958,6 @@ function updateUIForSubscription() {
     const hiddenAt = localStorage.getItem('trialBannerHiddenAt');
     const now = Date.now();
     const shouldShow = (!hiddenAt || now - parseInt(hiddenAt) > 48 * 60 * 60 * 1000); // 48hr cooldown
- 
     if (shouldShow) {
       trialBanner.style.display = 'flex';
       trialDaysSpan.textContent = subscriptionStatus.trialDaysRemaining;
@@ -5978,7 +5979,6 @@ function updateUIForSubscription() {
   PREMIUM_FEATURES.forEach(featureId => {
     const el = document.getElementById(featureId);
     if (!el) return;
- 
     if (hasAccess) {
       el.classList.remove('locked-feature');
       el.disabled = false;
@@ -6000,7 +6000,6 @@ function updateUIForSubscription() {
   document.querySelectorAll('.report-button').forEach(btn => {
     const type = btn.getAttribute('data-alert-type');
     const isPremiumType = ['Traffic Camera', 'Manual Traffic Camera', 'Construction', 'Lane Closure'].includes(type);
- 
     if (isPremiumType && !hasAccess) {
       btn.classList.add('locked-feature');
       btn.style.pointerEvents = 'auto';
@@ -6105,24 +6104,21 @@ async function handlePaymentCallback() {
     const checkStatus = async () => {
       attempts++;
       console.log(`Polling (${attempts}/${MAX_ATTEMPTS})...`);
-
       try {
         // Use cached token
         const response = await fetch('/api/subscription/status', {
-          headers: { 
+          headers: {
             'Authorization': `Bearer ${token}`,
             'Cache-Control': 'no-cache'
           },
           cache: 'no-store'
         });
-
         if (!response.ok) throw new Error('Status check failed');
         const status = await response.json();
-
         if (status.isPremium) {
           // ✅ SUCCESS: Clear URL BEFORE reload
           showToast('✅ Premium activated! Reloading...', 3000);
-          
+         
           // ✅ FIX: Use complete URL, not just pathname
           try {
             const cleanUrl = window.location.origin + window.location.pathname;
@@ -6132,13 +6128,12 @@ async function handlePaymentCallback() {
             console.warn('Could not clean URL:', historyError);
             // Fallback: just reload with query params
           }
-          
+         
           setTimeout(() => {
             window.location.reload(true);
           }, 2000);
           return; // Stop polling
         }
-
         // Continue polling
         if (attempts < MAX_ATTEMPTS) {
           setTimeout(checkStatus, 1000);
@@ -6154,7 +6149,7 @@ async function handlePaymentCallback() {
         }
       } catch (error) {
         console.error('Polling error:', error);
-        
+       
         // ✅ Also fix error handler
         if (attempts >= MAX_ATTEMPTS) {
           try {
@@ -6164,7 +6159,7 @@ async function handlePaymentCallback() {
             console.warn('Could not clean URL on error:', historyError);
           }
         }
-        
+       
         if (attempts < MAX_ATTEMPTS) {
           setTimeout(checkStatus, 1000);
         }
@@ -6270,7 +6265,6 @@ async function requestStorageAccess() {
 }
 async function initApp() {
   console.log('Initializing app...');
- 
   // ✅ Request storage access first
   const hasStorageAccess = await requestStorageAccess();
   if (!hasStorageAccess && window.location.search.includes('payment=success')) {
@@ -6318,7 +6312,7 @@ async function initApp() {
     // Don't return early - let map still load
   } else {
     initSocket(token, userId);
-   
+  
     // ✅ FIX: Only init subscription if NOT in payment callback
     if (!window.location.search.includes('payment=success')) {
       initSubscription();
