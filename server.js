@@ -38,7 +38,8 @@ const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://wazegps-g6j8.onrender.com',
+  'https://novadrives.live',
+  'https://wazelikeapp.onrender.com',
 ];
 
 const corsOptions = {
