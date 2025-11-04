@@ -40,6 +40,8 @@ const allowedOrigins = [
   'http://127.0.0.1:3000',
   'https://novadrives.live',
   'https://wazelikeapp.onrender.com',
+  'capacitor://localhost',
+  'capacitor://*',
 ];
 
 const corsOptions = {
